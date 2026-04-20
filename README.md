@@ -9,12 +9,13 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | # | Funcionalidade | Descrição |
 |---|---|---|
 | 1 | **Cache Caffeine** | Respostas das APIs externas cacheadas em memória (10–60 min) |
-| 2 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
-| 3 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
-| 4 | **3 Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos` |
-| 5 | **Formação 4-3-3** | 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC |
-| 6 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
-| 7 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 2 | **Invalidação de Cache** | Endpoint `DELETE /api/cache` para forçar atualização imediata dos dados |
+| 3 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
+| 4 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
+| 5 | **4 Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache` |
+| 6 | **Formação 4-3-3** | 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC |
+| 7 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
+| 8 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 
 
 ---
@@ -149,6 +150,7 @@ cartola.odd-limite=3.0
 > **Cache (Caffeine):** As respostas das APIs são cacheadas automaticamente em memória:
 > odds (10 min), atletas/partidas (15 min), clubes (60 min), status do mercado (2 min).
 > O cache é reiniciado quando o container é reiniciado.
+> Para forçar atualização imediata sem reiniciar, use `DELETE /api/cache`.
 
 > **Sem API Key configurada:** a aplicação sobe normalmente, o filtro por time favorito é desativado e todos os atletas elegíveis por status/preço são considerados.
 
@@ -164,6 +166,8 @@ cartola.odd-limite=3.0
 | `GET` | `/api/ranking` | Top 25 atletas por score |
 | `GET` | `/api/ranking?posicao=ATA` | Top 25 atacantes |
 | `GET` | `/api/ranking?posicao=MEI&limite=10` | Top 10 meias |
+| `DELETE` | `/api/cache` | Invalida todos os caches imediatamente |
+| `DELETE` | `/api/cache/{nome}` | Invalida um cache específico pelo nome |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
 
@@ -213,6 +217,30 @@ cartola.odd-limite=3.0
   ]
 }
 ```
+
+### Exemplo — `DELETE /api/cache`
+
+```json
+{
+  "cachesInvalidados": ["odds", "atletas", "clubes", "partidas", "pontuados", "statusMercado"],
+  "mensagem": "Todos os caches invalidados com sucesso.",
+  "timestamp": "2025-06-01T15:30:00"
+}
+```
+
+### Exemplo — `DELETE /api/cache/atletas`
+
+```json
+{
+  "cachesInvalidados": ["atletas"],
+  "mensagem": "Cache 'atletas' invalidado com sucesso.",
+  "timestamp": "2025-06-01T15:30:00"
+}
+```
+
+**Nomes de cache válidos:** `odds`, `atletas`, `clubes`, `partidas`, `pontuados`, `statusMercado`
+
+Passar um nome inválido retorna `400 Bad Request` com a lista de nomes aceitos.
 
 ### Aviso de mercado
 
@@ -335,6 +363,7 @@ mvn test jacoco:report
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
 | `CacheConfigTest` | 2 — Caffeine registrado com 6 caches |
+| `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 7 — HTTP completo |

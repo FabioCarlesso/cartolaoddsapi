@@ -198,6 +198,54 @@ public PontuadosResponse buscarPontuados(int rodada) { ... }
 - **Stats:** `recordStats()` habilitado — métricas acessíveis via Actuator futuramente.
 - **Thread-safe:** Caffeine garante consistência em ambientes multi-thread.
 
+### 4.5 Invalidação de Cache via API
+
+O endpoint `DELETE /api/cache` permite forçar a atualização dos dados sem reiniciar a aplicação.
+
+#### Invalidar todos os caches
+
+```http
+DELETE /api/cache
+```
+
+**Resposta `200 OK`:**
+```json
+{
+  "cachesInvalidados": ["odds", "atletas", "clubes", "partidas", "pontuados", "statusMercado"],
+  "mensagem": "Todos os caches invalidados com sucesso.",
+  "timestamp": "2025-06-01T15:30:00"
+}
+```
+
+#### Invalidar cache específico
+
+```http
+DELETE /api/cache/{nome}
+```
+
+**Parâmetro de path:** nome do cache — `odds`, `atletas`, `clubes`, `partidas`, `pontuados` ou `statusMercado`.
+
+**Resposta `200 OK`:**
+```json
+{
+  "cachesInvalidados": ["atletas"],
+  "mensagem": "Cache 'atletas' invalidado com sucesso.",
+  "timestamp": "2025-06-01T15:30:00"
+}
+```
+
+**Resposta `400 Bad Request` (nome inválido):**
+```json
+{
+  "status": 400,
+  "erro": "Parametro invalido",
+  "mensagem": "Cache 'xyz' nao encontrado. Caches validos: [odds, atletas, clubes, partidas, pontuados, statusMercado]",
+  "timestamp": "2025-06-01T15:30:00"
+}
+```
+
+**Caso de uso típico:** após um erro nos dados externos ou necessidade de forçar busca de odds atualizadas, chamar `DELETE /api/cache` garante que a próxima requisição busque dados frescos.
+
 ## 5. Regras de Negócio
 
 ### 4.1 Identificação de Times Favoritos
@@ -396,12 +444,14 @@ cartola/
 │   ├── controller/api/
 │   │   ├── TimeApi.java                 # Swagger + contrato REST do /api/time
 │   │   ├── RankingApi.java              # Swagger + contrato REST do /api/ranking
-│   │   └── FavoritosApi.java            # Swagger + contrato REST do /api/favoritos
+│   │   ├── FavoritosApi.java            # Swagger + contrato REST do /api/favoritos
+│   │   └── CacheApi.java               # Swagger + contrato REST do /api/cache
 │   ├── controller/
-│   │   ├── TimeController.java          # GET /api/time com anotações Swagger
+│   │   ├── TimeController.java          # GET /api/time
 │   │   ├── RankingController.java       # GET /api/ranking com filtros posicao e limite
-│   │   └── FavoritosController.java     # GET /api/favoritos com oddLimite customizavel          # GET /api/time com anotações Swagger
-│   │   └── GlobalExceptionHandler.java  # 422, 502, 500
+│   │   ├── FavoritosController.java     # GET /api/favoritos com oddLimite customizavel
+│   │   ├── CacheController.java         # DELETE /api/cache e /api/cache/{nome}
+│   │   └── GlobalExceptionHandler.java  # 400, 422, 502, 500
 │   ├── model/
 │   │   ├── Atleta.java                  # @Builder + @With — imutável com score e substituto
 │   │   ├── Time.java                    # resultado final da montagem
@@ -411,20 +461,21 @@ cartola/
 │   │   └── response/
 │   │       ├── TimeResponse.java        # DTO de saída com @Schema para Swagger
 │   │       ├── ErrorResponse.java       # status, erro, mensagem, timestamp
+│   │       ├── CacheResponse.java       # cachesInvalidados, mensagem, timestamp
+│   │       ├── RankingResponse.java     # DTO de saída do endpoint de ranking
+│   │       ├── FavoritosResponse.java   # DTO com favoritos, descartados e metadados
 │   │       ├── OddsResponse.java        # desserializa resposta da Odds API
 │   │       ├── AtletaResponse.java      # desserializa /atletas/mercado
 │   │       ├── ClubeResponse.java       # desserializa /clubes
 │   │       ├── MercadoStatusResponse.java
 │   │       └── PartidaResponse.java
-│   ├── model/response/
-│   │   ├── RankingResponse.java        # DTO de saída do endpoint de ranking
-│   │   └── FavoritosResponse.java      # DTO com favoritos, descartados e metadados
 │   └── util/
 │       └── NormalizadorUtil.java        # normalização de nomes (Unicode NFD)
 └── test/java/com/cartola/odds/
     ├── CartolaOddsApplicationTests.java  # sobe contexto Spring completo
     ├── controller/
-    │   └── TimeControllerTest.java       # MockMvc — HTTP status + corpo JSON
+    │   ├── TimeControllerTest.java       # MockMvc — HTTP status + corpo JSON
+    │   └── CacheControllerTest.java      # DELETE todos / por nome / 400 inválido
     ├── model/
     │   ├── AtletaTest.java               # imutabilidade, formatado(), isDuvida()
     │   └── EnumsTest.java                # fromId, fromSigla, isEscalavel
