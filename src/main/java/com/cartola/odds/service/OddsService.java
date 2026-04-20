@@ -1,0 +1,160 @@
+package com.cartola.odds.service;
+
+import com.cartola.odds.client.OddsClient;
+import com.cartola.odds.config.AppProperties;
+import com.cartola.odds.model.response.FavoritosResponse;
+import com.cartola.odds.model.response.FavoritosResponse.JogoDescartadoDto;
+import com.cartola.odds.model.response.FavoritosResponse.JogoFavoritoDto;
+import com.cartola.odds.model.response.OddsResponse;
+import com.cartola.odds.util.NormalizadorUtil;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class OddsService {
+
+    private final OddsClient    oddsClient;
+    private final AppProperties props;
+
+    // ── API interna (usada pelo pipeline de time/ranking) ─────────────
+
+    /**
+     * Retorna o set de nomes normalizados dos times favoritos.
+     * Usado pelos servicos de montagem de time e ranking.
+     */
+    public Set<String> buscarFavoritos() {
+        return buscarFavoritos(props.getOddLimite());
+    }
+
+    /**
+     * Retorna o set de nomes normalizados dos times favoritos com limite customizado.
+     */
+    public Set<String> buscarFavoritos(double oddLimite) {
+        var response = processarOdds(oddsClient.buscarOdds(), oddLimite);
+        return response.getFavoritos().stream()
+                .map(j -> NormalizadorUtil.normalizar(j.getTimeFavorito()))
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    // ── API publica (usada pelo endpoint de favoritos) ─────────────────
+
+    /**
+     * Monta a resposta detalhada para o endpoint GET /api/favoritos.
+     * Usa o ODD_LIMITE configurado quando nenhum e informado.
+     */
+    public FavoritosResponse buscarFavoritosDetalhado(double oddLimite) {
+        log.info("Buscando favoritos detalhado | oddLimite={}", oddLimite);
+        List<OddsResponse> odds = oddsClient.buscarOdds();
+
+        if (odds.isEmpty()) {
+            log.warn("Nenhuma odd disponivel da API.");
+            return FavoritosResponse.builder()
+                    .oddLimite(oddLimite)
+                    .totalJogos(0)
+                    .totalFavoritos(0)
+                    .totalDescartados(0)
+                    .favoritos(List.of())
+                    .descartados(List.of())
+                    .build();
+        }
+
+        return processarOdds(odds, oddLimite);
+    }
+
+    // ── Privado ───────────────────────────────────────────────────────
+
+    private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite) {
+        List<JogoFavoritoDto>  favoritos   = new ArrayList<>();
+        List<JogoDescartadoDto> descartados = new ArrayList<>();
+
+        for (OddsResponse jogo : odds) {
+            processarJogo(jogo, oddLimite, favoritos, descartados);
+        }
+
+        log.info("Favoritos: {} | Descartados: {} | Total jogos: {}",
+                favoritos.size(), descartados.size(), odds.size());
+
+        return FavoritosResponse.builder()
+                .oddLimite(oddLimite)
+                .totalJogos(odds.size())
+                .totalFavoritos(favoritos.size())
+                .totalDescartados(descartados.size())
+                .favoritos(favoritos)
+                .descartados(descartados)
+                .build();
+    }
+
+    private void processarJogo(OddsResponse jogo, double oddLimite,
+                                List<JogoFavoritoDto>  favoritos,
+                                List<JogoDescartadoDto> descartados) {
+
+        if (jogo.getBookmakers() == null || jogo.getBookmakers().isEmpty()) return;
+
+        var mercado = jogo.getBookmakers().get(0).getMarkets();
+        if (mercado == null || mercado.isEmpty()) return;
+
+        var outcomes = mercado.get(0).getOutcomes();
+        if (outcomes == null || outcomes.isEmpty()) return;
+
+        // Separa casa, visitante e empate
+        String homeName = jogo.getHomeTeam() != null ? jogo.getHomeTeam() : "";
+        String awayName = jogo.getAwayTeam() != null ? jogo.getAwayTeam() : "";
+
+        double oddCasa      = findOdd(outcomes, homeName);
+        double oddVisitante = findOdd(outcomes, awayName);
+        double oddEmpate    = findOdd(outcomes, "Draw");
+
+        // Time com menor odd = favorito do jogo
+        Optional<OddsResponse.Outcome> menorOdd = outcomes.stream()
+                .filter(o -> !"Draw".equalsIgnoreCase(o.getName()))
+                .min(Comparator.comparingDouble(OddsResponse.Outcome::getPrice));
+
+        if (menorOdd.isEmpty()) return;
+
+        double menorOddValor  = menorOdd.get().getPrice();
+        String nomeFavorito   = menorOdd.get().getName();
+        boolean emCasa        = nomeFavorito.equalsIgnoreCase(homeName);
+        String  nomeAdversario = emCasa ? awayName : homeName;
+        double  oddAdversario  = emCasa ? oddVisitante : oddCasa;
+
+        if (menorOddValor <= oddLimite) {
+            favoritos.add(JogoFavoritoDto.builder()
+                    .timeFavorito(nomeFavorito)
+                    .oddFavorito(menorOddValor)
+                    .timeAdversario(nomeAdversario)
+                    .oddAdversario(oddAdversario)
+                    .oddEmpate(oddEmpate)
+                    .favoritoEmCasa(emCasa)
+                    .build());
+            log.info("Favorito: {} odd={} vs {} | em casa={}", nomeFavorito, menorOddValor, nomeAdversario, emCasa);
+        } else {
+            descartados.add(JogoDescartadoDto.builder()
+                    .timeCasa(homeName)
+                    .oddCasa(oddCasa)
+                    .timeVisitante(awayName)
+                    .oddVisitante(oddVisitante)
+                    .oddEmpate(oddEmpate)
+                    .motivo("Menor odd (%.2f) acima do limite (%.1f)".formatted(menorOddValor, oddLimite))
+                    .build());
+            log.debug("Descartado: {} odd={} > {}", nomeFavorito, menorOddValor, oddLimite);
+        }
+    }
+
+    private double findOdd(List<OddsResponse.Outcome> outcomes, String name) {
+        return outcomes.stream()
+                .filter(o -> o.getName() != null && o.getName().equalsIgnoreCase(name))
+                .mapToDouble(OddsResponse.Outcome::getPrice)
+                .findFirst()
+                .orElse(0.0);
+    }
+}

@@ -1,0 +1,39 @@
+# ── Build outputs ─────────────────────────────────────────────────────
+target/
+*.jar
+*.war
+
+# ── IDEs ──────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.classpath
+.project
+.settings/
+
+# ── Git ───────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Testes e cobertura ────────────────────────────────────────────────
+src/test/
+
+# ── Documentação (não vai para a imagem) ──────────────────────────────
+docs/
+README.md
+
+# ── Ambiente local ────────────────────────────────────────────────────
+.env
+.env.local
+
+# ── OS ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Maven wrapper (se existir) ────────────────────────────────────────
+.mvn/
+mvnw
+mvnw.cmd
