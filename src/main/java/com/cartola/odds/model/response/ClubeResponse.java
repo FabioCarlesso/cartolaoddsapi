@@ -17,4 +17,7 @@ public class ClubeResponse {
 
     @JsonProperty("abreviacao")
     private String abreviacao;
+
+    @JsonProperty("nome_fantasia")
+    private String nomeFantasia;
 }
