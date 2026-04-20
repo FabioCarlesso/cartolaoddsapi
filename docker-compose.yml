@@ -6,8 +6,7 @@ services:
       dockerfile: Dockerfile
     container_name: cartola-odds
     image: cartola-odds:1.0.0
-    ports:
-      - "${APP_PORT:-8080}:8080"
+    network_mode: host
     environment:
       # ── API Key (obrigatório) ──────────────────────────────────────
       ODDS_API_KEY: "${ODDS_API_KEY}"

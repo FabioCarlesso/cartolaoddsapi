@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════════════
 # Stage 1 — Build
 # ══════════════════════════════════════════════════════════════════════
-FROM eclipse-temurin:21-jdk-alpine AS build
+FROM eclipse-temurin:21-jdk-jammy AS build
 
 WORKDIR /workspace
 
@@ -11,19 +11,19 @@ COPY pom.xml .
 COPY src ./src
 
 RUN ./mvnw clean package -DskipTests 2>/dev/null || \
-    (apk add --no-cache maven && mvn clean package -DskipTests)
+    (apt-get update -q && apt-get install -y --no-install-recommends maven && mvn clean package -DskipTests)
 
 # ══════════════════════════════════════════════════════════════════════
 # Stage 2 — Runtime
 # ══════════════════════════════════════════════════════════════════════
-FROM eclipse-temurin:21-jre-alpine AS runtime
+FROM eclipse-temurin:21-jre-jammy AS runtime
 
 LABEL org.opencontainers.image.title="cartola-odds" \
       org.opencontainers.image.description="API REST de montagem automatica de time do Cartola FC baseada em odds" \
       org.opencontainers.image.version="1.0.0"
 
 # Cria usuario nao-root para executar a aplicacao (boas praticas de seguranca)
-RUN addgroup -S cartola && adduser -S cartola -G cartola
+RUN groupadd -r cartola && useradd -r -g cartola cartola
 
 WORKDIR /app
 
