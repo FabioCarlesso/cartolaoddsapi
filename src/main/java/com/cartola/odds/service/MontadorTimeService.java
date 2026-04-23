@@ -1,7 +1,7 @@
 package com.cartola.odds.service;
 
-import com.cartola.odds.config.AppProperties;
 import com.cartola.odds.model.Atleta;
+import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
@@ -23,23 +23,21 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MontadorTimeService {
 
-    private final AppProperties props;
-
-    // Prioridade de posicao para escolha do capitao
     private static final List<Posicao> PRIORIDADE_CAPITAO =
             List.of(Posicao.ATA, Posicao.MEI, Posicao.ZAG, Posicao.LAT, Posicao.GOL, Posicao.TEC);
 
-    public Time montar(List<Atleta> pool, int rodada, String avisoMercado) {
+    private final ConfiguracaoService configuracaoService;
 
-        // Agrupa por posicao
+    public Time montar(List<Atleta> pool, int rodada, String avisoMercado) {
+        Configuracao config = configuracaoService.buscarConfig();
+
         Map<Posicao, List<Atleta>> porPosicao = pool.stream()
                 .collect(Collectors.groupingBy(Atleta::getPosicao));
 
         Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
         Map<Posicao, Atleta>       reservas  = new EnumMap<>(Posicao.class);
 
-        // Selecionar titulares e reservas por posicao
-        for (Map.Entry<String, Integer> slot : props.getFormacao().entrySet()) {
+        for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
             if (posicao == null) {
                 log.warn("Posicao desconhecida na formacao: {}", slot.getKey());
@@ -56,14 +54,12 @@ public class MontadorTimeService {
                 continue;
             }
 
-            // Top-N por score = titulares
             List<Atleta> escolhidos = new ArrayList<>(
                     candidatos.subList(0, Math.min(qtd, candidatos.size())));
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
                     escolhidos.stream().map(Atleta::getApelido).toList());
 
-            // Reserva: somente PROVAVEL, preferencialmente mais barato que o titular mais caro
             double maxPrecoTitular = escolhidos.stream()
                     .mapToDouble(Atleta::getPreco)
                     .max()
@@ -86,7 +82,6 @@ public class MontadorTimeService {
                     .ifPresent(r -> reservas.put(posicao, r));
         }
 
-        // Enriquecer titulares em duvida com substituto provavel (mesma posicao)
         Set<String> apelidosTitulares = titulares.values().stream()
                 .flatMap(List::stream)
                 .map(Atleta::getApelido)
@@ -129,7 +124,6 @@ public class MontadorTimeService {
             titularesEnriquecidos.put(entry.getKey(), enriquecidos);
         }
 
-        // Capitao e Reserva de Luxo
         List<Atleta> todosTitulares = PRIORIDADE_CAPITAO.stream()
                 .flatMap(pos -> titularesEnriquecidos.getOrDefault(pos, List.of()).stream())
                 .toList();
@@ -143,12 +137,8 @@ public class MontadorTimeService {
                 .max(Comparator.comparingDouble(Atleta::getScore))
                 .orElse(null);
 
-        if (capitao != null) {
-            log.info("Capitao: {}", capitao.formatado());
-        }
-        if (reservaLuxo != null) {
-            log.info("Reserva de Luxo: {}", reservaLuxo.formatado());
-        }
+        if (capitao    != null) log.info("Capitao: {}",      capitao.formatado());
+        if (reservaLuxo != null) log.info("Reserva de Luxo: {}", reservaLuxo.formatado());
 
         double custoTotal = titularesEnriquecidos.values().stream()
                 .flatMap(List::stream)

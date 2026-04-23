@@ -1,7 +1,6 @@
 package com.cartola.odds.service;
 
 import com.cartola.odds.client.OddsClient;
-import com.cartola.odds.config.AppProperties;
 import com.cartola.odds.model.response.FavoritosResponse;
 import com.cartola.odds.model.response.FavoritosResponse.JogoDescartadoDto;
 import com.cartola.odds.model.response.FavoritosResponse.JogoFavoritoDto;
@@ -23,22 +22,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class OddsService {
 
-    private final OddsClient    oddsClient;
-    private final AppProperties props;
+    private final OddsClient           oddsClient;
+    private final ConfiguracaoService  configuracaoService;
 
     // ── API interna (usada pelo pipeline de time/ranking) ─────────────
 
-    /**
-     * Retorna o set de nomes normalizados dos times favoritos.
-     * Usado pelos servicos de montagem de time e ranking.
-     */
     public Set<String> buscarFavoritos() {
-        return buscarFavoritos(props.getOddLimite());
+        return buscarFavoritos(configuracaoService.buscarConfig().getOddLimite());
     }
 
-    /**
-     * Retorna o set de nomes normalizados dos times favoritos com limite customizado.
-     */
     public Set<String> buscarFavoritos(double oddLimite) {
         var response = processarOdds(oddsClient.buscarOdds(), oddLimite);
         return response.getFavoritos().stream()
@@ -48,10 +40,6 @@ public class OddsService {
 
     // ── API publica (usada pelo endpoint de favoritos) ─────────────────
 
-    /**
-     * Monta a resposta detalhada para o endpoint GET /api/favoritos.
-     * Usa o ODD_LIMITE configurado quando nenhum e informado.
-     */
     public FavoritosResponse buscarFavoritosDetalhado(double oddLimite) {
         log.info("Buscando favoritos detalhado | oddLimite={}", oddLimite);
         List<OddsResponse> odds = oddsClient.buscarOdds();
@@ -74,7 +62,7 @@ public class OddsService {
     // ── Privado ───────────────────────────────────────────────────────
 
     private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite) {
-        List<JogoFavoritoDto>  favoritos   = new ArrayList<>();
+        List<JogoFavoritoDto>   favoritos   = new ArrayList<>();
         List<JogoDescartadoDto> descartados = new ArrayList<>();
 
         for (OddsResponse jogo : odds) {
@@ -95,7 +83,7 @@ public class OddsService {
     }
 
     private void processarJogo(OddsResponse jogo, double oddLimite,
-                                List<JogoFavoritoDto>  favoritos,
+                                List<JogoFavoritoDto>   favoritos,
                                 List<JogoDescartadoDto> descartados) {
 
         if (jogo.getBookmakers() == null || jogo.getBookmakers().isEmpty()) return;
@@ -106,7 +94,6 @@ public class OddsService {
         var outcomes = mercado.get(0).getOutcomes();
         if (outcomes == null || outcomes.isEmpty()) return;
 
-        // Separa casa, visitante e empate
         String homeName = jogo.getHomeTeam() != null ? jogo.getHomeTeam() : "";
         String awayName = jogo.getAwayTeam() != null ? jogo.getAwayTeam() : "";
 
@@ -114,16 +101,15 @@ public class OddsService {
         double oddVisitante = findOdd(outcomes, awayName);
         double oddEmpate    = findOdd(outcomes, "Draw");
 
-        // Time com menor odd = favorito do jogo
         Optional<OddsResponse.Outcome> menorOdd = outcomes.stream()
                 .filter(o -> !"Draw".equalsIgnoreCase(o.getName()))
                 .min(Comparator.comparingDouble(OddsResponse.Outcome::getPrice));
 
         if (menorOdd.isEmpty()) return;
 
-        double menorOddValor  = menorOdd.get().getPrice();
-        String nomeFavorito   = menorOdd.get().getName();
-        boolean emCasa        = nomeFavorito.equalsIgnoreCase(homeName);
+        double  menorOddValor  = menorOdd.get().getPrice();
+        String  nomeFavorito   = menorOdd.get().getName();
+        boolean emCasa         = nomeFavorito.equalsIgnoreCase(homeName);
         String  nomeAdversario = emCasa ? awayName : homeName;
         double  oddAdversario  = emCasa ? oddVisitante : oddCasa;
 

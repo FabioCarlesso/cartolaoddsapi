@@ -1,32 +1,48 @@
 services:
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: cartola-postgres
+    environment:
+      POSTGRES_DB:       cartola_odds
+      POSTGRES_USER:     "${POSTGRES_USER:-cartola}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-cartola}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cartola} -d cartola_odds"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   cartola-odds:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: cartola-odds
     image: cartola-odds:1.0.0
-    network_mode: host
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       # ── API Key (obrigatório) ──────────────────────────────────────
       ODDS_API_KEY: "${ODDS_API_KEY}"
 
-      # ── Regras de negócio (opcional, sobrescreve o application.properties) ──
-      CARTOLA_ODD_LIMITE: "${CARTOLA_ODD_LIMITE:-3.0}"
-
-      # ── Pesos do score (opcional) ─────────────────────────────────
-      CARTOLA_SCORE_PESO_MEDIA_PONTOS:  "${CARTOLA_SCORE_PESO_MEDIA_PONTOS:-0.40}"
-      CARTOLA_SCORE_PESO_VALORIZACAO:   "${CARTOLA_SCORE_PESO_VALORIZACAO:-0.20}"
-      CARTOLA_SCORE_PESO_DESEMPENHO:    "${CARTOLA_SCORE_PESO_DESEMPENHO:-0.20}"
-      CARTOLA_SCORE_PESO_FATOR_CASA:    "${CARTOLA_SCORE_PESO_FATOR_CASA:-0.10}"
-      CARTOLA_SCORE_PESO_TIME_FAVORITO: "${CARTOLA_SCORE_PESO_TIME_FAVORITO:-0.10}"
+      # ── Banco de dados ────────────────────────────────────────────
+      SPRING_DATASOURCE_URL:      "jdbc:postgresql://postgres:5432/cartola_odds"
+      SPRING_DATASOURCE_USERNAME: "${POSTGRES_USER:-cartola}"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-cartola}"
 
       # ── JVM / Spring ──────────────────────────────────────────────
       SPRING_PROFILES_ACTIVE: "${SPRING_PROFILES_ACTIVE:-default}"
       SERVER_PORT: "8080"
       JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
-    # Limites de recursos do container
     deploy:
       resources:
         limits:
@@ -42,7 +58,7 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/v3/api-docs > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
-      start_period: 45s
+      start_period: 60s
       retries: 3
 
     logging:
@@ -50,3 +66,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  postgres_data:

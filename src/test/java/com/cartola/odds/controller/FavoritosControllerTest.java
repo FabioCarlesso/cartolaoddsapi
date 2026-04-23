@@ -1,7 +1,8 @@
 package com.cartola.odds.controller;
 
-import com.cartola.odds.config.AppProperties;
+import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.response.FavoritosResponse;
+import com.cartola.odds.service.ConfiguracaoService;
 import com.cartola.odds.service.OddsService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -25,8 +26,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class FavoritosControllerTest {
 
     @Autowired MockMvc mockMvc;
-    @MockitoBean OddsService   oddsService;
-    @MockitoBean AppProperties props;
+    @MockitoBean OddsService          oddsService;
+    @MockitoBean ConfiguracaoService  configuracaoService;
 
     @Nested
     @DisplayName("GET /api/favoritos — sucesso")
@@ -35,7 +36,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve retornar 200 com estrutura completa")
         void deveRetornar200ComEstrutura() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(3.0)).thenReturn(responseMock(3.0, 2, 1));
 
             mockMvc.perform(get("/api/favoritos"))
@@ -52,7 +53,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve usar oddLimite do properties quando param omitido")
         void deveUsarLimiteDoProperties() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(3.0)).thenReturn(responseMock(3.0, 0, 0));
 
             mockMvc.perform(get("/api/favoritos"))
@@ -76,7 +77,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve retornar campos obrigatorios de jogo favorito")
         void deveRetornarCamposDeFavoritoCompletos() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(3.0)).thenReturn(responseMock(3.0, 1, 0));
 
             mockMvc.perform(get("/api/favoritos"))
@@ -91,7 +92,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve retornar campos obrigatorios de jogo descartado")
         void deveRetornarCamposDeDescartadoCompletos() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(3.0)).thenReturn(responseMock(3.0, 0, 1));
 
             mockMvc.perform(get("/api/favoritos"))
@@ -106,7 +107,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve retornar listas vazias quando nenhum jogo disponivel")
         void deveRetornarListasVazias() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(3.0))
                     .thenReturn(responseMock(3.0, 0, 0));
 
@@ -169,7 +170,7 @@ class FavoritosControllerTest {
         @Test
         @DisplayName("deve retornar 502 quando Odds API falhar")
         void deveRetornar502QuandoApiExternaFalhar() throws Exception {
-            when(props.getOddLimite()).thenReturn(3.0);
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
             when(oddsService.buscarFavoritosDetalhado(anyDouble()))
                     .thenThrow(new org.springframework.web.client.RestClientException("Timeout"));
 

@@ -30,6 +30,7 @@ public class CacheConfig {
     public static final String CACHE_PARTIDAS       = "partidas";
     public static final String CACHE_PONTUADOS      = "pontuados";
     public static final String CACHE_STATUS_MERCADO = "statusMercado";
+    public static final String CACHE_CONFIGURACAO   = "configuracao";
 
     @Bean
     public CacheManager cacheManager() {
@@ -39,7 +40,8 @@ public class CacheConfig {
             CACHE_CLUBES,
             CACHE_PARTIDAS,
             CACHE_PONTUADOS,
-            CACHE_STATUS_MERCADO
+            CACHE_STATUS_MERCADO,
+            CACHE_CONFIGURACAO
         );
         manager.setCaffeine(caffeine());
         return manager;

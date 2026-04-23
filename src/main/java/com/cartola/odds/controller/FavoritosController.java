@@ -1,8 +1,8 @@
 package com.cartola.odds.controller;
 
-import com.cartola.odds.config.AppProperties;
 import com.cartola.odds.controller.api.FavoritosApi;
 import com.cartola.odds.model.response.FavoritosResponse;
+import com.cartola.odds.service.ConfiguracaoService;
 import com.cartola.odds.service.OddsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class FavoritosController implements FavoritosApi {
 
-    private final OddsService   oddsService;
-    private final AppProperties props;
+    private final OddsService          oddsService;
+    private final ConfiguracaoService  configuracaoService;
 
     @Override
     public ResponseEntity<FavoritosResponse> listarFavoritos(Double oddLimite) {
@@ -25,7 +25,7 @@ public class FavoritosController implements FavoritosApi {
     }
 
     private double resolverLimite(Double oddLimite) {
-        if (oddLimite == null) return props.getOddLimite();
+        if (oddLimite == null) return configuracaoService.buscarConfig().getOddLimite();
         if (oddLimite <= 1.0) throw new IllegalArgumentException(
                 "oddLimite deve ser maior que 1.0. Valor informado: " + oddLimite);
         return oddLimite;
