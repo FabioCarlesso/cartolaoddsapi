@@ -10,12 +10,14 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 |---|---|---|
 | 1 | **Cache Caffeine** | Respostas das APIs externas cacheadas em memória (10–60 min) |
 | 2 | **Invalidação de Cache** | Endpoint `DELETE /api/cache` para forçar atualização imediata dos dados |
-| 3 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
-| 4 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
-| 5 | **4 Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache` |
-| 6 | **Formação 4-3-3** | 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC |
-| 7 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
-| 8 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 3 | **Configuração via Banco** | Parâmetros de negócio (odd limite, pesos, formação) gerenciados via banco de dados |
+| 4 | **Config em Runtime** | `PATCH /api/config` atualiza parâmetros sem restart; `POST /api/config/reset` restaura defaults |
+| 5 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
+| 6 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
+| 7 | **5 Grupos de Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache`, `/api/config` |
+| 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
+| 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
+| 10 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 
 
 ---
@@ -44,14 +46,16 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | Docker | 20.10+ |
 | Docker Compose | 2.x |
 | Caffeine Cache | 3.x |
+| PostgreSQL | 16 |
+| Flyway | 10.x |
 
 ---
 
 ## Pré-requisitos
 
 - Chave gratuita da [The Odds API](https://the-odds-api.com) *(500 req/mês no plano free)*
-- **Com Docker:** Docker Desktop ou Docker Engine + Compose
-- **Sem Docker:** JDK 21+ e Maven 3.9+
+- **Com Docker:** Docker Desktop ou Docker Engine + Compose *(PostgreSQL sobe automaticamente)*
+- **Sem Docker:** JDK 21+, Maven 3.9+ e PostgreSQL 16+ em execução local
 
 ---
 
@@ -95,7 +99,9 @@ docker build -t cartola-odds:1.0.0 .
 # Executar imagem diretamente
 docker run -p 8080:8080 \
   -e ODDS_API_KEY=sua_chave \
-  -e CARTOLA_ODD_LIMITE=3.0 \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://host:5432/cartola_odds \
+  -e SPRING_DATASOURCE_USERNAME=cartola \
+  -e SPRING_DATASOURCE_PASSWORD=cartola \
   cartola-odds:1.0.0
 ```
 
@@ -130,8 +136,10 @@ Edite `src/main/resources/application.properties`:
 
 ```properties
 odds.api.key=SUA_API_KEY_AQUI
-cartola.odd-limite=3.0
 ```
+
+> **Parâmetros de negócio** (odd limite, pesos, formação) são gerenciados via banco de dados.
+> Use `PATCH /api/config` para ajustá-los em runtime após subir a aplicação.
 
 ### Via variáveis de ambiente (produção / Docker)
 
@@ -139,17 +147,18 @@ cartola.odd-limite=3.0
 |---|---|---|
 | `ODDS_API_KEY` | `SUA_API_KEY_AQUI` | **Obrigatório** — chave da The Odds API |
 | `APP_PORT` | `8080` | Porta exposta no host (docker-compose) |
-| `CARTOLA_ODD_LIMITE` | `3.0` | Odd máxima para considerar um time favorito |
-| `CARTOLA_SCORE_PESO_MEDIA_PONTOS` | `0.40` | Peso da média de pontos no score |
-| `CARTOLA_SCORE_PESO_VALORIZACAO` | `0.20` | Peso da valorização |
-| `CARTOLA_SCORE_PESO_DESEMPENHO` | `0.20` | Peso do desempenho recente |
-| `CARTOLA_SCORE_PESO_FATOR_CASA` | `0.10` | Peso do bônus de mandante |
-| `CARTOLA_SCORE_PESO_TIME_FAVORITO` | `0.10` | Peso do bônus de favorito pelas odds |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco PostgreSQL |
+| `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
+| `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
+| `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
+| `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
 | `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
 
-> **Cache (Caffeine):** As respostas das APIs são cacheadas automaticamente em memória:
-> odds (10 min), atletas/partidas (15 min), clubes (60 min), status do mercado (2 min).
-> O cache é reiniciado quando o container é reiniciado.
+> **Parâmetros de negócio (odd limite, pesos, formação):** gerenciados via banco de dados.
+> Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
+> Use `PATCH /api/config` para atualizar em runtime ou `POST /api/config/reset` para restaurar os defaults.
+
+> **Cache (Caffeine):** As respostas das APIs são cacheadas automaticamente em memória.
 > Para forçar atualização imediata sem reiniciar, use `DELETE /api/cache`.
 
 > **Sem API Key configurada:** a aplicação sobe normalmente, o filtro por time favorito é desativado e todos os atletas elegíveis por status/preço são considerados.
@@ -168,6 +177,9 @@ cartola.odd-limite=3.0
 | `GET` | `/api/ranking?posicao=MEI&limite=10` | Top 10 meias |
 | `DELETE` | `/api/cache` | Invalida todos os caches imediatamente |
 | `DELETE` | `/api/cache/{nome}` | Invalida um cache específico pelo nome |
+| `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação) |
+| `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
+| `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
 
@@ -310,7 +322,7 @@ Cada slot seleciona exclusivamente dentro da sua posição. Reservas são sempre
 ```
 cartola/
 ├── Dockerfile               # Multi-stage: build (JDK 21) + runtime (JRE 21 Alpine)
-├── docker-compose.yml       # Orquestração com healthcheck e resource limits
+├── docker-compose.yml       # app + postgres:16, healthcheck, resource limits
 ├── .env.example             # Template de variáveis de ambiente
 ├── .dockerignore            # Exclui target/, testes, docs do contexto Docker
 ├── pom.xml
@@ -321,21 +333,30 @@ cartola/
 └── src/
     ├── main/
     │   ├── java/com/cartola/odds/
-    │   │   ├── config/          (AppProperties, OddsProperties, CartolaProperties,
-│   │                     CacheConfig, RestClientConfig, OpenApiConfig)
-    │   │   │                     RestClientConfig, OpenApiConfig)
+    │   │   ├── config/          (OddsProperties, CartolaProperties,
+    │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig)
     │   │   ├── client/          (OddsClient, CartolaClient)
+    │   │   ├── repository/      (ConfiguracaoRepository)
     │   │   ├── service/         (OddsService, CartolaDataService, ScoreService,
-│   │                     DesempenhoService, MontadorTimeService, PipelineService, RankingService)
-    │   
-    │   │   ├── controller/api/  (TimeApi, RankingApi, FavoritosApi — Swagger docs)
-│   ├── controller/      (TimeController, RankingController,
-    │   │   │                     FavoritosController, GlobalExceptionHandler)
-    │   │   ├── model/           (Atleta, Time, enums/, response/)
+    │   │   │                     DesempenhoService, MontadorTimeService, PipelineService,
+    │   │   │                     RankingService, ConfiguracaoService)
+    │   │   ├── controller/api/  (TimeApi, RankingApi, FavoritosApi, CacheApi,
+    │   │   │                     ConfiguracaoApi — Swagger docs)
+    │   │   ├── controller/      (TimeController, RankingController, FavoritosController,
+    │   │   │                     CacheController, ConfiguracaoController,
+    │   │   │                     GlobalExceptionHandler)
+    │   │   ├── model/           (Atleta, Time, Configuracao, enums/,
+    │   │   │                     request/ConfiguracaoRequest, response/)
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
-    │       └── application.properties   # Lê variáveis de ambiente com fallback
-    └── test/                            # 13 classes de teste — ~110 cenários
+    │       ├── application.properties        # Lê variáveis de ambiente com fallback
+    │       └── db/migration/
+    │           ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │           └── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
+    └── test/
+        ├── java/                            # 16 classes de teste — ~120 cenários
+        └── resources/
+            └── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
 ```
 
 ---
@@ -362,8 +383,9 @@ mvn test jacoco:report
 | `MontadorTimeServiceTest` | 13 — formação, capitão, dúvidas, reservas |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
-| `CacheConfigTest` | 2 — Caffeine registrado com 6 caches |
+| `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
+| `ConfiguracaoControllerTest` | 9 — GET config, PATCH (válido/inválido), POST reset |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 7 — HTTP completo |

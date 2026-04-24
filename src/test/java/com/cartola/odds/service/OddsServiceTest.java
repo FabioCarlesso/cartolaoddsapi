@@ -1,7 +1,7 @@
 package com.cartola.odds.service;
 
 import com.cartola.odds.client.OddsClient;
-import com.cartola.odds.config.AppProperties;
+import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.response.OddsResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -22,14 +22,14 @@ import static org.mockito.Mockito.when;
 @DisplayName("OddsService")
 class OddsServiceTest {
 
-    @Mock OddsClient    oddsClient;
-    @Mock AppProperties props;
+    @Mock OddsClient          oddsClient;
+    @Mock ConfiguracaoService configuracaoService;
 
     @InjectMocks OddsService oddsService;
 
     @BeforeEach
     void setUp() {
-        when(props.getOddLimite()).thenReturn(3.0);
+        when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
     }
 
     // ═══════════════════════════════════════════════════════════════

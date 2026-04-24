@@ -12,16 +12,17 @@ API REST que monta automaticamente um time competitivo para o Cartola FC cruzand
 1. [Stack e Dependências](#1-stack-e-dependências)
 2. [APIs Externas](#2-apis-externas)
 3. [Configuração](#3-configuração)
-4. [Regras de Negócio](#4-regras-de-negócio)
-5. [Fluxo de Execução](#5-fluxo-de-execução)
-6. [Estrutura do Projeto](#6-estrutura-do-projeto)
-7. [Referência de Funções](#7-referência-de-funções)
-8. [Referência de Dados](#8-referência-de-dados)
-9. [Testes](#9-testes)
-10. [Swagger / OpenAPI](#10-swagger--openapi)
-11. [Docker](#11-docker)
-12. [Como Executar](#12-como-executar)
-12. [Melhorias Futuras](#12-melhorias-futuras)
+4. [Cache (Caffeine)](#4-cache-caffeine)
+5. [Regras de Negócio](#5-regras-de-negócio)
+6. [Fluxo de Execução](#6-fluxo-de-execução)
+7. [Estrutura do Projeto](#7-estrutura-do-projeto)
+8. [Referência de Funções](#8-referência-de-funções)
+9. [Referência de Dados](#9-referência-de-dados)
+10. [Testes](#10-testes)
+11. [Swagger / OpenAPI](#11-swagger--openapi)
+12. [Docker](#12-docker)
+13. [Como Executar](#13-como-executar)
+14. [Melhorias Futuras](#14-melhorias-futuras)
 
 ---
 
@@ -32,6 +33,10 @@ API REST que monta automaticamente um time competitivo para o Cartola FC cruzand
 | Java | 21 | Linguagem principal |
 | Spring Boot | 3.4.5 | Framework web, IoC, configuração |
 | Maven | 3.9+ | Build e gerenciamento de dependências |
+| PostgreSQL | 16 | Banco de dados relacional (configuração, produção) |
+| H2 | runtime | Banco in-memory (MODE=PostgreSQL) para testes |
+| Flyway | 10.x | Migrations de banco de dados |
+| Spring Data JPA | via starter-data-jpa | Persistência com Hibernate |
 | Lombok | latest | `@Builder`, `@Getter`, `@With` — reduz boilerplate |
 | springdoc OpenAPI | 2.8.8 | Swagger UI e spec OpenAPI 3 automática |
 | JUnit 5 | via starter-test | Testes unitários e parametrizados |
@@ -104,6 +109,8 @@ restClient.get()
 
 ## 3. Configuração
 
+### 3.1 Arquivo de Propriedades
+
 Arquivo: `src/main/resources/application.properties`
 
 ```properties
@@ -121,21 +128,14 @@ odds.api.timeout=10000
 cartola.api.base-url=https://api.cartola.globo.com
 cartola.api.timeout=15000
 
-# ── Regras de negócio ─────────────────────────────────────────────────
-cartola.odd-limite=3.0          # odd máxima para considerar time favorito
-
-cartola.formacao.GOL=1
-cartola.formacao.LAT=2
-cartola.formacao.ZAG=2
-cartola.formacao.MEI=3
-cartola.formacao.ATA=3
-cartola.formacao.TEC=1
-
-cartola.score.peso.media-pontos=0.40
-cartola.score.peso.valorizacao=0.20
-cartola.score.peso.desempenho=0.20
-cartola.score.peso.fator-casa=0.10
-cartola.score.peso.time-favorito=0.10
+# ── Banco de Dados ────────────────────────────────────────────────────
+spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cartola_odds}
+spring.datasource.username=${SPRING_DATASOURCE_USERNAME:cartola}
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:cartola}
+spring.jpa.hibernate.ddl-auto=validate
+spring.jpa.open-in-view=false
+spring.flyway.enabled=true
+spring.flyway.locations=classpath:db/migration
 
 # ── Swagger ───────────────────────────────────────────────────────────
 springdoc.swagger-ui.path=/swagger-ui.html
@@ -146,10 +146,84 @@ springdoc.api-docs.path=/v3/api-docs
 server.port=8080
 ```
 
+### 3.2 Parâmetros de Negócio via Banco de Dados
+
+Os parâmetros de negócio (odd limite, pesos do score, formação) são armazenados na tabela `configuracao` do PostgreSQL e gerenciados via API REST — sem necessidade de restart.
+
+**Migrations Flyway:**
+
+- `V1__create_configuracao.sql` — cria a tabela com valores padrão (colunas `NUMERIC`)
+- `V2__alter_configuracao_numeric_to_double.sql` — converte as colunas de pesos/odds para `DOUBLE PRECISION` (necessário para compatibilidade com o mapeamento Hibernate de `double`)
+
+```sql
+-- V1: estrutura inicial
+CREATE TABLE configuracao (
+    id               BIGINT PRIMARY KEY,
+    odd_limite       DOUBLE PRECISION NOT NULL DEFAULT 3.00,
+    peso_media_pontos DOUBLE PRECISION NOT NULL DEFAULT 0.400,
+    peso_valorizacao DOUBLE PRECISION NOT NULL DEFAULT 0.200,
+    peso_desempenho  DOUBLE PRECISION NOT NULL DEFAULT 0.200,
+    peso_fator_casa  DOUBLE PRECISION NOT NULL DEFAULT 0.100,
+    peso_time_favorito DOUBLE PRECISION NOT NULL DEFAULT 0.100,
+    formacao_gol     INT  NOT NULL DEFAULT 1,
+    formacao_lat     INT  NOT NULL DEFAULT 2,
+    formacao_zag     INT  NOT NULL DEFAULT 2,
+    formacao_mei     INT  NOT NULL DEFAULT 3,
+    formacao_ata     INT  NOT NULL DEFAULT 3,
+    formacao_tec     INT  NOT NULL DEFAULT 1,
+    updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_single_row CHECK (id = 1)
+);
+```
+
+**Endpoints de configuração:**
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/api/config` | Retorna a configuração atual |
+| `PATCH` | `/api/config` | Atualiza um ou mais campos em runtime |
+| `POST` | `/api/config/reset` | Restaura todos os defaults |
+
+**Exemplo — `GET /api/config`:**
+```json
+{
+  "oddLimite": 3.0,
+  "pesoMediaPontos": 0.40,
+  "pesoValorizacao": 0.20,
+  "pesoDesempenho": 0.20,
+  "pesoFatorCasa": 0.10,
+  "pesoTimeFavorito": 0.10,
+  "formacaoGol": 1,
+  "formacaoLat": 2,
+  "formacaoZag": 2,
+  "formacaoMei": 3,
+  "formacaoAta": 3,
+  "formacaoTec": 1,
+  "updatedAt": "2025-06-01T15:30:00"
+}
+```
+
+**Validações do `PATCH /api/config`:**
+- `oddLimite` deve ser `> 1.0`
+- Pesos devem ser `>= 0.0` e `<= 1.0`
+- Quando todos os pesos são enviados, a soma deve ser `1.0` (tolerância `±0.01`)
+- Formações devem ser `>= 1`
+
+**Cache:** a configuração é cacheada no Caffeine (`configuracao` cache). `PATCH` e `POST /reset` invalidam o cache automaticamente via `@CacheEvict`.
+
+### 3.3 Variáveis de Ambiente (Docker)
+
+| Variável | Padrão | Descrição |
+|---|---|---|
+| `ODDS_API_KEY` | `SUA_API_KEY_AQUI` | **Obrigatório** — chave da The Odds API |
+| `APP_PORT` | `8080` | Porta exposta no host (docker-compose) |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
+| `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
+| `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
+| `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
+| `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
+
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
-
----
-
 
 ## 4. Cache (Caffeine)
 
@@ -166,6 +240,7 @@ CACHE_CLUBES         = "clubes"         // TTL: 10 min
 CACHE_PARTIDAS       = "partidas"       // TTL: 10 min
 CACHE_PONTUADOS      = "pontuados"      // TTL: 10 min (por rodada)
 CACHE_STATUS_MERCADO = "statusMercado"  // TTL: 10 min
+CACHE_CONFIGURACAO   = "configuracao"   // invalidado via PATCH/POST /api/config
 ```
 
 ### 4.2 Estratégia por endpoint
@@ -178,6 +253,7 @@ CACHE_STATUS_MERCADO = "statusMercado"  // TTL: 10 min
 | `partidas` | `GET /partidas` | Partidas da rodada são fixas |
 | `pontuados` | `GET /atletas/pontuados` | Histórico muda somente após cada rodada |
 | `statusMercado` | `GET /mercado/status` | Consultado com frequência |
+| `configuracao` | `GET /api/config` | Invalidado via `PATCH /api/config` ou `POST /api/config/reset` |
 
 ### 4.3 Anotações
 
@@ -248,7 +324,7 @@ DELETE /api/cache/{nome}
 
 ## 5. Regras de Negócio
 
-### 4.1 Identificação de Times Favoritos
+### 5.1 Identificação de Times Favoritos
 
 1. Para cada jogo, seleciona o time com **menor odd** (maior probabilidade de vitória).
 2. Aplica `ODD_LIMITE` (padrão `3.0`):
@@ -264,7 +340,7 @@ Fortaleza x Bahia → odds: FOR 3.30 / BAH 3.40
 Favorito: Fortaleza (3.30 > 3.0) ⛔ descartado
 ```
 
-### 4.2 Filtros de Atletas
+### 5.2 Filtros de Atletas
 
 | Filtro | Regra | Fallback |
 |---|---|---|
@@ -273,7 +349,7 @@ Favorito: Fortaleza (3.30 > 3.0) ⛔ descartado
 | Time favorito | Clube em `favoritos_norm` | Descartado |
 | Sem odds | `favoritos_norm` vazio | Filtro desativado — usa todos os elegíveis |
 
-### 4.3 Fórmula do Score
+### 5.3 Fórmula do Score
 
 ```
 score = (mediaPontos  × 0.40)
@@ -283,7 +359,7 @@ score = (mediaPontos  × 0.40)
       + (timeFavorito × 0.10)   ← 10.0 se favorito pelas odds, 0 caso contrário
 ```
 
-### 4.4 Formação 4-3-3
+### 5.4 Formação 4-3-3
 
 | Slot | `posicao_id` | Qtd | Pool elegível |
 |---|---|---|---|
@@ -296,20 +372,20 @@ score = (mediaPontos  × 0.40)
 
 Cada slot seleciona **exclusivamente** dentro da sua posição.
 
-### 4.5 Seleção de Reservas
+### 5.5 Seleção de Reservas
 
 - Somente `status == PROVAVEL` (7) — dúvidas não são reservas.
 - Preferencialmente mais baratos que o titular mais caro da posição.
 - Fallback: qualquer provável da posição se nenhum mais barato existir.
 - Sempre da **mesma posição individual** do titular (LAT reserva LAT, ZAG reserva ZAG).
 
-### 4.6 Capitão e Reserva de Luxo
+### 5.6 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
 - **Reserva de Luxo:** segundo maior score global (qualquer posição)
 - O capitão tem pontuação **dobrada** no Cartola FC.
 
-### 4.7 Tratamento de Dúvidas
+### 5.7 Tratamento de Dúvidas
 
 - Titulares com `status_id == 6` são escalados, mas marcados com `⚠️ DÚVIDA`.
 - Sistema busca o melhor substituto `PROVAVEL` na **mesma posição individual**.
@@ -317,7 +393,7 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
 
-### 4.9 Endpoint de Ranking (`GET /api/ranking`)
+### 5.8 Endpoint de Ranking (`GET /api/ranking`)
 
 Retorna os melhores atletas disponíveis ordenados por score decrescente.  
 Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
@@ -334,7 +410,7 @@ Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
 - Atletas em dúvida aparecem com `emDuvida: true` no response
 
 
-### 4.10 Endpoint de Favoritos (`GET /api/favoritos`)
+### 5.9 Endpoint de Favoritos (`GET /api/favoritos`)
 
 Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
@@ -355,7 +431,7 @@ Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
 **Validação:** `oddLimite <= 1.0` retorna HTTP 400 (odd de 1.0 ou menos é matematicamente impossível em apostas reais).
 
-### 4.8 Normalização de Nomes
+### 5.10 Normalização de Nomes
 
 ```java
 // Remove acentos, converte para lowercase, elimina especiais
@@ -411,7 +487,7 @@ GET /api/time
 ```
 cartola/
 ├── Dockerfile               # Multi-stage build (JDK 21 build + JRE 21 runtime)
-├── docker-compose.yml       # Orquestração com healthcheck e resource limits
+├── docker-compose.yml       # app + postgres:16, healthcheck, resource limits
 ├── .env.example             # Template de variáveis de ambiente
 ├── .dockerignore
 ├── pom.xml
@@ -421,80 +497,111 @@ cartola/
 │   └── documentacao.docx
 └── src/
     ├── main/java/com/cartola/odds/
-│   ├── CartolaOddsApplication.java      # @SpringBootApplication + @ConfigurationPropertiesScan
-│   ├── config/
-│   │   ├── CacheConfig.java             # Caffeine: 6 caches, TTL 10 min, maxSize 500
-│   │   ├── AppProperties.java           # odd-limite, formacao, pesos (bound do .properties)
-│   │   ├── OddsProperties.java          # key, baseUrl, sport, regions, markets, timeout
-│   │   ├── CartolaProperties.java       # baseUrl, timeout
-│   │   ├── RestClientConfig.java        # beans oddsRestClient e cartolaRestClient
-│   │   └── OpenApiConfig.java           # metadados Swagger UI
-│   ├── client/
-│   │   ├── OddsClient.java              # GET /odds — retorna lista vazia em falha
-│   │   └── CartolaClient.java           # GET /mercado/status, /atletas/mercado, /clubes, /partidas
-│   ├── service/
-│   │   ├── OddsService.java             # extrai favoritos com filtro ODD_LIMITE
-│   │   ├── DesempenhoService.java       # média das últimas 5 rodadas por atletaId
-│   │   ├── RankingService.java          # top-N atletas por score com filtros opcionais
-│   │   └── OddsService.java             # buscarFavoritos() e buscarFavoritosDetalhado()             # extrai favoritos com filtro ODD_LIMITE
-│   │   ├── CartolaDataService.java      # filtra atletas: status + preço + time favorito
-│   │   ├── ScoreService.java            # calcula score ponderado (5 componentes)
-│   │   ├── MontadorTimeService.java     # monta titulares, reservas, capitão, substitutos
-│   │   └── PipelineService.java         # orquestra todas as etapas
-│   ├── controller/api/
-│   │   ├── TimeApi.java                 # Swagger + contrato REST do /api/time
-│   │   ├── RankingApi.java              # Swagger + contrato REST do /api/ranking
-│   │   ├── FavoritosApi.java            # Swagger + contrato REST do /api/favoritos
-│   │   └── CacheApi.java               # Swagger + contrato REST do /api/cache
-│   ├── controller/
-│   │   ├── TimeController.java          # GET /api/time
-│   │   ├── RankingController.java       # GET /api/ranking com filtros posicao e limite
-│   │   ├── FavoritosController.java     # GET /api/favoritos com oddLimite customizavel
-│   │   ├── CacheController.java         # DELETE /api/cache e /api/cache/{nome}
-│   │   └── GlobalExceptionHandler.java  # 400, 422, 502, 500
-│   ├── model/
-│   │   ├── Atleta.java                  # @Builder + @With — imutável com score e substituto
-│   │   ├── Time.java                    # resultado final da montagem
-│   │   ├── enums/
-│   │   │   ├── Posicao.java             # GOL(1) LAT(2) ZAG(3) MEI(4) ATA(5) TEC(6)
-│   │   │   └── StatusAtleta.java        # PROVAVEL(7) DUVIDA(6) + não escaláveis
-│   │   └── response/
-│   │       ├── TimeResponse.java        # DTO de saída com @Schema para Swagger
-│   │       ├── ErrorResponse.java       # status, erro, mensagem, timestamp
-│   │       ├── CacheResponse.java       # cachesInvalidados, mensagem, timestamp
-│   │       ├── RankingResponse.java     # DTO de saída do endpoint de ranking
-│   │       ├── FavoritosResponse.java   # DTO com favoritos, descartados e metadados
-│   │       ├── OddsResponse.java        # desserializa resposta da Odds API
-│   │       ├── AtletaResponse.java      # desserializa /atletas/mercado
-│   │       ├── ClubeResponse.java       # desserializa /clubes
-│   │       ├── MercadoStatusResponse.java
-│   │       └── PartidaResponse.java
-│   └── util/
-│       └── NormalizadorUtil.java        # normalização de nomes (Unicode NFD)
-└── test/java/com/cartola/odds/
-    ├── CartolaOddsApplicationTests.java  # sobe contexto Spring completo
-    ├── controller/
-    │   ├── TimeControllerTest.java       # MockMvc — HTTP status + corpo JSON
-    │   └── CacheControllerTest.java      # DELETE todos / por nome / 400 inválido
-    ├── model/
-    │   ├── AtletaTest.java               # imutabilidade, formatado(), isDuvida()
-    │   └── EnumsTest.java                # fromId, fromSigla, isEscalavel
-    ├── service/
-    │   ├── OddsServiceTest.java          # filtro ODD_LIMITE, normalização, múltiplos jogos
-    │   ├── CartolaDataServiceTest.java   # filtros de status/preço/favorito, mapeamento
-    │   ├── ScoreServiceTest.java         # pesos, bônus casa/favorito, imutabilidade
-    │   ├── MontadorTimeServiceTest.java  # formação, capitão, reservas, dúvidas
-    │   └── PipelineServiceTest.java      # orquestração, falhas, propagação de parâmetros
-    └── util/
-        └── NormalizadorUtilTest.java     # nomes com acento, hifen, nulo, idempotência
+    │   ├── CartolaOddsApplication.java
+    │   ├── config/
+    │   │   ├── CacheConfig.java             # Caffeine: 7 caches, TTL 10 min, maxSize 500
+    │   │   ├── OddsProperties.java          # key, baseUrl, sport, regions, markets, timeout
+    │   │   ├── CartolaProperties.java       # baseUrl, timeout
+    │   │   ├── RestClientConfig.java        # beans oddsRestClient e cartolaRestClient
+    │   │   └── OpenApiConfig.java           # metadados Swagger UI
+    │   ├── client/
+    │   │   ├── OddsClient.java
+    │   │   └── CartolaClient.java
+    │   ├── repository/
+    │   │   └── ConfiguracaoRepository.java  # JpaRepository<Configuracao, Long>
+    │   ├── service/
+    │   │   ├── ConfiguracaoService.java     # buscarConfig(), atualizar(), resetar()
+    │   │   ├── OddsService.java
+    │   │   ├── DesempenhoService.java
+    │   │   ├── RankingService.java
+    │   │   ├── CartolaDataService.java
+    │   │   ├── ScoreService.java
+    │   │   ├── MontadorTimeService.java
+    │   │   └── PipelineService.java
+    │   ├── controller/api/
+    │   │   ├── TimeApi.java
+    │   │   ├── RankingApi.java
+    │   │   ├── FavoritosApi.java
+    │   │   ├── CacheApi.java
+    │   │   └── ConfiguracaoApi.java         # Swagger docs para /api/config
+    │   ├── controller/
+    │   │   ├── TimeController.java
+    │   │   ├── RankingController.java
+    │   │   ├── FavoritosController.java
+    │   │   ├── CacheController.java
+    │   │   ├── ConfiguracaoController.java  # GET/PATCH /api/config, POST /api/config/reset
+    │   │   └── GlobalExceptionHandler.java
+    │   ├── model/
+    │   │   ├── Atleta.java
+    │   │   ├── Time.java
+    │   │   ├── Configuracao.java            # @Entity — tabela configuracao (linha única)
+    │   │   ├── enums/
+    │   │   │   ├── Posicao.java
+    │   │   │   └── StatusAtleta.java
+    │   │   ├── request/
+    │   │   │   └── ConfiguracaoRequest.java # DTO PATCH com Bean Validation
+    │   │   └── response/
+    │   │       ├── TimeResponse.java
+    │   │       ├── ErrorResponse.java
+    │   │       ├── CacheResponse.java
+    │   │       ├── RankingResponse.java
+    │   │       ├── FavoritosResponse.java
+    │   │       ├── ConfiguracaoResponse.java # DTO GET com factory from(Configuracao)
+    │   │       ├── OddsResponse.java
+    │   │       ├── AtletaResponse.java
+    │   │       ├── ClubeResponse.java
+    │   │       ├── MercadoStatusResponse.java
+    │   │       └── PartidaResponse.java
+    │   └── util/
+    │       └── NormalizadorUtil.java
+    ├── main/resources/
+    │   ├── application.properties
+    │   └── db/migration/
+    │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │       └── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
+    └── test/
+        ├── java/com/cartola/odds/
+        │   ├── CartolaOddsApplicationTests.java
+        │   ├── controller/
+        │   │   ├── TimeControllerTest.java
+        │   │   ├── CacheControllerTest.java
+        │   │   ├── FavoritosControllerTest.java
+        │   │   ├── RankingControllerTest.java
+        │   │   └── ConfiguracaoControllerTest.java
+        │   ├── model/
+        │   │   ├── AtletaTest.java
+        │   │   └── EnumsTest.java
+        │   ├── service/
+        │   │   ├── OddsServiceTest.java
+        │   │   ├── CartolaDataServiceTest.java
+        │   │   ├── ScoreServiceTest.java
+        │   │   ├── MontadorTimeServiceTest.java
+        │   │   ├── DesempenhoServiceTest.java
+        │   │   ├── RankingServiceTest.java
+        │   │   └── PipelineServiceTest.java
+        │   └── util/
+        │       └── NormalizadorUtilTest.java
+        └── resources/
+            └── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
 ```
+
 
 ---
 
 ## 8. Referência de Funções
 
+### `ConfiguracaoService.buscarConfig() → Configuracao`
+Retorna a configuração atual do banco (resultado cacheado em `configuracao`).  
+Usado por `OddsService`, `ScoreService`, `MontadorTimeService` e `FavoritosController`.
+
+### `ConfiguracaoService.atualizar(ConfiguracaoRequest) → ConfiguracaoResponse`
+Atualiza os campos não-nulos da configuração, valida a soma dos pesos e invalida o cache.
+
+### `ConfiguracaoService.resetar() → ConfiguracaoResponse`
+Restaura todos os campos para os valores padrão e invalida o cache.
+
 ### `OddsService.buscarFavoritos() → Set<String>`
-Busca odds da API e retorna nomes normalizados dos times com `odd ≤ ODD_LIMITE`.  
+Busca odds da API e retorna nomes normalizados dos times com `odd ≤ ODD_LIMITE` (lido do banco).  
 Retorna `Set.of()` se API indisponível ou chave não configurada.
 
 ### `CartolaDataService.buscarAtletasFiltrados(Set<String> favoritos) → List<Atleta>`
@@ -600,13 +707,19 @@ Remove acentos (Unicode NFD), converte para lowercase, remove caracteres especia
 |---|---|---|
 | `CartolaOddsApplicationTests` | Integração | Contexto Spring sobe sem erros |
 | `TimeControllerTest` | Web (MockMvc) | HTTP 200/422/502/500, corpo JSON, campos obrigatórios, timestamp no erro |
+| `FavoritosControllerTest` | Web (MockMvc) | HTTP 200/400/502, campos favorito/descartado, validação oddLimite |
+| `RankingControllerTest` | Web (MockMvc) | HTTP completo com filtros posição e limite |
+| `CacheControllerTest` | Web (MockMvc) | DELETE todos / DELETE por nome / 400 nome inválido |
+| `ConfiguracaoControllerTest` | Web (MockMvc) | GET config, PATCH (válido/inválido/soma), POST reset |
 | `AtletaTest` | Unitário | `formatado()`, `isDuvida()`, `isProvavel()`, imutabilidade `@With` |
 | `EnumsTest` | Unitário | `fromId()`, `fromSigla()`, `isEscalavel()`, `idsEscalaveis()` para todos os valores |
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
-| `ScoreServiceTest` | Unitário | Pesos ponderados, bônus casa, bônus favorito, acúmulo de bônus, imutabilidade, lista vazia |
+| `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
 | `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, capitão, reserva de luxo, reservas por posição, dúvidas com substituto |
-| `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção, propagação de parâmetros |
+| `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
+| `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
+| `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência |
 
 ### Executar
@@ -654,8 +767,13 @@ mvn test jacoco:report
 | `GET /api/ranking` | Top atletas por score com filtros opcionais |
 | `GET /api/ranking?posicao=ATA` | Top atacantes |
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
-| `GET /api/favoritos` | Times favoritos com oddLimite do properties |
+| `GET /api/favoritos` | Times favoritos com oddLimite atual |
 | `GET /api/favoritos?oddLimite=2.5` | Favoritos com limite customizado |
+| `DELETE /api/cache` | Invalida todos os caches |
+| `DELETE /api/cache/{nome}` | Invalida um cache específico |
+| `GET /api/config` | Retorna configuração atual |
+| `PATCH /api/config` | Atualiza parâmetros em runtime |
+| `POST /api/config/reset` | Restaura defaults |
 
 **Respostas documentadas em `GET /api/time`:**
 
@@ -671,7 +789,7 @@ mvn test jacoco:report
 
 ## 12. Docker
 
-### 11.1 Arquivos
+### 12.1 Arquivos
 
 | Arquivo | Descrição |
 |---|---|
@@ -681,7 +799,7 @@ mvn test jacoco:report
 | `.dockerignore` | Exclui `target/`, `src/test/`, `docs/` e arquivos de IDE do contexto |
 | `application.properties` | Lê variáveis de ambiente com fallback para valores padrão |
 
-### 11.2 Dockerfile — Multi-stage Build
+### 12.2 Dockerfile — Multi-stage Build
 
 ```
 Stage 1 — build (eclipse-temurin:21-jdk-alpine)
@@ -702,28 +820,31 @@ Stage 2 — runtime (eclipse-temurin:21-jre-alpine)
 - **`-XX:+UseContainerSupport`** — JVM respeita os limites de CPU/memória do container
 - **`-XX:MaxRAMPercentage=75.0`** — usa até 75% da RAM disponível para o heap Java
 
-### 11.3 Variáveis de Ambiente
+### 12.3 Variáveis de Ambiente
 
 O `application.properties` usa sintaxe `${VAR:default}` para ler variáveis do ambiente com fallback:
 
 ```properties
 odds.api.key=${ODDS_API_KEY:SUA_API_KEY_AQUI}
-cartola.odd-limite=${CARTOLA_ODD_LIMITE:3.0}
+spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cartola_odds}
+spring.datasource.username=${SPRING_DATASOURCE_USERNAME:cartola}
+spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:cartola}
 ```
 
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `ODDS_API_KEY` | `SUA_API_KEY_AQUI` | **Obrigatório** — chave da The Odds API |
 | `APP_PORT` | `8080` | Porta exposta no host (somente docker-compose) |
-| `CARTOLA_ODD_LIMITE` | `3.0` | Odd máxima para considerar um time favorito |
-| `CARTOLA_SCORE_PESO_MEDIA_PONTOS` | `0.40` | Peso da média de pontos |
-| `CARTOLA_SCORE_PESO_VALORIZACAO` | `0.20` | Peso da valorização |
-| `CARTOLA_SCORE_PESO_DESEMPENHO` | `0.20` | Peso do desempenho |
-| `CARTOLA_SCORE_PESO_FATOR_CASA` | `0.10` | Peso do bônus mandante |
-| `CARTOLA_SCORE_PESO_TIME_FAVORITO` | `0.10` | Peso do bônus favorito |
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://postgres:5432/cartola_odds` | URL do banco PostgreSQL |
+| `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
+| `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
+| `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
+| `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
 | `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
 
-### 11.4 Comandos
+> Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via `PATCH /api/config` — não precisam de variáveis de ambiente.
+
+### 12.4 Comandos
 
 ```bash
 # Início rápido
@@ -749,11 +870,13 @@ docker build -t cartola-odds:1.0.0 .
 # Executar sem Compose (passando variáveis diretamente)
 docker run -p 8080:8080 \
   -e ODDS_API_KEY=sua_chave \
-  -e CARTOLA_ODD_LIMITE=2.5 \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://host:5432/cartola_odds \
+  -e SPRING_DATASOURCE_USERNAME=cartola \
+  -e SPRING_DATASOURCE_PASSWORD=cartola \
   cartola-odds:1.0.0
 ```
 
-### 11.5 Resource Limits (docker-compose.yml)
+### 12.5 Resource Limits (docker-compose.yml)
 
 ```yaml
 deploy:
@@ -768,7 +891,7 @@ deploy:
 
 Ajuste conforme o ambiente de destino. Para produção com carga alta, considere `memory: 768m`.
 
-### 11.6 Healthcheck
+### 12.6 Healthcheck
 
 O container verifica automaticamente se a aplicação está respondendo a cada 30 segundos:
 
@@ -776,7 +899,7 @@ O container verifica automaticamente se a aplicação está respondendo a cada 3
 GET http://localhost:8080/v3/api-docs → 200 OK = healthy
 ```
 
-`start_period: 45s` — aguarda a JVM inicializar antes de começar as verificações.
+`start_period: 60s` — aguarda a JVM e o PostgreSQL inicializarem antes de começar as verificações.
 
 ## 13. Como Executar
 
@@ -799,18 +922,16 @@ mvn spring-boot:run
 
 ---
 
-## 13. Melhorias Futuras
+## 14. Melhorias Futuras
 
 ### Dados e Algoritmos
-- [ ] Substituir proxy de desempenho pela **média real das últimas 5 rodadas** via `/atletas/pontuados`
 - [ ] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
 - [ ] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
 - [ ] Ponderar a odd como **variável contínua** em vez de bônus binário
 
 ### Infraestrutura
-- [ ] **Cache** das respostas com Spring Cache + Caffeine (TTL 1h)
 - [ ] **Retry** com backoff exponencial via Spring Retry
-- [ ] **Endpoint** `GET /api/atletas?posicao=ATA` para exploração por posição
+- [ ] **Métricas** com Spring Actuator + Micrometer
 - [ ] **Cobertura de testes** com JaCoCo + relatório HTML
 
 ### Regras de Negócio
@@ -820,7 +941,6 @@ mvn spring-boot:run
 
 ### Qualidade
 - [ ] **Testes de integração** com WireMock simulando as APIs externas
-- [ ] **Métricas** com Spring Actuator + Micrometer
 
 ---
 

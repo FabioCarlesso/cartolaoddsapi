@@ -1,15 +1,19 @@
 package com.cartola.odds.service;
 
-import com.cartola.odds.config.AppProperties;
 import com.cartola.odds.model.Atleta;
+import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Map;
@@ -17,17 +21,19 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 @DisplayName("ScoreService")
 class ScoreServiceTest {
 
-    private ScoreService scoreService;
+    @Mock ConfiguracaoService configuracaoService;
+
+    @InjectMocks ScoreService scoreService;
 
     @BeforeEach
     void setUp() {
-        var props = new AppProperties();
-        props.getScore().setPeso(new AppProperties.Score.Peso());
-        scoreService = new ScoreService(props);
+        when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
     }
 
     @Nested
@@ -135,12 +141,11 @@ class ScoreServiceTest {
         @DisplayName("deve usar mediaPontos como fallback quando atletaId ausente do mapa")
         void deveUsarFallbackQuandoIdAusenteDoMapa() {
             var atleta = base().atletaId(99).mediaPontos(10.0).valorizacao(0.0).build();
-            var desempenhoMap = Map.of(1, 5.0); // atleta 99 nao esta no mapa
+            var desempenhoMap = Map.of(1, 5.0);
 
             var semMapa = scoreService.calcularScores(List.of(atleta), Set.of(), Set.of()).get(0).getScore();
             var comMapa = scoreService.calcularScores(List.of(atleta), Set.of(), Set.of(), desempenhoMap).get(0).getScore();
 
-            // sem mapa: usa proxy (media como desempenho) -> mesmos pesos aplicados
             assertThat(comMapa).isCloseTo(semMapa, within(0.001));
         }
 
@@ -158,10 +163,8 @@ class ScoreServiceTest {
         @DisplayName("deve gerar score diferente com desempenho real vs proxy")
         void deveGerarScoreDiferenteComDesempenhoReal() {
             var atleta = base().atletaId(5).mediaPontos(5.0).valorizacao(0.0).build();
-            // proxy: desempenho = mediaPontos = 5.0
             var comProxy = scoreService.calcularScores(
                     List.of(atleta), Set.of(), Set.of(), Map.of()).get(0).getScore();
-            // real: desempenho = 10.0 (maior)
             var comReal = scoreService.calcularScores(
                     List.of(atleta), Set.of(), Set.of(), Map.of(5, 10.0)).get(0).getScore();
 
