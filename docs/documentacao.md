@@ -388,6 +388,8 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 
 Quando `evitarMesmoClubeDefesa=true` (padrão), a seleção de titulares não repete clubes entre `GOL`, `LAT` e `ZAG`. O montador percorre os candidatos por score e pula defensores cujo clube já tenha sido usado nessas posições. A regra não limita `MEI`, `ATA` ou `TEC` e pode ser desligada via `PATCH /api/config`.
 
+Caso não haja candidatos suficientes sem repetição (ex: poucos clubes disponíveis na rodada), o montador completa a posição com os melhores atletas restantes — evitando apenas apelidos já escalados — garantindo que a formação nunca fique incompleta.
+
 ### 5.7 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
@@ -451,7 +453,7 @@ NormalizadorUtil.normalizar("São Paulo FC")        // → "sao paulo fc"
 NormalizadorUtil.normalizar("Grêmio")              // → "gremio"
 ```
 
-Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense` e `america mineiro`.
+Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense` e `vasco da gama`.
 
 ---
 
@@ -655,7 +657,7 @@ Propagado para todos os responses via `Time.avisoMercado` e `RankingResponse.avi
 Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espaço, remove caracteres especiais, colapsa espaços duplicados e aplica aliases de clubes.
 
 ### `GlobalExceptionHandler.handleValidation(MethodArgumentNotValidException) → ErrorResponse`
-Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e a primeira mensagem de campo no corpo da resposta.
+Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e todas as mensagens de campos inválidos concatenadas com `"; "` no corpo da resposta.
 
 ---
 

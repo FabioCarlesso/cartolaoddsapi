@@ -181,8 +181,18 @@ public class MontadorTimeService {
         }
 
         if (escolhidos.size() < quantidade) {
-            log.warn("Regra de defesa sem clube repetido limitou {} para {}/{} titulares",
+            log.warn("Regra de defesa sem clube repetido nao encontrou candidatos suficientes para {} ({}/{}), completando com melhor disponivel",
                     posicao, escolhidos.size(), quantidade);
+            Set<String> apelidosEscolhidos = escolhidos.stream()
+                    .map(Atleta::getApelido)
+                    .collect(Collectors.toSet());
+            for (Atleta candidato : candidatos) {
+                if (escolhidos.size() == quantidade) break;
+                if (apelidosEscolhidos.add(candidato.getApelido())) {
+                    clubesDefesaEscalados.add(candidato.getClubeId());
+                    escolhidos.add(candidato);
+                }
+            }
         }
 
         return escolhidos;

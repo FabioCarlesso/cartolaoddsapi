@@ -326,9 +326,11 @@ Quando `evitarMesmoClubeDefesa=true` (padrão), o montador não repete clubes en
 { "evitarMesmoClubeDefesa": false }
 ```
 
+Quando não há candidatos suficientes sem repetição (ex: poucos clubes disponíveis na rodada), o montador completa a posição com os melhores atletas restantes, garantindo que a formação nunca fique incompleta.
+
 ### Normalização de nomes de clubes
 
-Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, sem acentos, com hífens transformados em espaços, espaços duplicados colapsados e aliases aplicados. Exemplos: `Atlético-MG` vira `atletico mg` e `Atlético Mineiro MG` também vira `atletico mg`.
+Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, sem acentos, com hífens transformados em espaços, espaços duplicados colapsados e aliases aplicados. Exemplos: `Atlético-MG` → `atletico mg`, `Atlético Mineiro MG` → `atletico mg`, `Athletico Paranaense` → `athletico pr`, `Vasco da Gama` → `vasco`.
 
 ---
 

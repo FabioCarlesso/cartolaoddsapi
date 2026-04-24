@@ -11,6 +11,9 @@ public final class NormalizadorUtil {
     private static final Map<String, String> ALIASES = Map.of(
         "atletico mineiro",     "atletico mg",
         "atletico mineiro mg",  "atletico mg",
+        "atletico paranaense",  "athletico pr",
+        "athletico paranaense", "athletico pr",
+        "vasco da gama",        "vasco",
         "bragantino sp",        "bragantino",
         "red bull bragantino",  "bragantino",
         "atletico goianiense",  "atletico go",

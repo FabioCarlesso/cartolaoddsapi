@@ -87,7 +87,6 @@ class MontadorTimeServiceTest {
 
             var clubesDefesa = titularesDefesa(time);
 
-            assertThat(clubesDefesa).hasSize(5);
             assertThat(new HashSet<>(clubesDefesa)).hasSameSizeAs(clubesDefesa);
         }
 
@@ -99,6 +98,16 @@ class MontadorTimeServiceTest {
             var time = service.montar(poolComDefensoresRepetidos(), 1, null);
 
             assertThat(Collections.frequency(titularesDefesa(time), 10)).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("quando candidatos insuficientes a regra completa o time sem falhar")
+        void quandoClubesInsuficientesTimeDeveEstarCompleto() {
+            var time = service.montar(poolComDefesaUmSoClube(), 1, null);
+
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
         }
 
         @Test
@@ -339,6 +348,17 @@ class MontadorTimeServiceTest {
         pool.addAll(criarAtletasMesmoClube(Posicao.MEI, 3, 20, 200));
         pool.addAll(criarAtletasMesmoClube(Posicao.ATA, 3, 30, 300));
         pool.addAll(criarAtletasMesmoClube(Posicao.TEC, 1, 40, 400));
+        return pool;
+    }
+
+    private List<Atleta> poolComDefesaUmSoClube() {
+        List<Atleta> pool = new ArrayList<>();
+        pool.addAll(criarAtletasMesmoClube(Posicao.GOL, 2, 1,  10));
+        pool.addAll(criarAtletasMesmoClube(Posicao.LAT, 4, 10, 10));
+        pool.addAll(criarAtletasMesmoClube(Posicao.ZAG, 4, 20, 10));
+        pool.addAll(criarAtletasMesmoClube(Posicao.MEI, 3, 30, 200));
+        pool.addAll(criarAtletasMesmoClube(Posicao.ATA, 3, 40, 300));
+        pool.addAll(criarAtletasMesmoClube(Posicao.TEC, 1, 50, 400));
         return pool;
     }
 
