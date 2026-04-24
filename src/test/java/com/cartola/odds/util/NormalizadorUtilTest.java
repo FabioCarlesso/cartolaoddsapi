@@ -17,10 +17,10 @@ class NormalizadorUtilTest {
         "Atletico-MG,        atletico mg",
         "Sao Paulo FC,       sao paulo fc",
         "Gremio,             gremio",
-        "Athletico Paranaense, athletico paranaense",
+        "Athletico Paranaense, athletico pr",
         "Flamengo,           flamengo",
         "BOTAFOGO,           botafogo",
-        "Vasco da Gama,      vasco da gama",
+        "Vasco da Gama,      vasco",
         "Coritiba FC,        coritiba fc",
     })
     @DisplayName("deve normalizar nomes de clubes corretamente")

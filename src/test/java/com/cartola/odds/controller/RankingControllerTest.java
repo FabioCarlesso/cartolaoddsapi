@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -153,7 +154,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar 422 quando pipeline nao encontra atletas")
         void deveRetornar422QuandoPipelineVazio() throws Exception {
-            when(rankingService.buscarRanking(any(), any()))
+            when(rankingService.buscarRanking(any(), anyInt()))
                     .thenThrow(new IllegalStateException("Nenhum atleta disponivel"));
 
             mockMvc.perform(get("/api/ranking"))
@@ -164,7 +165,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar 502 quando API externa falhar")
         void deveRetornar502QuandoApiExternaFalhar() throws Exception {
-            when(rankingService.buscarRanking(any(), any()))
+            when(rankingService.buscarRanking(any(), anyInt()))
                     .thenThrow(new org.springframework.web.client.RestClientException("Timeout"));
 
             mockMvc.perform(get("/api/ranking"))

@@ -21,7 +21,7 @@ class AtletaTest {
     @DisplayName("formatado deve incluir alerta de duvida para atleta em duvida")
     void formatadoDeveIncluirAlertaDeDuvida() {
         var atleta = base().status(StatusAtleta.DUVIDA).build();
-        assertThat(atleta.formatado()).contains("DUVIDA");
+        assertThat(atleta.formatado()).contains("DÚVIDA");
         assertThat(atleta.formatado()).startsWith("Hulk (ATM)");
     }
 

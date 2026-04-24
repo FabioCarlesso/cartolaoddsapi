@@ -51,7 +51,7 @@ Todos os parâmetros são configuráveis em runtime via `PATCH /api/config` sem 
 
 ### Configuração via Banco de Dados
 
-Parâmetros de negócio (odd limite, pesos do score, formação) ficam na tabela `configuracao` do PostgreSQL.
+Parâmetros de negócio (odd limite, pesos do score, formação e regras) ficam na tabela `configuracao` do PostgreSQL.
 Gerenciados via API REST:
 
 | Método | Endpoint | Descrição |
@@ -63,6 +63,7 @@ Gerenciados via API REST:
 O Flyway aplica as migrations automaticamente na inicialização:
 - `V1__create_configuracao.sql` — cria tabela e insere valores padrão
 - `V2__alter_configuracao_numeric_to_double.sql` — converte colunas para `DOUBLE PRECISION`
+- `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para não repetir clubes entre GOL, LAT e ZAG
 
 ### Cache Caffeine (in-memory)
 
@@ -85,6 +86,18 @@ Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome
 
 Apenas atletas com status **Provável (7)** ou **Dúvida (6)** e preço `> 0` são considerados.
 Quando odds não estão disponíveis, o filtro por time favorito é desativado e todos os elegíveis entram no pool.
+
+### Normalização de Clubes
+
+O `NormalizadorUtil` remove acentos, converte para lowercase, troca hífens por espaços, colapsa espaços duplicados e aplica aliases para alinhar nomes vindos da The Odds API com os nomes do Cartola FC. Isso cobre variações como `Atlético-MG`, `Atlético Mineiro`, `Atlético Mineiro MG`, `Athletico Paranaense`, `Atlético Paranaense` e `Vasco da Gama`.
+
+### Regra de Defesa
+
+Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime. Quando não há candidatos suficientes sem repetição, o montador completa a posição com os melhores atletas restantes, garantindo que a formação nunca fique incompleta.
+
+### Validação de Entrada
+
+Falhas de Bean Validation no corpo de requisições, principalmente em `PATCH /api/config`, são tratadas no `GlobalExceptionHandler` e retornam HTTP 400 com todas as mensagens de campos inválidos concatenadas com `"; "`.
 
 ---
 
@@ -136,7 +149,8 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-~150 cenários distribuídos em 17 classes de teste cobrindo serviços, controllers, domínio e utilitários. Execute com:
+~250 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
+Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
 mvn test
