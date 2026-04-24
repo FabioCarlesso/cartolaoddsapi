@@ -87,9 +87,17 @@ Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome
 Apenas atletas com status **Provável (7)** ou **Dúvida (6)** e preço `> 0` são considerados.
 Quando odds não estão disponíveis, o filtro por time favorito é desativado e todos os elegíveis entram no pool.
 
+### Normalização de Clubes
+
+O `NormalizadorUtil` remove acentos, converte para lowercase, troca hífens por espaços, colapsa espaços duplicados e aplica aliases para alinhar nomes vindos da The Odds API com os nomes do Cartola FC. Isso cobre variações como `Atlético-MG`, `Atlético Mineiro` e `Atlético Mineiro MG`.
+
 ### Regra de Defesa
 
 Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime.
+
+### Validação de Entrada
+
+Falhas de Bean Validation no corpo de requisições, principalmente em `PATCH /api/config`, são tratadas no `GlobalExceptionHandler` e retornam HTTP 400 com a primeira mensagem de campo inválido.
 
 ---
 
@@ -141,7 +149,8 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-~160 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários. Execute com:
+~250 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
+Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
 mvn test

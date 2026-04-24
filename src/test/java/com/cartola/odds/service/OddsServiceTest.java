@@ -27,11 +27,6 @@ class OddsServiceTest {
 
     @InjectMocks OddsService oddsService;
 
-    @BeforeEach
-    void setUp() {
-        when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
-    }
-
     // ═══════════════════════════════════════════════════════════════
     // buscarFavoritos (Set<String>) — contrato do pipeline
     // ═══════════════════════════════════════════════════════════════
@@ -39,6 +34,11 @@ class OddsServiceTest {
     @Nested
     @DisplayName("buscarFavoritos — Set<String>")
     class BuscarFavoritosSet {
+
+        @BeforeEach
+        void setUp() {
+            when(configuracaoService.buscarConfig()).thenReturn(Configuracao.defaults());
+        }
 
         @Test
         @DisplayName("deve retornar set vazio quando API nao retorna odds")

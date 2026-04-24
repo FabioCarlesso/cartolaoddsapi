@@ -304,6 +304,7 @@ DELETE /api/cache/{nome}
 ```
 
 **Parâmetro de path:** nome do cache — `odds`, `atletas`, `clubes`, `partidas`, `pontuados` ou `statusMercado`.
+O cache `configuracao` é interno da camada de configuração e é invalidado automaticamente por `PATCH /api/config` e `POST /api/config/reset`.
 
 **Resposta `200 OK`:**
 ```json
@@ -387,13 +388,13 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 
 Quando `evitarMesmoClubeDefesa=true` (padrão), a seleção de titulares não repete clubes entre `GOL`, `LAT` e `ZAG`. O montador percorre os candidatos por score e pula defensores cujo clube já tenha sido usado nessas posições. A regra não limita `MEI`, `ATA` ou `TEC` e pode ser desligada via `PATCH /api/config`.
 
-### 5.6 Capitão e Reserva de Luxo
+### 5.7 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
 - **Reserva de Luxo:** segundo maior score global (qualquer posição)
 - O capitão tem pontuação **dobrada** no Cartola FC.
 
-### 5.7 Tratamento de Dúvidas
+### 5.8 Tratamento de Dúvidas
 
 - Titulares com `status_id == 6` são escalados, mas marcados com `⚠️ DÚVIDA`.
 - Sistema busca o melhor substituto `PROVAVEL` na **mesma posição individual**.
@@ -401,7 +402,7 @@ Quando `evitarMesmoClubeDefesa=true` (padrão), a seleção de titulares não re
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
 
-### 5.8 Endpoint de Ranking (`GET /api/ranking`)
+### 5.9 Endpoint de Ranking (`GET /api/ranking`)
 
 Retorna os melhores atletas disponíveis ordenados por score decrescente.  
 Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
@@ -418,7 +419,7 @@ Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
 - Atletas em dúvida aparecem com `emDuvida: true` no response
 
 
-### 5.9 Endpoint de Favoritos (`GET /api/favoritos`)
+### 5.10 Endpoint de Favoritos (`GET /api/favoritos`)
 
 Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
@@ -439,16 +440,18 @@ Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
 **Validação:** `oddLimite <= 1.0` retorna HTTP 400 (odd de 1.0 ou menos é matematicamente impossível em apostas reais).
 
-### 5.10 Normalização de Nomes
+### 5.11 Normalização de Nomes
 
 ```java
-// Remove acentos, converte para lowercase, elimina especiais
-NormalizadorUtil.normalizar("Atlético-MG")  // → "atletico mg"
-NormalizadorUtil.normalizar("São Paulo FC") // → "sao paulo fc"
-NormalizadorUtil.normalizar("Grêmio")       // → "gremio"
+// Remove acentos, converte para lowercase, troca hífen por espaço,
+// colapsa espaços duplicados, elimina especiais e aplica aliases.
+NormalizadorUtil.normalizar("Atlético-MG")         // → "atletico mg"
+NormalizadorUtil.normalizar("Atlético Mineiro MG") // → "atletico mg"
+NormalizadorUtil.normalizar("São Paulo FC")        // → "sao paulo fc"
+NormalizadorUtil.normalizar("Grêmio")              // → "gremio"
 ```
 
-> ⚠️ **Ponto fraco:** grafias muito divergentes entre APIs podem falhar no cruzamento. Melhoria futura: dicionário de aliases.
+Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense` e `america mineiro`.
 
 ---
 
@@ -566,7 +569,8 @@ cartola/
     │   ├── application.properties
     │   └── db/migration/
     │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
-    │       └── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
+    │       ├── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
+    │       └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     └── test/
         ├── java/com/cartola/odds/
         │   ├── CartolaOddsApplicationTests.java
@@ -590,7 +594,8 @@ cartola/
         │   └── util/
         │       └── NormalizadorUtilTest.java
         └── resources/
-            └── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
+            ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
+            └── db/migration/h2/             # Migrations Flyway equivalentes ajustadas para H2
 ```
 
 
@@ -647,7 +652,10 @@ Retorna o texto de aviso quando o mercado não está aberto; `null` quando abert
 Propagado para todos os responses via `Time.avisoMercado` e `RankingResponse.avisoMercado`.
 
 ### `NormalizadorUtil.normalizar(String) → String`
-Remove acentos (Unicode NFD), converte para lowercase, remove caracteres especiais.
+Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espaço, remove caracteres especiais, colapsa espaços duplicados e aplica aliases de clubes.
+
+### `GlobalExceptionHandler.handleValidation(MethodArgumentNotValidException) → ErrorResponse`
+Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e a primeira mensagem de campo no corpo da resposta.
 
 ---
 
@@ -731,6 +739,8 @@ Remove acentos (Unicode NFD), converte para lowercase, remove caracteres especia
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência |
 
+Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
+
 ### Executar
 
 ```bash
@@ -747,15 +757,9 @@ mvn test jacoco:report
 ### Exemplo de saída esperada
 
 ```
-[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0 -- OddsServiceTest
-[INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0 -- CartolaDataServiceTest
-[INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0 -- ScoreServiceTest
-[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0 -- MontadorTimeServiceTest
-[INFO] Tests run:  8, Failures: 0, Errors: 0, Skipped: 0 -- PipelineServiceTest
-[INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0 -- TimeControllerTest
-[INFO] Tests run:  5, Failures: 0, Errors: 0, Skipped: 0 -- AtletaTest
-[INFO] Tests run:  8, Failures: 0, Errors: 0, Skipped: 0 -- EnumsTest
-[INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0 -- NormalizadorUtilTest
+[INFO] Results:
+[INFO]
+[INFO] Tests run: 250, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
@@ -783,6 +787,8 @@ mvn test jacoco:report
 | `GET /api/config` | Retorna configuração atual |
 | `PATCH /api/config` | Atualiza parâmetros em runtime |
 | `POST /api/config/reset` | Restaura defaults |
+
+Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 com a mensagem do campo inválido.
 
 **Respostas documentadas em `GET /api/time`:**
 

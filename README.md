@@ -18,7 +18,8 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
 | 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
 | 10 | **Defesa sem Clube Repetido** | Regra configurável evita repetir clubes entre GOL, LAT e ZAG |
-| 11 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 11 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
+| 12 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 
 
 ---
@@ -273,6 +274,7 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 |---|---|
 | `200` | Sucesso |
 | `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`) |
+| `400` | Erro de validação no corpo do `PATCH /api/config` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
@@ -324,6 +326,10 @@ Quando `evitarMesmoClubeDefesa=true` (padrão), o montador não repete clubes en
 { "evitarMesmoClubeDefesa": false }
 ```
 
+### Normalização de nomes de clubes
+
+Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, sem acentos, com hífens transformados em espaços, espaços duplicados colapsados e aliases aplicados. Exemplos: `Atlético-MG` vira `atletico mg` e `Atlético Mineiro MG` também vira `atletico mg`.
+
 ---
 
 ## Estrutura do Projeto
@@ -361,11 +367,13 @@ cartola/
     │       ├── application.properties        # Lê variáveis de ambiente com fallback
     │       └── db/migration/
     │           ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
-    │           └── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
+    │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
+    │           └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     └── test/
-        ├── java/                            # 16 classes de teste — ~120 cenários
+        ├── java/                            # 18 classes de teste — ~250 cenários
         └── resources/
-            └── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
+            ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
+            └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
 ```
 
 ---
