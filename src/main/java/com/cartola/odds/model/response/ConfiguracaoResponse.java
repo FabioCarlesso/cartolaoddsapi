@@ -48,6 +48,9 @@ public class ConfiguracaoResponse {
     @Schema(description = "Numero de tecnicos na formacao", example = "1")
     private final int formacaoTec;
 
+    @Schema(description = "Impede repetir clubes entre titulares GOL, LAT e ZAG", example = "true")
+    private final boolean evitarMesmoClubeDefesa;
+
     @Schema(description = "Data e hora da ultima atualizacao")
     private final LocalDateTime updatedAt;
 
@@ -65,6 +68,7 @@ public class ConfiguracaoResponse {
                 .formacaoMei(c.getFormacaoMei())
                 .formacaoAta(c.getFormacaoAta())
                 .formacaoTec(c.getFormacaoTec())
+                .evitarMesmoClubeDefesa(c.isEvitarMesmoClubeDefesa())
                 .updatedAt(c.getUpdatedAt())
                 .build();
     }

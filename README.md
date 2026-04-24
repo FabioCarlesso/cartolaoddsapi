@@ -10,14 +10,15 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 |---|---|---|
 | 1 | **Cache Caffeine** | Respostas das APIs externas cacheadas em memória (10–60 min) |
 | 2 | **Invalidação de Cache** | Endpoint `DELETE /api/cache` para forçar atualização imediata dos dados |
-| 3 | **Configuração via Banco** | Parâmetros de negócio (odd limite, pesos, formação) gerenciados via banco de dados |
+| 3 | **Configuração via Banco** | Parâmetros de negócio (odd limite, pesos, formação e regras) gerenciados via banco de dados |
 | 4 | **Config em Runtime** | `PATCH /api/config` atualiza parâmetros sem restart; `POST /api/config/reset` restaura defaults |
 | 5 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
 | 6 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
 | 7 | **5 Grupos de Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache`, `/api/config` |
 | 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
 | 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
-| 10 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 10 | **Defesa sem Clube Repetido** | Regra configurável evita repetir clubes entre GOL, LAT e ZAG |
+| 11 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 
 
 ---
@@ -138,7 +139,7 @@ Edite `src/main/resources/application.properties`:
 odds.api.key=SUA_API_KEY_AQUI
 ```
 
-> **Parâmetros de negócio** (odd limite, pesos, formação) são gerenciados via banco de dados.
+> **Parâmetros de negócio** (odd limite, pesos, formação e regras) são gerenciados via banco de dados.
 > Use `PATCH /api/config` para ajustá-los em runtime após subir a aplicação.
 
 ### Via variáveis de ambiente (produção / Docker)
@@ -154,7 +155,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
 | `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
 
-> **Parâmetros de negócio (odd limite, pesos, formação):** gerenciados via banco de dados.
+> **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
 > Use `PATCH /api/config` para atualizar em runtime ou `POST /api/config/reset` para restaurar os defaults.
 
@@ -177,7 +178,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | `GET` | `/api/ranking?posicao=MEI&limite=10` | Top 10 meias |
 | `DELETE` | `/api/cache` | Invalida todos os caches imediatamente |
 | `DELETE` | `/api/cache/{nome}` | Invalida um cache específico pelo nome |
-| `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação) |
+| `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |
 | `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
@@ -315,6 +316,14 @@ Fallback automático para `mediaPontos` da temporada quando o histórico não es
 
 Cada slot seleciona exclusivamente dentro da sua posição. Reservas são sempre prováveis, da mesma posição e preferencialmente mais baratos.
 
+### Defesa sem clube repetido
+
+Quando `evitarMesmoClubeDefesa=true` (padrão), o montador não repete clubes entre os titulares de `GOL`, `LAT` e `ZAG`. A regra pode ser desligada em runtime com `PATCH /api/config`:
+
+```json
+{ "evitarMesmoClubeDefesa": false }
+```
+
 ---
 
 ## Estrutura do Projeto
@@ -380,12 +389,13 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 12 — filtros de status/preço/favorito |
 | `ScoreServiceTest` | 16 — pesos, bônus, desempenho real vs proxy, fallback |
-| `MontadorTimeServiceTest` | 13 — formação, capitão, dúvidas, reservas |
+| `MontadorTimeServiceTest` | 20 — formação, regra de defesa, capitão, dúvidas, reservas |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
-| `ConfiguracaoControllerTest` | 9 — GET config, PATCH (válido/inválido), POST reset |
+| `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
+| `ConfiguracaoServiceTest` | 2 — atualização/reset da regra de defesa |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 7 — HTTP completo |

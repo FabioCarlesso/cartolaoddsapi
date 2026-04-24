@@ -57,7 +57,8 @@ class ConfiguracaoControllerTest {
                     .andExpect(jsonPath("$.formacaoZag").value(2))
                     .andExpect(jsonPath("$.formacaoMei").value(3))
                     .andExpect(jsonPath("$.formacaoAta").value(3))
-                    .andExpect(jsonPath("$.formacaoTec").value(1));
+                    .andExpect(jsonPath("$.formacaoTec").value(1))
+                    .andExpect(jsonPath("$.evitarMesmoClubeDefesa").value(true));
         }
 
         @Test
@@ -103,6 +104,19 @@ class ConfiguracaoControllerTest {
                                 }
                                 """))
                     .andExpect(status().isOk());
+        }
+
+        @Test
+        @DisplayName("deve retornar 200 ao atualizar regra de defesa")
+        void deveAtualizarRegraDefesa() throws Exception {
+            when(configuracaoService.atualizar(any())).thenReturn(responsePadrao);
+
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"evitarMesmoClubeDefesa\": false}"))
+                    .andExpect(status().isOk());
+
+            verify(configuracaoService).atualizar(any());
         }
 
         @Test

@@ -58,6 +58,9 @@ public class Configuracao {
     @Column(name = "formacao_tec", nullable = false)
     private int formacaoTec;
 
+    @Column(name = "evitar_mesmo_clube_defesa", nullable = false)
+    private boolean evitarMesmoClubeDefesa;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -87,6 +90,7 @@ public class Configuracao {
         c.setFormacaoMei(3);
         c.setFormacaoAta(3);
         c.setFormacaoTec(1);
+        c.setEvitarMesmoClubeDefesa(true);
         c.setUpdatedAt(LocalDateTime.now());
         return c;
     }

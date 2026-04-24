@@ -72,6 +72,9 @@ public class ConfiguracaoService {
         if (req.getFormacaoMei()      != null) config.setFormacaoMei(req.getFormacaoMei());
         if (req.getFormacaoAta()      != null) config.setFormacaoAta(req.getFormacaoAta());
         if (req.getFormacaoTec()      != null) config.setFormacaoTec(req.getFormacaoTec());
+        if (req.getEvitarMesmoClubeDefesa() != null) {
+            config.setEvitarMesmoClubeDefesa(req.getEvitarMesmoClubeDefesa());
+        }
     }
 
     private void validarPesos(Configuracao config) {
@@ -99,5 +102,6 @@ public class ConfiguracaoService {
         config.setFormacaoMei(3);
         config.setFormacaoAta(3);
         config.setFormacaoTec(1);
+        config.setEvitarMesmoClubeDefesa(true);
     }
 }

@@ -66,4 +66,7 @@ public class ConfiguracaoRequest {
     @Min(value = 0, message = "Quantidade de TEC deve ser >= 0")
     @Schema(description = "Numero de tecnicos na formacao", example = "1")
     private Integer formacaoTec;
+
+    @Schema(description = "Impede repetir clubes entre titulares GOL, LAT e ZAG", example = "true")
+    private Boolean evitarMesmoClubeDefesa;
 }

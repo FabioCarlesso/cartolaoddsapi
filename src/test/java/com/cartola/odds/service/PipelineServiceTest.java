@@ -75,7 +75,7 @@ class PipelineServiceTest {
             verify(cartolaDataService, times(1)).buscarTimesCasa();
             verify(desempenhoService,  times(1)).calcularMediaUltimasRodadas(15);
             verify(scoreService,       times(1)).calcularScores(any(), any(), any(), any());
-            verify(montadorTimeService,times(1)).montar(any(), eq(15));
+            verify(montadorTimeService,times(1)).montar(any(), eq(15), any());
         }
 
         @Test
@@ -126,7 +126,7 @@ class PipelineServiceTest {
 
             verify(desempenhoService, never()).calcularMediaUltimasRodadas(anyInt());
             verify(scoreService,      never()).calcularScores(any(), any(), any(), any());
-            verify(montadorTimeService, never()).montar(any(), anyInt());
+            verify(montadorTimeService, never()).montar(any(), anyInt(), any());
         }
 
         @Test

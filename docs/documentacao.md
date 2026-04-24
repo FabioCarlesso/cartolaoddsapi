@@ -148,12 +148,13 @@ server.port=8080
 
 ### 3.2 Parâmetros de Negócio via Banco de Dados
 
-Os parâmetros de negócio (odd limite, pesos do score, formação) são armazenados na tabela `configuracao` do PostgreSQL e gerenciados via API REST — sem necessidade de restart.
+Os parâmetros de negócio (odd limite, pesos do score, formação e regras) são armazenados na tabela `configuracao` do PostgreSQL e gerenciados via API REST — sem necessidade de restart.
 
 **Migrations Flyway:**
 
 - `V1__create_configuracao.sql` — cria a tabela com valores padrão (colunas `NUMERIC`)
 - `V2__alter_configuracao_numeric_to_double.sql` — converte as colunas de pesos/odds para `DOUBLE PRECISION` (necessário para compatibilidade com o mapeamento Hibernate de `double`)
+- `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para evitar clubes repetidos entre GOL, LAT e ZAG
 
 ```sql
 -- V1: estrutura inicial
@@ -171,6 +172,7 @@ CREATE TABLE configuracao (
     formacao_mei     INT  NOT NULL DEFAULT 3,
     formacao_ata     INT  NOT NULL DEFAULT 3,
     formacao_tec     INT  NOT NULL DEFAULT 1,
+    evitar_mesmo_clube_defesa BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_single_row CHECK (id = 1)
 );
@@ -199,6 +201,7 @@ CREATE TABLE configuracao (
   "formacaoMei": 3,
   "formacaoAta": 3,
   "formacaoTec": 1,
+  "evitarMesmoClubeDefesa": true,
   "updatedAt": "2025-06-01T15:30:00"
 }
 ```
@@ -208,6 +211,7 @@ CREATE TABLE configuracao (
 - Pesos devem ser `>= 0.0` e `<= 1.0`
 - Quando todos os pesos são enviados, a soma deve ser `1.0` (tolerância `±0.01`)
 - Formações devem ser `>= 1`
+- `evitarMesmoClubeDefesa` ativa/desativa a regra de não repetir clubes entre GOL, LAT e ZAG
 
 **Cache:** a configuração é cacheada no Caffeine (`configuracao` cache). `PATCH` e `POST /reset` invalidam o cache automaticamente via `@CacheEvict`.
 
@@ -378,6 +382,10 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 - Preferencialmente mais baratos que o titular mais caro da posição.
 - Fallback: qualquer provável da posição se nenhum mais barato existir.
 - Sempre da **mesma posição individual** do titular (LAT reserva LAT, ZAG reserva ZAG).
+
+### 5.6 Defesa sem Clube Repetido
+
+Quando `evitarMesmoClubeDefesa=true` (padrão), a seleção de titulares não repete clubes entre `GOL`, `LAT` e `ZAG`. O montador percorre os candidatos por score e pula defensores cujo clube já tenha sido usado nessas posições. A regra não limita `MEI`, `ATA` ou `TEC` e pode ser desligada via `PATCH /api/config`.
 
 ### 5.6 Capitão e Reserva de Luxo
 
@@ -614,8 +622,8 @@ Retorna IDs dos times mandantes da rodada atual.
 ### `ScoreService.calcularScores(atletas, timesCasa, favoritos) → List<Atleta>`
 Retorna nova lista imutável com campo `score` preenchido para cada atleta.
 
-### `MontadorTimeService.montar(pool, rodada) → Time`
-Seleciona titulares, reservas, capitão, reserva de luxo e substitutos.  
+### `MontadorTimeService.montar(pool, rodada, avisoMercado) → Time`
+Seleciona titulares, aplica a regra configurável de defesa sem clube repetido, reservas, capitão, reserva de luxo e substitutos.
 Retorna `Time` completo com alertas de dúvida.
 
 
@@ -710,13 +718,14 @@ Remove acentos (Unicode NFD), converte para lowercase, remove caracteres especia
 | `FavoritosControllerTest` | Web (MockMvc) | HTTP 200/400/502, campos favorito/descartado, validação oddLimite |
 | `RankingControllerTest` | Web (MockMvc) | HTTP completo com filtros posição e limite |
 | `CacheControllerTest` | Web (MockMvc) | DELETE todos / DELETE por nome / 400 nome inválido |
-| `ConfiguracaoControllerTest` | Web (MockMvc) | GET config, PATCH (válido/inválido/soma), POST reset |
+| `ConfiguracaoControllerTest` | Web (MockMvc) | GET config, PATCH (válido/inválido/soma/regra de defesa), POST reset |
+| `ConfiguracaoServiceTest` | Unitário (Mockito) | Atualização e reset da regra de defesa |
 | `AtletaTest` | Unitário | `formatado()`, `isDuvida()`, `isProvavel()`, imutabilidade `@With` |
 | `EnumsTest` | Unitário | `fromId()`, `fromSigla()`, `isEscalavel()`, `idsEscalaveis()` para todos os valores |
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
-| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, capitão, reserva de luxo, reservas por posição, dúvidas com substituto |
+| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, capitão, reserva de luxo, reservas por posição, dúvidas com substituto |
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
@@ -741,7 +750,7 @@ mvn test jacoco:report
 [INFO] Tests run: 10, Failures: 0, Errors: 0, Skipped: 0 -- OddsServiceTest
 [INFO] Tests run: 12, Failures: 0, Errors: 0, Skipped: 0 -- CartolaDataServiceTest
 [INFO] Tests run: 11, Failures: 0, Errors: 0, Skipped: 0 -- ScoreServiceTest
-[INFO] Tests run: 13, Failures: 0, Errors: 0, Skipped: 0 -- MontadorTimeServiceTest
+[INFO] Tests run: 20, Failures: 0, Errors: 0, Skipped: 0 -- MontadorTimeServiceTest
 [INFO] Tests run:  8, Failures: 0, Errors: 0, Skipped: 0 -- PipelineServiceTest
 [INFO] Tests run:  7, Failures: 0, Errors: 0, Skipped: 0 -- TimeControllerTest
 [INFO] Tests run:  5, Failures: 0, Errors: 0, Skipped: 0 -- AtletaTest

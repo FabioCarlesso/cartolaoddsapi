@@ -21,14 +21,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
  * Contrato REST do endpoint de configuracao de parametros.
  * Toda a documentacao Swagger fica aqui — a implementacao fica limpa.
  */
-@Tag(name = "Configuracao", description = "Gerenciamento dos parametros de negocio em runtime (odd limite, pesos do score, formacao)")
+@Tag(name = "Configuracao", description = "Gerenciamento dos parametros de negocio em runtime (odd limite, pesos do score, formacao e regras)")
 @RequestMapping("/api/config")
 public interface ConfiguracaoApi {
 
     @GetMapping
     @Operation(
         summary     = "Consultar configuracao ativa",
-        description = "Retorna os parametros de negocio ativos no momento: odd limite, pesos do score ponderado e formacao."
+        description = "Retorna os parametros de negocio ativos no momento: odd limite, pesos do score ponderado, formacao e regras."
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Configuracao retornada com sucesso",
@@ -49,6 +49,7 @@ public interface ConfiguracaoApi {
             - `oddLimite` deve ser > 1.0
             - Cada peso deve estar entre 0.0 e 1.0
             - A **soma dos 5 pesos** deve ser exatamente 1.0 (tolerancia ±0.01)
+            - `evitarMesmoClubeDefesa` ativa/desativa a regra de nao repetir clubes entre GOL, LAT e ZAG
 
             **Efeito imediato:** o cache de configuracao e invalidado apos a atualizacao.
             A proxima chamada a qualquer endpoint ja usa os novos valores.
@@ -72,6 +73,7 @@ public interface ConfiguracaoApi {
             - `oddLimite`: 3.0
             - Pesos: mediaPontos=0.40, valorizacao=0.20, desempenho=0.20, fatorCasa=0.10, timeFavorito=0.10
             - Formacao: GOL=1, LAT=2, ZAG=2, MEI=3, ATA=3, TEC=1
+            - Regra de defesa: evitarMesmoClubeDefesa=true
             """
     )
     @ApiResponses({

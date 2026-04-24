@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -26,6 +27,8 @@ public class MontadorTimeService {
     private static final List<Posicao> PRIORIDADE_CAPITAO =
             List.of(Posicao.ATA, Posicao.MEI, Posicao.ZAG, Posicao.LAT, Posicao.GOL, Posicao.TEC);
 
+    private static final Set<Posicao> POSICOES_DEFESA = Set.of(Posicao.GOL, Posicao.LAT, Posicao.ZAG);
+
     private final ConfiguracaoService configuracaoService;
 
     public Time montar(List<Atleta> pool, int rodada, String avisoMercado) {
@@ -36,6 +39,7 @@ public class MontadorTimeService {
 
         Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
         Map<Posicao, Atleta>       reservas  = new EnumMap<>(Posicao.class);
+        Set<Integer> clubesDefesaEscalados = new HashSet<>();
 
         for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
@@ -54,8 +58,7 @@ public class MontadorTimeService {
                 continue;
             }
 
-            List<Atleta> escolhidos = new ArrayList<>(
-                    candidatos.subList(0, Math.min(qtd, candidatos.size())));
+            List<Atleta> escolhidos = escolherTitulares(candidatos, qtd, posicao, config, clubesDefesaEscalados);
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
                     escolhidos.stream().map(Atleta::getApelido).toList());
@@ -70,7 +73,6 @@ public class MontadorTimeService {
                     .collect(Collectors.toSet());
 
             List<Atleta> restantes = candidatos.stream()
-                    .skip(qtd)
                     .filter(a -> !apelidosTitulares.contains(a.getApelido()))
                     .filter(a -> a.getStatus() == StatusAtleta.PROVAVEL)
                     .toList();
@@ -157,5 +159,32 @@ public class MontadorTimeService {
                 .alertasDuvida(alertas)
                 .custoTotal(custoTotal)
                 .build();
+    }
+
+    private List<Atleta> escolherTitulares(List<Atleta> candidatos,
+                                           int quantidade,
+                                           Posicao posicao,
+                                           Configuracao config,
+                                           Set<Integer> clubesDefesaEscalados) {
+        if (!config.isEvitarMesmoClubeDefesa() || !POSICOES_DEFESA.contains(posicao)) {
+            return new ArrayList<>(candidatos.subList(0, Math.min(quantidade, candidatos.size())));
+        }
+
+        List<Atleta> escolhidos = new ArrayList<>();
+        for (Atleta candidato : candidatos) {
+            if (escolhidos.size() == quantidade) {
+                break;
+            }
+            if (clubesDefesaEscalados.add(candidato.getClubeId())) {
+                escolhidos.add(candidato);
+            }
+        }
+
+        if (escolhidos.size() < quantidade) {
+            log.warn("Regra de defesa sem clube repetido limitou {} para {}/{} titulares",
+                    posicao, escolhidos.size(), quantidade);
+        }
+
+        return escolhidos;
     }
 }
