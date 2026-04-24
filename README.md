@@ -351,7 +351,8 @@ cartola/
     │   └── resources/
     │       ├── application.properties        # Lê variáveis de ambiente com fallback
     │       └── db/migration/
-    │           └── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │           ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │           └── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
     └── test/
         ├── java/                            # 16 classes de teste — ~120 cenários
         └── resources/

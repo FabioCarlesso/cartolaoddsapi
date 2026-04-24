@@ -12,16 +12,17 @@ API REST que monta automaticamente um time competitivo para o Cartola FC cruzand
 1. [Stack e Dependências](#1-stack-e-dependências)
 2. [APIs Externas](#2-apis-externas)
 3. [Configuração](#3-configuração)
-4. [Regras de Negócio](#4-regras-de-negócio)
-5. [Fluxo de Execução](#5-fluxo-de-execução)
-6. [Estrutura do Projeto](#6-estrutura-do-projeto)
-7. [Referência de Funções](#7-referência-de-funções)
-8. [Referência de Dados](#8-referência-de-dados)
-9. [Testes](#9-testes)
-10. [Swagger / OpenAPI](#10-swagger--openapi)
-11. [Docker](#11-docker)
-12. [Como Executar](#12-como-executar)
-12. [Melhorias Futuras](#12-melhorias-futuras)
+4. [Cache (Caffeine)](#4-cache-caffeine)
+5. [Regras de Negócio](#5-regras-de-negócio)
+6. [Fluxo de Execução](#6-fluxo-de-execução)
+7. [Estrutura do Projeto](#7-estrutura-do-projeto)
+8. [Referência de Funções](#8-referência-de-funções)
+9. [Referência de Dados](#9-referência-de-dados)
+10. [Testes](#10-testes)
+11. [Swagger / OpenAPI](#11-swagger--openapi)
+12. [Docker](#12-docker)
+13. [Como Executar](#13-como-executar)
+14. [Melhorias Futuras](#14-melhorias-futuras)
 
 ---
 
@@ -149,17 +150,21 @@ server.port=8080
 
 Os parâmetros de negócio (odd limite, pesos do score, formação) são armazenados na tabela `configuracao` do PostgreSQL e gerenciados via API REST — sem necessidade de restart.
 
-**Migration Flyway:** `src/main/resources/db/migration/V1__create_configuracao.sql`
+**Migrations Flyway:**
+
+- `V1__create_configuracao.sql` — cria a tabela com valores padrão (colunas `NUMERIC`)
+- `V2__alter_configuracao_numeric_to_double.sql` — converte as colunas de pesos/odds para `DOUBLE PRECISION` (necessário para compatibilidade com o mapeamento Hibernate de `double`)
 
 ```sql
+-- V1: estrutura inicial
 CREATE TABLE configuracao (
     id               BIGINT PRIMARY KEY,
-    odd_limite       NUMERIC(5,2)  NOT NULL DEFAULT 3.00,
-    peso_media_pontos NUMERIC(5,3) NOT NULL DEFAULT 0.400,
-    peso_valorizacao NUMERIC(5,3)  NOT NULL DEFAULT 0.200,
-    peso_desempenho  NUMERIC(5,3)  NOT NULL DEFAULT 0.200,
-    peso_fator_casa  NUMERIC(5,3)  NOT NULL DEFAULT 0.100,
-    peso_time_favorito NUMERIC(5,3) NOT NULL DEFAULT 0.100,
+    odd_limite       DOUBLE PRECISION NOT NULL DEFAULT 3.00,
+    peso_media_pontos DOUBLE PRECISION NOT NULL DEFAULT 0.400,
+    peso_valorizacao DOUBLE PRECISION NOT NULL DEFAULT 0.200,
+    peso_desempenho  DOUBLE PRECISION NOT NULL DEFAULT 0.200,
+    peso_fator_casa  DOUBLE PRECISION NOT NULL DEFAULT 0.100,
+    peso_time_favorito DOUBLE PRECISION NOT NULL DEFAULT 0.100,
     formacao_gol     INT  NOT NULL DEFAULT 1,
     formacao_lat     INT  NOT NULL DEFAULT 2,
     formacao_zag     INT  NOT NULL DEFAULT 2,
@@ -319,7 +324,7 @@ DELETE /api/cache/{nome}
 
 ## 5. Regras de Negócio
 
-### 4.1 Identificação de Times Favoritos
+### 5.1 Identificação de Times Favoritos
 
 1. Para cada jogo, seleciona o time com **menor odd** (maior probabilidade de vitória).
 2. Aplica `ODD_LIMITE` (padrão `3.0`):
@@ -335,7 +340,7 @@ Fortaleza x Bahia → odds: FOR 3.30 / BAH 3.40
 Favorito: Fortaleza (3.30 > 3.0) ⛔ descartado
 ```
 
-### 4.2 Filtros de Atletas
+### 5.2 Filtros de Atletas
 
 | Filtro | Regra | Fallback |
 |---|---|---|
@@ -344,7 +349,7 @@ Favorito: Fortaleza (3.30 > 3.0) ⛔ descartado
 | Time favorito | Clube em `favoritos_norm` | Descartado |
 | Sem odds | `favoritos_norm` vazio | Filtro desativado — usa todos os elegíveis |
 
-### 4.3 Fórmula do Score
+### 5.3 Fórmula do Score
 
 ```
 score = (mediaPontos  × 0.40)
@@ -354,7 +359,7 @@ score = (mediaPontos  × 0.40)
       + (timeFavorito × 0.10)   ← 10.0 se favorito pelas odds, 0 caso contrário
 ```
 
-### 4.4 Formação 4-3-3
+### 5.4 Formação 4-3-3
 
 | Slot | `posicao_id` | Qtd | Pool elegível |
 |---|---|---|---|
@@ -367,20 +372,20 @@ score = (mediaPontos  × 0.40)
 
 Cada slot seleciona **exclusivamente** dentro da sua posição.
 
-### 4.5 Seleção de Reservas
+### 5.5 Seleção de Reservas
 
 - Somente `status == PROVAVEL` (7) — dúvidas não são reservas.
 - Preferencialmente mais baratos que o titular mais caro da posição.
 - Fallback: qualquer provável da posição se nenhum mais barato existir.
 - Sempre da **mesma posição individual** do titular (LAT reserva LAT, ZAG reserva ZAG).
 
-### 4.6 Capitão e Reserva de Luxo
+### 5.6 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
 - **Reserva de Luxo:** segundo maior score global (qualquer posição)
 - O capitão tem pontuação **dobrada** no Cartola FC.
 
-### 4.7 Tratamento de Dúvidas
+### 5.7 Tratamento de Dúvidas
 
 - Titulares com `status_id == 6` são escalados, mas marcados com `⚠️ DÚVIDA`.
 - Sistema busca o melhor substituto `PROVAVEL` na **mesma posição individual**.
@@ -388,7 +393,7 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
 
-### 4.9 Endpoint de Ranking (`GET /api/ranking`)
+### 5.8 Endpoint de Ranking (`GET /api/ranking`)
 
 Retorna os melhores atletas disponíveis ordenados por score decrescente.  
 Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
@@ -405,7 +410,7 @@ Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
 - Atletas em dúvida aparecem com `emDuvida: true` no response
 
 
-### 4.10 Endpoint de Favoritos (`GET /api/favoritos`)
+### 5.9 Endpoint de Favoritos (`GET /api/favoritos`)
 
 Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
@@ -426,7 +431,7 @@ Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
 **Validação:** `oddLimite <= 1.0` retorna HTTP 400 (odd de 1.0 ou menos é matematicamente impossível em apostas reais).
 
-### 4.8 Normalização de Nomes
+### 5.10 Normalização de Nomes
 
 ```java
 // Remove acentos, converte para lowercase, elimina especiais
@@ -552,7 +557,8 @@ cartola/
     ├── main/resources/
     │   ├── application.properties
     │   └── db/migration/
-    │       └── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
+    │       └── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
     └── test/
         ├── java/com/cartola/odds/
         │   ├── CartolaOddsApplicationTests.java
@@ -783,7 +789,7 @@ mvn test jacoco:report
 
 ## 12. Docker
 
-### 11.1 Arquivos
+### 12.1 Arquivos
 
 | Arquivo | Descrição |
 |---|---|
@@ -793,7 +799,7 @@ mvn test jacoco:report
 | `.dockerignore` | Exclui `target/`, `src/test/`, `docs/` e arquivos de IDE do contexto |
 | `application.properties` | Lê variáveis de ambiente com fallback para valores padrão |
 
-### 11.2 Dockerfile — Multi-stage Build
+### 12.2 Dockerfile — Multi-stage Build
 
 ```
 Stage 1 — build (eclipse-temurin:21-jdk-alpine)
@@ -814,7 +820,7 @@ Stage 2 — runtime (eclipse-temurin:21-jre-alpine)
 - **`-XX:+UseContainerSupport`** — JVM respeita os limites de CPU/memória do container
 - **`-XX:MaxRAMPercentage=75.0`** — usa até 75% da RAM disponível para o heap Java
 
-### 11.3 Variáveis de Ambiente
+### 12.3 Variáveis de Ambiente
 
 O `application.properties` usa sintaxe `${VAR:default}` para ler variáveis do ambiente com fallback:
 
@@ -838,7 +844,7 @@ spring.datasource.password=${SPRING_DATASOURCE_PASSWORD:cartola}
 
 > Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via `PATCH /api/config` — não precisam de variáveis de ambiente.
 
-### 11.4 Comandos
+### 12.4 Comandos
 
 ```bash
 # Início rápido
@@ -870,7 +876,7 @@ docker run -p 8080:8080 \
   cartola-odds:1.0.0
 ```
 
-### 11.5 Resource Limits (docker-compose.yml)
+### 12.5 Resource Limits (docker-compose.yml)
 
 ```yaml
 deploy:
@@ -885,7 +891,7 @@ deploy:
 
 Ajuste conforme o ambiente de destino. Para produção com carga alta, considere `memory: 768m`.
 
-### 11.6 Healthcheck
+### 12.6 Healthcheck
 
 O container verifica automaticamente se a aplicação está respondendo a cada 30 segundos:
 
@@ -916,18 +922,16 @@ mvn spring-boot:run
 
 ---
 
-## 13. Melhorias Futuras
+## 14. Melhorias Futuras
 
 ### Dados e Algoritmos
-- [ ] Substituir proxy de desempenho pela **média real das últimas 5 rodadas** via `/atletas/pontuados`
 - [ ] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
 - [ ] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
 - [ ] Ponderar a odd como **variável contínua** em vez de bônus binário
 
 ### Infraestrutura
-- [ ] **Cache** das respostas com Spring Cache + Caffeine (TTL 1h)
 - [ ] **Retry** com backoff exponencial via Spring Retry
-- [ ] **Endpoint** `GET /api/atletas?posicao=ATA` para exploração por posição
+- [ ] **Métricas** com Spring Actuator + Micrometer
 - [ ] **Cobertura de testes** com JaCoCo + relatório HTML
 
 ### Regras de Negócio
@@ -937,7 +941,6 @@ mvn spring-boot:run
 
 ### Qualidade
 - [ ] **Testes de integração** com WireMock simulando as APIs externas
-- [ ] **Métricas** com Spring Actuator + Micrometer
 
 ---
 
