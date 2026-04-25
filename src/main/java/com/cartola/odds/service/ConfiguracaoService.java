@@ -75,6 +75,9 @@ public class ConfiguracaoService {
         if (req.getEvitarMesmoClubeDefesa() != null) {
             config.setEvitarMesmoClubeDefesa(req.getEvitarMesmoClubeDefesa());
         }
+        if (req.getLimiteAtletasPorClube() != null) {
+            config.setLimiteAtletasPorClube(req.getLimiteAtletasPorClube());
+        }
     }
 
     private void validarPesos(Configuracao config) {
@@ -103,5 +106,6 @@ public class ConfiguracaoService {
         config.setFormacaoAta(3);
         config.setFormacaoTec(1);
         config.setEvitarMesmoClubeDefesa(true);
+        config.setLimiteAtletasPorClube(4);
     }
 }

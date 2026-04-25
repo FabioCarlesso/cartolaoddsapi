@@ -61,6 +61,9 @@ public class Configuracao {
     @Column(name = "evitar_mesmo_clube_defesa", nullable = false)
     private boolean evitarMesmoClubeDefesa;
 
+    @Column(name = "limite_atletas_por_clube", nullable = false)
+    private int limiteAtletasPorClube;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -91,6 +94,7 @@ public class Configuracao {
         c.setFormacaoAta(3);
         c.setFormacaoTec(1);
         c.setEvitarMesmoClubeDefesa(true);
+        c.setLimiteAtletasPorClube(4);
         c.setUpdatedAt(LocalDateTime.now());
         return c;
     }

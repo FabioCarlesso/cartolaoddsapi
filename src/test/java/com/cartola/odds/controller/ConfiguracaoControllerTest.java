@@ -58,7 +58,8 @@ class ConfiguracaoControllerTest {
                     .andExpect(jsonPath("$.formacaoMei").value(3))
                     .andExpect(jsonPath("$.formacaoAta").value(3))
                     .andExpect(jsonPath("$.formacaoTec").value(1))
-                    .andExpect(jsonPath("$.evitarMesmoClubeDefesa").value(true));
+                    .andExpect(jsonPath("$.evitarMesmoClubeDefesa").value(true))
+                    .andExpect(jsonPath("$.limiteAtletasPorClube").value(4));
         }
 
         @Test
@@ -120,6 +121,19 @@ class ConfiguracaoControllerTest {
         }
 
         @Test
+        @DisplayName("deve retornar 200 ao atualizar limite de atletas por clube")
+        void deveAtualizarLimiteAtletasPorClube() throws Exception {
+            when(configuracaoService.atualizar(any())).thenReturn(responsePadrao);
+
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"limiteAtletasPorClube\": 5}"))
+                    .andExpect(status().isOk());
+
+            verify(configuracaoService).atualizar(any());
+        }
+
+        @Test
         @DisplayName("deve retornar 400 para oddLimite <= 1.0")
         void deveRetornar400ParaOddLimiteInvalido() throws Exception {
             mockMvc.perform(patch("/api/config")
@@ -143,6 +157,15 @@ class ConfiguracaoControllerTest {
             mockMvc.perform(patch("/api/config")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"pesoMediaPontos\": 1.5}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 para limiteAtletasPorClube < 1")
+        void deveRetornar400ParaLimiteAtletasPorClubeInvalido() throws Exception {
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"limiteAtletasPorClube\": 0}"))
                     .andExpect(status().isBadRequest());
         }
 

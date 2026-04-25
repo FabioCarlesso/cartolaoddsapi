@@ -18,8 +18,10 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
 | 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
 | 10 | **Defesa sem Clube Repetido** | Regra configurável evita repetir clubes entre GOL, LAT e ZAG |
-| 11 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
-| 12 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 11 | **Limite por Clube** | Time titular respeita no máximo 4 atletas do mesmo clube (incluindo TEC) |
+| 12 | **Reserva de Luxo por Reserva** | Reserva de luxo é sempre a reserva com maior score |
+| 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
+| 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 
 
 ---
@@ -327,6 +329,17 @@ Quando `evitarMesmoClubeDefesa=true` (padrão), o montador não repete clubes en
 ```
 
 Quando não há candidatos suficientes sem repetição (ex: poucos clubes disponíveis na rodada), o montador completa a posição com os melhores atletas restantes, garantindo que a formação nunca fique incompleta.
+
+### Limite máximo por clube (incluindo treinador)
+
+Na escalação titular, o montador respeita **no máximo 4 atletas do mesmo clube**, considerando todas as posições, inclusive `TEC`.
+Esse valor é configurável em runtime via `PATCH /api/config` com o campo `limiteAtletasPorClube` (default `4`).
+Quando o limite impedir a escalação completa em uma posição, o montador tenta completar com atletas de outros clubes; em último caso, relaxa a regra para manter a formação completa.
+
+### Capitão e Reserva de Luxo
+
+- **Capitão:** titular com maior score global.
+- **Reserva de Luxo:** atleta de maior score entre todas as **reservas**.
 
 ### Normalização de nomes de clubes
 

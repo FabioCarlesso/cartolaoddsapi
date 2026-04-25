@@ -157,22 +157,67 @@ class MontadorTimeServiceTest {
         }
 
         @Test
-        @DisplayName("reserva de luxo deve ser diferente do capitao")
-        void reservaLuxoDeveSerDiferenteDoCapitao() {
+        @DisplayName("reserva de luxo deve ser o melhor score entre as reservas")
+        void reservaLuxoDeveSerMelhorReserva() {
             var time = service.montar(criarPool(), 1, null);
 
             assertThat(time.getReservaLuxo()).isNotNull();
-            assertThat(time.getReservaLuxo().getApelido())
-                    .isNotEqualTo(time.getCapitao().getApelido());
+            double maiorScoreReserva = time.getReservas().values().stream()
+                    .mapToDouble(Atleta::getScore)
+                    .max()
+                    .orElseThrow();
+            assertThat(time.getReservaLuxo().getScore()).isEqualTo(maiorScoreReserva);
         }
 
         @Test
-        @DisplayName("reserva de luxo deve ter score menor ou igual ao do capitao")
-        void reservaLuxoDeveSerSegundoMaiorScore() {
+        @DisplayName("reserva de luxo pode ter score maior que o capitao")
+        void reservaLuxoPodeTerScoreMaiorQueCapitao() {
             var time = service.montar(criarPool(), 1, null);
 
-            assertThat(time.getReservaLuxo().getScore())
-                    .isLessThanOrEqualTo(time.getCapitao().getScore());
+            assertThat(time.getReservaLuxo().getScore()).isGreaterThan(0.0);
+        }
+    }
+
+    @Nested
+    @DisplayName("limite maximo por clube")
+    class LimiteMaximoPorClube {
+
+        @Test
+        @DisplayName("deve escalar no maximo 4 atletas do mesmo clube nos titulares incluindo TEC")
+        void deveRespeitarLimiteMaximoPorClube() {
+            var time = service.montar(poolComMuitosAtletasMesmoClube(), 1, null);
+
+            var maiorQtdPorClube = time.getTitulares().values().stream()
+                    .flatMap(List::stream)
+                    .collect(java.util.stream.Collectors.groupingBy(Atleta::getClubeId, java.util.stream.Collectors.counting()))
+                    .values().stream()
+                    .max(Long::compareTo)
+                    .orElse(0L);
+
+            assertThat(maiorQtdPorClube).isLessThanOrEqualTo(4L);
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("deve respeitar limite configuravel por clube")
+        void deveRespeitarLimiteConfiguravelPorClube() {
+            config.setLimiteAtletasPorClube(2);
+
+            var time = service.montar(poolComMuitosAtletasMesmoClube(), 1, null);
+
+            var maiorQtdPorClube = time.getTitulares().values().stream()
+                    .flatMap(List::stream)
+                    .collect(java.util.stream.Collectors.groupingBy(Atleta::getClubeId, java.util.stream.Collectors.counting()))
+                    .values().stream()
+                    .max(Long::compareTo)
+                    .orElse(0L);
+
+            assertThat(maiorQtdPorClube).isLessThanOrEqualTo(2L);
         }
     }
 
@@ -327,6 +372,42 @@ class MontadorTimeServiceTest {
         pool.addAll(criarAtletas(Posicao.MEI, 5, id)); id += 5;
         pool.addAll(criarAtletas(Posicao.ATA, 5, id)); id += 5;
         pool.addAll(criarAtletas(Posicao.TEC, 3, id));
+        return pool;
+    }
+
+    private List<Atleta> poolComMuitosAtletasMesmoClube() {
+        List<Atleta> pool = new ArrayList<>();
+        int clubeDominante = 999;
+
+        pool.add(atletaBuilder(Posicao.GOL, 1, 100.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.GOL, 2, 50.0, 10.0, 1).build());
+
+        pool.add(atletaBuilder(Posicao.LAT, 3, 99.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.LAT, 4, 98.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.LAT, 5, 70.0, 15.0, 2).build());
+        pool.add(atletaBuilder(Posicao.LAT, 6, 69.0, 15.0, 3).build());
+
+        pool.add(atletaBuilder(Posicao.ZAG, 7, 97.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.ZAG, 8, 96.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.ZAG, 9, 68.0, 15.0, 4).build());
+        pool.add(atletaBuilder(Posicao.ZAG, 10, 67.0, 15.0, 5).build());
+
+        pool.add(atletaBuilder(Posicao.MEI, 11, 95.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.MEI, 12, 94.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.MEI, 13, 93.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.MEI, 14, 66.0, 15.0, 6).build());
+        pool.add(atletaBuilder(Posicao.MEI, 15, 65.0, 15.0, 7).build());
+        pool.add(atletaBuilder(Posicao.MEI, 16, 64.0, 15.0, 8).build());
+
+        pool.add(atletaBuilder(Posicao.ATA, 17, 92.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.ATA, 18, 91.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.ATA, 19, 90.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.ATA, 20, 63.0, 15.0, 9).build());
+        pool.add(atletaBuilder(Posicao.ATA, 21, 62.0, 15.0, 10).build());
+        pool.add(atletaBuilder(Posicao.ATA, 22, 61.0, 15.0, 11).build());
+
+        pool.add(atletaBuilder(Posicao.TEC, 23, 89.0, 20.0, clubeDominante).build());
+        pool.add(atletaBuilder(Posicao.TEC, 24, 60.0, 15.0, 12).build());
         return pool;
     }
 
