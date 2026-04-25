@@ -177,7 +177,7 @@ public class MontadorTimeService {
             }
             if (podeEscalar(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares)) {
                 escolhidos.add(candidato);
-                registrarEscalacao(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares);
+                registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
             }
         }
 
@@ -197,7 +197,7 @@ public class MontadorTimeService {
                 if (escolhidos.size() == quantidade) break;
                 if (apelidosEscolhidos.add(candidato.getApelido())) {
                     escolhidos.add(candidato);
-                    registrarEscalacao(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares);
+                    registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
                 }
             }
         }
@@ -230,11 +230,11 @@ public class MontadorTimeService {
             if (!apelidosEscolhidos.add(candidato.getApelido())) {
                 continue;
             }
-            if (atingiuLimitePorClube(candidato.getClubeId(), config, contagemClubesTitulares)) {
+            if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
                 continue;
             }
             escolhidos.add(candidato);
-            registrarEscalacao(candidato, posicao, null, clubesDefesaEscalados, contagemClubesTitulares);
+            registrarEscalacao(candidato, posicao, false, clubesDefesaEscalados, contagemClubesTitulares);
         }
     }
 
@@ -243,7 +243,7 @@ public class MontadorTimeService {
                                 Configuracao config,
                                 Set<Integer> clubesDefesaEscalados,
                                 Map<Integer, Integer> contagemClubesTitulares) {
-        if (atingiuLimitePorClube(candidato.getClubeId(), config, contagemClubesTitulares)) {
+        if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
             return false;
         }
 
@@ -253,18 +253,18 @@ public class MontadorTimeService {
     }
 
     private boolean atingiuLimitePorClube(int clubeId,
-                                          Configuracao config,
+                                          int limite,
                                           Map<Integer, Integer> contagemClubesTitulares) {
-        return contagemClubesTitulares.getOrDefault(clubeId, 0) >= config.getLimiteAtletasPorClube();
+        return contagemClubesTitulares.getOrDefault(clubeId, 0) >= limite;
     }
 
     private void registrarEscalacao(Atleta atleta,
                                     Posicao posicao,
-                                    Configuracao config,
+                                    boolean atualizarDefesa,
                                     Set<Integer> clubesDefesaEscalados,
                                     Map<Integer, Integer> contagemClubesTitulares) {
         contagemClubesTitulares.merge(atleta.getClubeId(), 1, Integer::sum);
-        if (config != null && config.isEvitarMesmoClubeDefesa() && POSICOES_DEFESA.contains(posicao)) {
+        if (atualizarDefesa && POSICOES_DEFESA.contains(posicao)) {
             clubesDefesaEscalados.add(atleta.getClubeId());
         }
     }
