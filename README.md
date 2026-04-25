@@ -412,7 +412,7 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 12 — filtros de status/preço/favorito |
 | `ScoreServiceTest` | 16 — pesos, bônus, desempenho real vs proxy, fallback |
-| `MontadorTimeServiceTest` | 20 — formação, regra de defesa, capitão, dúvidas, reservas |
+| `MontadorTimeServiceTest` | 24 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |

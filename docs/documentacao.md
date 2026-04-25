@@ -749,7 +749,7 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
-| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo de 4 por clube, capitão, reserva de luxo por reservas, reservas por posição, dúvidas com substituto |
+| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição, dúvidas com substituto |
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
