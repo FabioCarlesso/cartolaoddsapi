@@ -155,6 +155,7 @@ Os parâmetros de negócio (odd limite, pesos do score, formação e regras) sã
 - `V1__create_configuracao.sql` — cria a tabela com valores padrão (colunas `NUMERIC`)
 - `V2__alter_configuracao_numeric_to_double.sql` — converte as colunas de pesos/odds para `DOUBLE PRECISION` (necessário para compatibilidade com o mapeamento Hibernate de `double`)
 - `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para evitar clubes repetidos entre GOL, LAT e ZAG
+- `V4__add_limite_atletas_por_clube.sql` — adiciona o limite configurável de atletas titulares por clube
 
 ```sql
 -- V1: estrutura inicial
@@ -202,6 +203,7 @@ CREATE TABLE configuracao (
   "formacaoAta": 3,
   "formacaoTec": 1,
   "evitarMesmoClubeDefesa": true,
+  "limiteAtletasPorClube": 4,
   "updatedAt": "2025-06-01T15:30:00"
 }
 ```
@@ -212,6 +214,7 @@ CREATE TABLE configuracao (
 - Quando todos os pesos são enviados, a soma deve ser `1.0` (tolerância `±0.01`)
 - Formações devem ser `>= 1`
 - `evitarMesmoClubeDefesa` ativa/desativa a regra de não repetir clubes entre GOL, LAT e ZAG
+- `limiteAtletasPorClube` deve ser `>= 1` e controla o teto de atletas titulares do mesmo clube (inclui TEC)
 
 **Cache:** a configuração é cacheada no Caffeine (`configuracao` cache). `PATCH` e `POST /reset` invalidam o cache automaticamente via `@CacheEvict`.
 
@@ -393,10 +396,20 @@ Caso não haja candidatos suficientes sem repetição (ex: poucos clubes dispon�
 ### 5.7 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
-- **Reserva de Luxo:** segundo maior score global (qualquer posição)
+- **Reserva de Luxo:** melhor score entre os atletas de `reservas`
 - O capitão tem pontuação **dobrada** no Cartola FC.
 
-### 5.8 Tratamento de Dúvidas
+### 5.8 Limite Máximo por Clube (inclui TEC)
+
+Durante a montagem dos titulares, o serviço limita a escalação para **até 4 atletas do mesmo clube** no time completo, incluindo o treinador (`TEC`).
+
+Fluxo aplicado:
+- tenta selecionar por score respeitando simultaneamente o limite por clube;
+- mantém também a regra de defesa sem repetição quando ativada;
+- se faltar atleta para completar uma posição, relaxa primeiro a regra de defesa e mantém o limite por clube;
+- em último caso, relaxa o limite por clube para não deixar a formação incompleta.
+
+### 5.9 Tratamento de Dúvidas
 
 - Titulares com `status_id == 6` são escalados, mas marcados com `⚠️ DÚVIDA`.
 - Sistema busca o melhor substituto `PROVAVEL` na **mesma posição individual**.
@@ -404,7 +417,7 @@ Caso não haja candidatos suficientes sem repetição (ex: poucos clubes dispon�
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
 
-### 5.9 Endpoint de Ranking (`GET /api/ranking`)
+### 5.10 Endpoint de Ranking (`GET /api/ranking`)
 
 Retorna os melhores atletas disponíveis ordenados por score decrescente.  
 Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
@@ -572,7 +585,8 @@ cartola/
     │   └── db/migration/
     │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │       ├── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
-    │       └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
+    │       ├── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
+    │       └── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
     └── test/
         ├── java/com/cartola/odds/
         │   ├── CartolaOddsApplicationTests.java
@@ -735,7 +749,7 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
-| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, capitão, reserva de luxo, reservas por posição, dúvidas com substituto |
+| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição, dúvidas com substituto |
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |

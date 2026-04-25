@@ -64,6 +64,7 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V1__create_configuracao.sql` — cria tabela e insere valores padrão
 - `V2__alter_configuracao_numeric_to_double.sql` — converte colunas para `DOUBLE PRECISION`
 - `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para não repetir clubes entre GOL, LAT e ZAG
+- `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
 
 ### Cache Caffeine (in-memory)
 
@@ -93,7 +94,18 @@ O `NormalizadorUtil` remove acentos, converte para lowercase, troca hífens por 
 
 ### Regra de Defesa
 
-Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime. Quando não há candidatos suficientes sem repetição, o montador completa a posição com os melhores atletas restantes, garantindo que a formação nunca fique incompleta.
+Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime. Quando não há candidatos suficientes sem repetição, o montador completa a posição com os melhores atletas restantes (respeitando ainda o limite por clube), garantindo que a formação nunca fique incompleta.
+
+### Limite por Clube no Time Titular
+
+O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, incluindo o **treinador (TEC)**. O limite é configurável em runtime via `PATCH /api/config` no campo `limiteAtletasPorClube` (padrão `4`). O montador aplica um fallback em três níveis:
+1. **Primário** — respeita regra de defesa (sem clube repetido em GOL/LAT/ZAG) e limite por clube.
+2. **Intermediário** — relaxa a regra de defesa, mas mantém o limite máximo por clube.
+3. **Último recurso** — relaxa também o limite por clube para preservar a formação completa.
+
+### Reserva de Luxo
+
+A **reserva de luxo** é sempre a reserva com maior score entre todas as posições (não é mais o segundo melhor titular).
 
 ### Validação de Entrada
 

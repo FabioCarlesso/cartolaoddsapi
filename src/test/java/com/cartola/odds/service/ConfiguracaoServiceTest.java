@@ -43,6 +43,22 @@ class ConfiguracaoServiceTest {
     }
 
     @Test
+    @DisplayName("deve atualizar limite de atletas por clube")
+    void deveAtualizarLimiteAtletasPorClube() {
+        var config = Configuracao.defaults();
+        var request = new ConfiguracaoRequest();
+        request.setLimiteAtletasPorClube(5);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.atualizar(request);
+
+        assertThat(response.getLimiteAtletasPorClube()).isEqualTo(5);
+        assertThat(config.getLimiteAtletasPorClube()).isEqualTo(5);
+    }
+
+    @Test
     @DisplayName("reset deve reativar regra de defesa")
     void resetDeveReativarRegraDefesa() {
         var config = Configuracao.defaults();
@@ -55,5 +71,6 @@ class ConfiguracaoServiceTest {
 
         assertThat(response.isEvitarMesmoClubeDefesa()).isTrue();
         assertThat(config.isEvitarMesmoClubeDefesa()).isTrue();
+        assertThat(response.getLimiteAtletasPorClube()).isEqualTo(4);
     }
 }

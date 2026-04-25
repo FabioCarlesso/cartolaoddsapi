@@ -51,6 +51,9 @@ public class ConfiguracaoResponse {
     @Schema(description = "Impede repetir clubes entre titulares GOL, LAT e ZAG", example = "true")
     private final boolean evitarMesmoClubeDefesa;
 
+    @Schema(description = "Limite maximo de titulares do mesmo clube (inclui TEC)", example = "4")
+    private final int limiteAtletasPorClube;
+
     @Schema(description = "Data e hora da ultima atualizacao")
     private final LocalDateTime updatedAt;
 
@@ -69,6 +72,7 @@ public class ConfiguracaoResponse {
                 .formacaoAta(c.getFormacaoAta())
                 .formacaoTec(c.getFormacaoTec())
                 .evitarMesmoClubeDefesa(c.isEvitarMesmoClubeDefesa())
+                .limiteAtletasPorClube(c.getLimiteAtletasPorClube())
                 .updatedAt(c.getUpdatedAt())
                 .build();
     }

@@ -69,4 +69,8 @@ public class ConfiguracaoRequest {
 
     @Schema(description = "Impede repetir clubes entre titulares GOL, LAT e ZAG", example = "true")
     private Boolean evitarMesmoClubeDefesa;
+
+    @Min(value = 1, message = "limiteAtletasPorClube deve ser >= 1")
+    @Schema(description = "Limite maximo de titulares do mesmo clube (inclui TEC)", example = "4")
+    private Integer limiteAtletasPorClube;
 }

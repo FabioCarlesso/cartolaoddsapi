@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ public class MontadorTimeService {
         Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
         Map<Posicao, Atleta>       reservas  = new EnumMap<>(Posicao.class);
         Set<Integer> clubesDefesaEscalados = new HashSet<>();
+        Map<Integer, Integer> contagemClubesTitulares = new HashMap<>();
 
         for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
@@ -58,7 +60,9 @@ public class MontadorTimeService {
                 continue;
             }
 
-            List<Atleta> escolhidos = escolherTitulares(candidatos, qtd, posicao, config, clubesDefesaEscalados);
+            List<Atleta> escolhidos = escolherTitulares(
+                    candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares
+            );
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
                     escolhidos.stream().map(Atleta::getApelido).toList());
@@ -134,8 +138,7 @@ public class MontadorTimeService {
                 .max(Comparator.comparingDouble(Atleta::getScore))
                 .orElse(null);
 
-        Atleta reservaLuxo = todosTitulares.stream()
-                .filter(a -> capitao == null || !a.getApelido().equals(capitao.getApelido()))
+        Atleta reservaLuxo = reservas.values().stream()
                 .max(Comparator.comparingDouble(Atleta::getScore))
                 .orElse(null);
 
@@ -165,23 +168,27 @@ public class MontadorTimeService {
                                            int quantidade,
                                            Posicao posicao,
                                            Configuracao config,
-                                           Set<Integer> clubesDefesaEscalados) {
-        if (!config.isEvitarMesmoClubeDefesa() || !POSICOES_DEFESA.contains(posicao)) {
-            return new ArrayList<>(candidatos.subList(0, Math.min(quantidade, candidatos.size())));
-        }
-
+                                           Set<Integer> clubesDefesaEscalados,
+                                           Map<Integer, Integer> contagemClubesTitulares) {
         List<Atleta> escolhidos = new ArrayList<>();
         for (Atleta candidato : candidatos) {
             if (escolhidos.size() == quantidade) {
                 break;
             }
-            if (clubesDefesaEscalados.add(candidato.getClubeId())) {
+            if (podeEscalar(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares)) {
                 escolhidos.add(candidato);
+                registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
             }
         }
 
         if (escolhidos.size() < quantidade) {
-            log.warn("Regra de defesa sem clube repetido nao encontrou candidatos suficientes para {} ({}/{}), completando com melhor disponivel",
+            completarMantendoLimitePorClube(
+                    candidatos, quantidade, posicao, escolhidos, config, contagemClubesTitulares, clubesDefesaEscalados
+            );
+        }
+
+        if (escolhidos.size() < quantidade) {
+            log.warn("Nao foi possivel respeitar todas as regras para {} ({}/{}), completando com melhor disponivel",
                     posicao, escolhidos.size(), quantidade);
             Set<String> apelidosEscolhidos = escolhidos.stream()
                     .map(Atleta::getApelido)
@@ -189,12 +196,76 @@ public class MontadorTimeService {
             for (Atleta candidato : candidatos) {
                 if (escolhidos.size() == quantidade) break;
                 if (apelidosEscolhidos.add(candidato.getApelido())) {
-                    clubesDefesaEscalados.add(candidato.getClubeId());
                     escolhidos.add(candidato);
+                    registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
                 }
             }
         }
 
         return escolhidos;
+    }
+
+    private void completarMantendoLimitePorClube(List<Atleta> candidatos,
+                                                  int quantidade,
+                                                  Posicao posicao,
+                                                  List<Atleta> escolhidos,
+                                                  Configuracao config,
+                                                  Map<Integer, Integer> contagemClubesTitulares,
+                                                  Set<Integer> clubesDefesaEscalados) {
+        if (escolhidos.size() >= quantidade) {
+            return;
+        }
+
+        log.warn("Nao foi possivel preencher {} ({}/{}), tentando completar mantendo limite maximo por clube",
+                posicao, escolhidos.size(), quantidade);
+
+        Set<String> apelidosEscolhidos = escolhidos.stream()
+                .map(Atleta::getApelido)
+                .collect(Collectors.toSet());
+
+        for (Atleta candidato : candidatos) {
+            if (escolhidos.size() == quantidade) {
+                break;
+            }
+            if (!apelidosEscolhidos.add(candidato.getApelido())) {
+                continue;
+            }
+            if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
+                continue;
+            }
+            escolhidos.add(candidato);
+            registrarEscalacao(candidato, posicao, false, clubesDefesaEscalados, contagemClubesTitulares);
+        }
+    }
+
+    private boolean podeEscalar(Atleta candidato,
+                                Posicao posicao,
+                                Configuracao config,
+                                Set<Integer> clubesDefesaEscalados,
+                                Map<Integer, Integer> contagemClubesTitulares) {
+        if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
+            return false;
+        }
+
+        return !config.isEvitarMesmoClubeDefesa()
+                || !POSICOES_DEFESA.contains(posicao)
+                || !clubesDefesaEscalados.contains(candidato.getClubeId());
+    }
+
+    private boolean atingiuLimitePorClube(int clubeId,
+                                          int limite,
+                                          Map<Integer, Integer> contagemClubesTitulares) {
+        return contagemClubesTitulares.getOrDefault(clubeId, 0) >= limite;
+    }
+
+    private void registrarEscalacao(Atleta atleta,
+                                    Posicao posicao,
+                                    boolean atualizarDefesa,
+                                    Set<Integer> clubesDefesaEscalados,
+                                    Map<Integer, Integer> contagemClubesTitulares) {
+        contagemClubesTitulares.merge(atleta.getClubeId(), 1, Integer::sum);
+        if (atualizarDefesa && POSICOES_DEFESA.contains(posicao)) {
+            clubesDefesaEscalados.add(atleta.getClubeId());
+        }
     }
 }
