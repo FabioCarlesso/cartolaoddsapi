@@ -386,6 +386,7 @@ Cada slot seleciona **exclusivamente** dentro da sua posição.
 - Preferencialmente mais baratos que o titular mais caro da posição.
 - Fallback: qualquer provável da posição se nenhum mais barato existir.
 - Sempre da **mesma posição individual** do titular (LAT reserva LAT, ZAG reserva ZAG).
+- `TEC` não tem reserva.
 
 ### 5.6 Defesa sem Clube Repetido
 
@@ -396,7 +397,7 @@ Caso não haja candidatos suficientes sem repetição (ex: poucos clubes dispon�
 ### 5.7 Capitão e Reserva de Luxo
 
 - **Capitão:** maior score, prioridade `ATA > MEI > ZAG > LAT > GOL > TEC`
-- **Reserva de Luxo:** melhor score entre os atletas de `reservas`
+- **Reserva de Luxo:** melhor score entre os atletas de `reservas`; `TEC` não concorre porque não tem reserva.
 - O capitão tem pontuação **dobrada** no Cartola FC.
 
 ### 5.8 Limite Máximo por Clube (inclui TEC)
@@ -494,13 +495,13 @@ GET /api/time
 6. selecionar titulares         → top-N por score em cada posição
       │
       ▼
-7. selecionar reservas          → provável, mesma posição, mais barato
+7. selecionar reservas          → provável, mesma posição, mais barato, exceto TEC
       │
       ▼
 8. mapear substitutos           → provável da mesma posição para cada dúvida
       │
       ▼
-9. eleger capitão/reserva luxo → maior e segundo maior score
+9. eleger capitão/reserva luxo → maior titular e melhor reserva
       │
       ▼
 10. TimeResponse.from(time)    → HTTP 200 com JSON
@@ -644,7 +645,7 @@ Retorna IDs dos times mandantes da rodada atual.
 Retorna nova lista imutável com campo `score` preenchido para cada atleta.
 
 ### `MontadorTimeService.montar(pool, rodada, avisoMercado) → Time`
-Seleciona titulares, aplica a regra configurável de defesa sem clube repetido, reservas, capitão, reserva de luxo e substitutos.
+Seleciona titulares, aplica a regra configurável de defesa sem clube repetido, reservas (exceto TEC), capitão, reserva de luxo e substitutos.
 Retorna `Time` completo com alertas de dúvida.
 
 
@@ -749,7 +750,7 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
-| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição, dúvidas com substituto |
+| `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição sem TEC, dúvidas com substituto |
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
@@ -775,7 +776,7 @@ mvn test jacoco:report
 ```
 [INFO] Results:
 [INFO]
-[INFO] Tests run: 250, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 258, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
