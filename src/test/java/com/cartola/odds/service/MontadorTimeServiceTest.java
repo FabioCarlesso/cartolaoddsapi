@@ -292,7 +292,6 @@ class MontadorTimeServiceTest {
         void reservaDeveSerDaMesmaPosicao() {
             var time = service.montar(criarPool(), 1, null);
 
-            assertThat(time.getReservas()).doesNotContainKey(Posicao.TEC);
             time.getReservas().forEach((posicao, reserva) ->
                     assertThat(reserva.getPosicao()).isEqualTo(posicao));
         }

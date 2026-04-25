@@ -130,7 +130,7 @@ public class OddsService {
                     .timeVisitante(awayName)
                     .oddVisitante(oddVisitante)
                     .oddEmpate(oddEmpate)
-                    .motivo("Menor odd (%.2f) acima do limite (%.1f)".formatted(menorOddValor, oddLimite))
+                    .motivo(String.format(java.util.Locale.ROOT, "Menor odd (%.2f) acima do limite (%.1f)", menorOddValor, oddLimite))
                     .build());
             log.debug("Descartado: {} odd={} > {}", nomeFavorito, menorOddValor, oddLimite);
         }
