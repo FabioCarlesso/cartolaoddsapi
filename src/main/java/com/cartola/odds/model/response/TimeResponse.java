@@ -30,13 +30,13 @@ public class TimeResponse {
     @Schema(description = "Titulares agrupados por posicao (GOL, LAT, ZAG, MEI, ATA, TEC)")
     private final Map<String, List<AtletaDto>> titulares;
 
-    @Schema(description = "Reservas por posicao (sempre Provaveis, da mesma posicao do titular)")
+    @Schema(description = "Reservas por posicao (sempre Provaveis, da mesma posicao do titular; TEC nao tem reserva)")
     private final Map<String, AtletaDto> reservas;
 
     @Schema(description = "Capitao - atleta com maior score (pontuacao dobrada no Cartola)")
     private final AtletaDto capitao;
 
-    @Schema(description = "Reserva de luxo - segundo maior score geral")
+    @Schema(description = "Reserva de luxo - maior score entre os reservas")
     private final AtletaDto reservaLuxo;
 
     @Schema(description = "Alertas de titulares em Duvida com substituto sugerido")

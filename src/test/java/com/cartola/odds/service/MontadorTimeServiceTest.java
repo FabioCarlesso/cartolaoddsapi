@@ -292,8 +292,18 @@ class MontadorTimeServiceTest {
         void reservaDeveSerDaMesmaPosicao() {
             var time = service.montar(criarPool(), 1, null);
 
+            assertThat(time.getReservas()).doesNotContainKey(Posicao.TEC);
             time.getReservas().forEach((posicao, reserva) ->
                     assertThat(reserva.getPosicao()).isEqualTo(posicao));
+        }
+
+        @Test
+        @DisplayName("tecnico nao deve ter reserva")
+        void tecnicoNaoDeveTerReserva() {
+            var time = service.montar(criarPool(), 1, null);
+
+            assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
+            assertThat(time.getReservas()).doesNotContainKey(Posicao.TEC);
         }
 
         @Test

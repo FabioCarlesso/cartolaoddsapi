@@ -29,6 +29,8 @@ public class MontadorTimeService {
             List.of(Posicao.ATA, Posicao.MEI, Posicao.ZAG, Posicao.LAT, Posicao.GOL, Posicao.TEC);
 
     private static final Set<Posicao> POSICOES_DEFESA = Set.of(Posicao.GOL, Posicao.LAT, Posicao.ZAG);
+    private static final Set<Posicao> POSICOES_COM_RESERVA =
+            Set.of(Posicao.GOL, Posicao.LAT, Posicao.ZAG, Posicao.MEI, Posicao.ATA);
 
     private final ConfiguracaoService configuracaoService;
 
@@ -66,6 +68,10 @@ public class MontadorTimeService {
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
                     escolhidos.stream().map(Atleta::getApelido).toList());
+
+            if (!POSICOES_COM_RESERVA.contains(posicao)) {
+                continue;
+            }
 
             double maxPrecoTitular = escolhidos.stream()
                     .mapToDouble(Atleta::getPreco)

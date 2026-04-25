@@ -105,7 +105,7 @@ O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, inc
 
 ### Reserva de Luxo
 
-A **reserva de luxo** é sempre a reserva com maior score entre todas as posições (não é mais o segundo melhor titular).
+A **reserva de luxo** é sempre a reserva com maior score entre as posições que possuem reserva (não é mais o segundo melhor titular). `TEC` não tem reserva e, portanto, não concorre a reserva de luxo.
 
 ### Validação de Entrada
 
@@ -161,7 +161,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-~250 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
+258 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

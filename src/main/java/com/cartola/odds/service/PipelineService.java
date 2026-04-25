@@ -26,7 +26,7 @@ public class PipelineService {
      *  4. Busca times mandantes
      *  5. Calcula media das ultimas 5 rodadas (desempenho real)
      *  6. Calcula score ponderado com desempenho real
-     *  7. Monta time (titulares, reservas, capitao, substitutos)
+     *  7. Monta time (titulares, reservas sem TEC, capitao, substitutos)
      */
     public Time executar() {
 

@@ -38,7 +38,7 @@ public interface TimeApi {
             - Somente atletas de times favoritos (odd ≤ ODD_LIMITE, padrao 3.0)
             - Somente Provavel (7) e Duvida (6)
             - Formacao: 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC
-            - Reservas: somente Provaveis, mesma posicao, preferencialmente mais baratos
+            - Reservas: somente Provaveis, mesma posicao, preferencialmente mais baratos; TEC nao tem reserva
             - Titulares em Duvida recebem substituto provavel da mesma posicao
             - Capitao: maior score — prioridade ATA > MEI > ZAG > LAT > GOL > TEC
 

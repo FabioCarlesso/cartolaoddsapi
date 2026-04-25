@@ -318,7 +318,7 @@ Fallback automático para `mediaPontos` da temporada quando o histórico não es
 
 `1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC`
 
-Cada slot seleciona exclusivamente dentro da sua posição. Reservas são sempre prováveis, da mesma posição e preferencialmente mais baratos.
+Cada slot seleciona exclusivamente dentro da sua posição. Reservas são sempre prováveis, da mesma posição e preferencialmente mais baratos. `TEC` não tem reserva.
 
 ### Defesa sem clube repetido
 
@@ -339,7 +339,7 @@ Quando o limite impedir a escalação completa em uma posição, o montador tent
 ### Capitão e Reserva de Luxo
 
 - **Capitão:** titular com maior score global.
-- **Reserva de Luxo:** atleta de maior score entre todas as **reservas**.
+- **Reserva de Luxo:** atleta de maior score entre todas as **reservas**; como `TEC` não tem reserva, técnicos não concorrem a reserva de luxo.
 
 ### Normalização de nomes de clubes
 
@@ -385,7 +385,7 @@ cartola/
     │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
     │           └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     └── test/
-        ├── java/                            # 18 classes de teste — ~250 cenários
+        ├── java/                            # 18 classes de teste — 258 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -412,7 +412,7 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 12 — filtros de status/preço/favorito |
 | `ScoreServiceTest` | 16 — pesos, bônus, desempenho real vs proxy, fallback |
-| `MontadorTimeServiceTest` | 24 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas |
+| `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
