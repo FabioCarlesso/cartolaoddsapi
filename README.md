@@ -22,6 +22,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 12 | **Reserva de Luxo por Reserva** | Reserva de luxo é sempre a reserva com maior score |
 | 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 15 | **Exportação de Relatório de Pagamento** | Exporta o relatório de pagamento dos profissionais escalados em **PDF** e **Excel**, com contrato JSON amigável ao Angular (Base64 + metadados) ou download binário direto |
 
 
 ---
@@ -184,6 +185,11 @@ odds.api.key=SUA_API_KEY_AQUI
 | `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |
 | `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
+| `GET` | `/api/relatorio/pagamento` | Relatório de pagamento dos profissionais escalados (JSON Angular-friendly) |
+| `GET` | `/api/relatorio/pagamento/exportar?formato=PDF` | Exporta o relatório em PDF (JSON com Base64 + metadados) |
+| `GET` | `/api/relatorio/pagamento/exportar?formato=EXCEL` | Exporta o relatório em Excel (JSON com Base64 + metadados) |
+| `GET` | `/api/relatorio/pagamento/download?formato=PDF` | Download direto do relatório em PDF (binário) |
+| `GET` | `/api/relatorio/pagamento/download?formato=EXCEL` | Download direto do relatório em Excel (binário) |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
 
@@ -258,6 +264,72 @@ odds.api.key=SUA_API_KEY_AQUI
 
 Passar um nome inválido retorna `400 Bad Request` com a lista de nomes aceitos.
 
+### Exemplo — `GET /api/relatorio/pagamento`
+
+Relatório consolidado dos pagamentos (custo em cartoletas) de cada profissional escalado para a rodada — incluindo titulares, reservas e capitão. Contrato preparado para consumo direto no Angular: campos em camelCase, datas em ISO-8601 e nullable explícito.
+
+```json
+{
+  "rodada": 15,
+  "geradoEm": "2026-04-27T15:30:00",
+  "moeda": "C$",
+  "totalProfissionais": 19,
+  "totalPagamento": 142.5,
+  "itens": [
+    {
+      "atletaId": 82934,
+      "apelido": "Hulk",
+      "posicao": "ATA",
+      "posicaoLabel": "Atacante",
+      "siglaClube": "ATM",
+      "nomeClube": "Atletico Mineiro",
+      "status": "Provável",
+      "funcao": "Capitao",
+      "titular": true,
+      "capitao": true,
+      "valorPagamento": 22.0
+    }
+  ]
+}
+```
+
+### Exemplo — `GET /api/relatorio/pagamento/exportar?formato=PDF`
+
+Endpoint Angular-friendly: devolve um JSON com o arquivo codificado em **Base64** mais metadados. No frontend, basta decodificar e disparar o download:
+
+```typescript
+this.http.get<ExportacaoResponse>('/api/relatorio/pagamento/exportar?formato=PDF')
+    .subscribe(res => {
+      const bytes = Uint8Array.from(atob(res.conteudoBase64), c => c.charCodeAt(0));
+      const blob  = new Blob([bytes], { type: res.mimeType });
+      const url   = URL.createObjectURL(blob);
+      const a     = document.createElement('a');
+      a.href = url; a.download = res.fileName; a.click();
+      URL.revokeObjectURL(url);
+    });
+```
+
+```json
+{
+  "fileName": "relatorio-pagamento-rodada-15.pdf",
+  "mimeType": "application/pdf",
+  "extensao": "pdf",
+  "formato": "PDF",
+  "sizeBytes": 12345,
+  "geradoEm": "2026-04-27T15:30:00",
+  "conteudoBase64": "JVBERi0xLjQK..."
+}
+```
+
+### Exemplo — `GET /api/relatorio/pagamento/download?formato=EXCEL`
+
+Mesma geração, porém entrega o conteúdo binário com `Content-Disposition: attachment` — útil quando o frontend prefere abrir uma aba para download direto, sem manipular Base64.
+
+| Header | Valor |
+|---|---|
+| `Content-Type` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (Excel) ou `application/pdf` |
+| `Content-Disposition` | `attachment; filename="relatorio-pagamento-rodada-15.xlsx"` |
+
 ### Aviso de mercado
 
 Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMercado` preenchido:
@@ -275,7 +347,7 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | Código | Situação |
 |---|---|
 | `200` | Sucesso |
-| `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`) |
+| `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `formato` fora de `PDF\|EXCEL`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
@@ -369,13 +441,16 @@ cartola/
     │   │   ├── repository/      (ConfiguracaoRepository)
     │   │   ├── service/         (OddsService, CartolaDataService, ScoreService,
     │   │   │                     DesempenhoService, MontadorTimeService, PipelineService,
-    │   │   │                     RankingService, ConfiguracaoService)
+    │   │   │                     RankingService, ConfiguracaoService,
+    │   │   │                     RelatorioPagamentoService, ExportadorPdfService,
+    │   │   │                     ExportadorExcelService)
     │   │   ├── controller/api/  (TimeApi, RankingApi, FavoritosApi, CacheApi,
-    │   │   │                     ConfiguracaoApi — Swagger docs)
+    │   │   │                     ConfiguracaoApi, RelatorioPagamentoApi — Swagger docs)
     │   │   ├── controller/      (TimeController, RankingController, FavoritosController,
     │   │   │                     CacheController, ConfiguracaoController,
-    │   │   │                     GlobalExceptionHandler)
-    │   │   ├── model/           (Atleta, Time, Configuracao, enums/,
+    │   │   │                     RelatorioPagamentoController, GlobalExceptionHandler)
+    │   │   ├── model/           (Atleta, Time, Configuracao, RelatorioPagamento,
+    │   │   │                     ItemPagamento, enums/ — inclui FormatoExportacao,
     │   │   │                     request/ConfiguracaoRequest, response/)
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
@@ -385,7 +460,7 @@ cartola/
     │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
     │           └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     └── test/
-        ├── java/                            # 18 classes de teste — 258 cenários
+        ├── java/                            # 25 classes de teste — 303 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -425,6 +500,13 @@ mvn test jacoco:report
 | `AtletaTest` | 5 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 10 — normalização |
+| `RelatorioPagamentoServiceTest` | 7 — geração do relatório, ordenação, marcação de capitão e arredondamento |
+| `ExportadorPdfServiceTest` | 4 — PDF válido, com/sem aviso de mercado, sem itens, validação de nulo |
+| `ExportadorExcelServiceTest` | 7 — XLSX válido, cabeçalho, itens, total, aviso de mercado |
+| `RelatorioPagamentoControllerTest` | 12 — HTTP 200/400/422 nos três endpoints (JSON, exportar Base64, download binário) |
+| `FormatoExportacaoTest` | 5 — enum PDF/EXCEL, parsing case-insensitive |
+| `ItemPagamentoTest` | 7 — funções (Capitão/Titular/Reserva), labels |
+| `ExportacaoResponseTest` | 3 — codificação Base64 + metadados |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---

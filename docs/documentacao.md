@@ -43,6 +43,8 @@ API REST que monta automaticamente um time competitivo para o Cartola FC cruzand
 | Mockito | via starter-test | Mocking de dependências |
 | AssertJ | via starter-test | Assertions fluentes |
 | MockMvc | via starter-test | Testes de camada web |
+| OpenPDF | 1.3.34 | Geração de PDF do relatório de pagamento (fork Apache 2.0 do iText) |
+| Apache POI | 5.2.5 | Geração de planilhas XLSX (relatório de pagamento) |
 
 **Instalação:**
 ```bash
@@ -456,7 +458,57 @@ Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 
 **Validação:** `oddLimite <= 1.0` retorna HTTP 400 (odd de 1.0 ou menos é matematicamente impossível em apostas reais).
 
-### 5.11 Normalização de Nomes
+### 5.11 Relatório de Pagamento dos Profissionais
+
+A partir do time montado no `/api/time`, o `RelatorioPagamentoService` consolida o **pagamento de cada profissional escalado** — titulares, reservas e capitão. O "pagamento" é o custo em cartoletas (C$) pago pelo gestor para escalar cada atleta. Os itens são ordenados por valor de pagamento decrescente; em caso de empate, por nome.
+
+**Modelo de domínio**
+
+| Tipo | Campos relevantes |
+|---|---|
+| `RelatorioPagamento` | `rodada`, `avisoMercado`, `geradoEm`, `moeda` (`C$`), `totalProfissionais`, `totalPagamento`, `itens` |
+| `ItemPagamento` | `atletaId`, `apelido`, `posicao`, `siglaClube`, `nomeClube`, `status`, `valorPagamento`, `titular`, `capitao`, `funcao` (`Capitao`/`Titular`/`Reserva`) |
+
+**Endpoints disponíveis**
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/api/relatorio/pagamento` | JSON Angular-friendly com todos os pagamentos da rodada |
+| `GET` | `/api/relatorio/pagamento/exportar?formato=PDF\|EXCEL` | JSON com o arquivo em **Base64** + metadados (`fileName`, `mimeType`, `extensao`, `sizeBytes`, `geradoEm`) |
+| `GET` | `/api/relatorio/pagamento/download?formato=PDF\|EXCEL` | Download direto do arquivo binário com `Content-Disposition: attachment` |
+
+**Contrato amigável ao Angular**
+
+- Campos em `camelCase`, datas em ISO-8601 (`LocalDateTime`).
+- `nullable` explícito em `avisoMercado` (omitido quando o mercado está aberto).
+- Tipos primitivos para fácil binding em formulários reativos e tabelas Material.
+- O modo Base64 evita lidar com headers binários no frontend: `atob()` + `Blob` + `URL.createObjectURL()` disparam o download.
+
+**Geração dos arquivos**
+
+| Formato | Biblioteca | Notas |
+|---|---|---|
+| PDF | OpenPDF 1.3.34 (Apache 2.0, fork do iText 2.x) | A4, cabeçalho centralizado, tabela com cores, total à direita, valores formatados em pt-BR |
+| XLSX | Apache POI 5.2.5 | Aba `Pagamentos`, header colorido, células com bordas, formato de moeda `#,##0.00`, total na última linha |
+
+**Fluxo**
+
+```
+GET /api/relatorio/pagamento(/exportar|/download)
+      │
+      ▼
+RelatorioPagamentoService.gerar()
+      │
+      ├─▶ PipelineService.executar()           ───▶ Time
+      │
+      └─▶ Constrói RelatorioPagamento (titulares + reservas + capitão; ordena por valor)
+              │
+              ├─▶ Endpoint base   → RelatorioPagamentoResponse (JSON)
+              ├─▶ Endpoint exportar → ExportadorPdfService/ExportadorExcelService → ExportacaoResponse (JSON + Base64)
+              └─▶ Endpoint download → ExportadorPdfService/ExportadorExcelService → ResponseEntity<Resource> (binário)
+```
+
+### 5.12 Normalização de Nomes
 
 ```java
 // Remove acentos, converte para lowercase, troca hífen por espaço,
@@ -755,6 +807,13 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência |
+| `RelatorioPagamentoServiceTest` | Unitário (Mockito) | Geração do relatório, ordenação por valor, marcação de capitão, reservas, aviso de mercado, arredondamento, time vazio |
+| `ExportadorPdfServiceTest` | Unitário | PDF válido (cabeçalho `%PDF-`), com aviso de mercado, sem itens, validação de nulo |
+| `ExportadorExcelServiceTest` | Unitário (POI) | XLSX válido com aba `Pagamentos`, cabeçalho, linhas de itens, total, aviso de mercado |
+| `RelatorioPagamentoControllerTest` | Web (MockMvc) | HTTP 200/400/422 nos três endpoints (JSON, exportar Base64, download binário) |
+| `FormatoExportacaoTest` | Unitário | Enum PDF/EXCEL, parsing case-insensitive, valores inválidos |
+| `ItemPagamentoTest` | Unitário | Funções (Capitão/Titular/Reserva), labels de posição e status |
+| `ExportacaoResponseTest` | Unitário | Codificação Base64 + metadados, conteúdo vazio |
 
 Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
 
@@ -776,7 +835,7 @@ mvn test jacoco:report
 ```
 [INFO] Results:
 [INFO]
-[INFO] Tests run: 258, Failures: 0, Errors: 0, Skipped: 0
+[INFO] Tests run: 303, Failures: 0, Errors: 0, Skipped: 0
 [INFO] BUILD SUCCESS
 ```
 
@@ -804,8 +863,13 @@ mvn test jacoco:report
 | `GET /api/config` | Retorna configuração atual |
 | `PATCH /api/config` | Atualiza parâmetros em runtime |
 | `POST /api/config/reset` | Restaura defaults |
+| `GET /api/relatorio/pagamento` | Relatório de pagamento dos profissionais (JSON Angular-friendly) |
+| `GET /api/relatorio/pagamento/exportar?formato=PDF` | Exporta o relatório em PDF (JSON com Base64) |
+| `GET /api/relatorio/pagamento/exportar?formato=EXCEL` | Exporta o relatório em Excel (JSON com Base64) |
+| `GET /api/relatorio/pagamento/download?formato=PDF` | Download direto do relatório em PDF |
+| `GET /api/relatorio/pagamento/download?formato=EXCEL` | Download direto do relatório em Excel |
 
-Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 com a mensagem do campo inválido.
+Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 com a mensagem do campo inválido. Para os endpoints de exportação, valores fora de `PDF`/`EXCEL` em `formato` retornam HTTP 400.
 
 **Respostas documentadas em `GET /api/time`:**
 

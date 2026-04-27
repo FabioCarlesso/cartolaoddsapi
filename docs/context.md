@@ -111,6 +111,25 @@ A **reserva de luxo** é sempre a reserva com maior score entre as posições qu
 
 Falhas de Bean Validation no corpo de requisições, principalmente em `PATCH /api/config`, são tratadas no `GlobalExceptionHandler` e retornam HTTP 400 com todas as mensagens de campos inválidos concatenadas com `"; "`.
 
+### Relatório de Pagamento dos Profissionais
+
+A partir do time montado pelo `PipelineService`, o `RelatorioPagamentoService` constrói um **relatório de pagamento dos profissionais** (atletas) escalados — incluindo titulares, reservas e capitão. O "pagamento" é o custo em cartoletas (C$) pago pelo gestor para escalar cada atleta. Os itens são ordenados por valor decrescente.
+
+A exportação é tratada por dois serviços dedicados:
+
+- `ExportadorPdfService` — gera PDF via **OpenPDF** (fork Apache 2.0 do iText 2.x) com cabeçalho, metadados de geração, tabela paginada e total geral.
+- `ExportadorExcelService` — gera planilha XLSX via **Apache POI** com cabeçalho estilizado, células formatadas com bordas e total na última linha.
+
+O contrato REST oferece três rotas:
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/api/relatorio/pagamento` | JSON Angular-friendly com os pagamentos de cada profissional |
+| `GET` | `/api/relatorio/pagamento/exportar?formato=PDF\|EXCEL` | JSON com o arquivo em **Base64** + metadados (`fileName`, `mimeType`, `extensao`, `sizeBytes`, `geradoEm`) |
+| `GET` | `/api/relatorio/pagamento/download?formato=PDF\|EXCEL` | Download direto do arquivo binário com `Content-Disposition: attachment` |
+
+O contrato Angular-friendly usa camelCase, datas ISO-8601, primitivos para fácil binding em formulários reativos e nullable explícito em `avisoMercado`. O modo Base64 evita que o frontend precise lidar com headers binários — basta `atob()` + `Blob` + `URL.createObjectURL()` para disparar o download.
+
 ---
 
 ## Estrutura de Pacotes
@@ -141,6 +160,9 @@ com.cartola.odds/
 | `GET` | `/api/config` | Retorna configuração atual |
 | `PATCH` | `/api/config` | Atualiza parâmetros em runtime |
 | `POST` | `/api/config/reset` | Restaura defaults |
+| `GET` | `/api/relatorio/pagamento` | Relatório de pagamento dos profissionais (JSON Angular-friendly) |
+| `GET` | `/api/relatorio/pagamento/exportar` | Exporta o relatório (PDF/Excel) em JSON com Base64 |
+| `GET` | `/api/relatorio/pagamento/download` | Download direto do relatório (PDF/Excel) |
 | `GET` | `/swagger-ui.html` | Documentação interativa |
 
 ---
@@ -161,7 +183,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-258 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
+303 cenários distribuídos em 25 classes de teste cobrindo serviços, controllers, domínio, utilitários e a exportação do relatório de pagamento (PDF/Excel).
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
