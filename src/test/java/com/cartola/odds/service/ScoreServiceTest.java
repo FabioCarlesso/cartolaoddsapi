@@ -185,6 +185,169 @@ class ScoreServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("calcularScores — score específico por posição")
+    class ScorePorPosicao {
+
+        @Nested
+        @DisplayName("Goleiro (GOL)")
+        class Goleiro {
+
+            @Test
+            @DisplayName("deve usar formula especifica com maior peso em desempenho para goleiro")
+            void deveUsarFormulaGoleiro() {
+                // desempenho=8, mediaPontos=6, valorizacao=0, sem scouts, sem bonus situacional
+                // score = 8*0.35 + 6*0.25 + 0*0.10 = 2.80 + 1.50 = 4.30
+                var goleiro = base().posicao(Posicao.GOL).mediaPontos(6.0).valorizacao(0.0).atletaId(10).build();
+                var resultado = scoreService.calcularScores(
+                        List.of(goleiro), Set.of(), Set.of(), Map.of(10, 8.0));
+
+                assertThat(resultado.get(0).getScore()).isCloseTo(4.30, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve adicionar bonus por defesas difíceis (DD) no score do goleiro")
+            void deveAdicionarBonusDefesasDificeis() {
+                var semDD = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .defesasDificeis(0).build();
+                var comDD = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .defesasDificeis(10).build();
+
+                double scoreSem = scoreService.calcularScores(List.of(semDD), Set.of(), Set.of()).get(0).getScore();
+                double scoreCom = scoreService.calcularScores(List.of(comDD), Set.of(), Set.of()).get(0).getScore();
+
+                // delta = 10 * GOL_PESO_DEFESAS_DIFICEIS = 10 * 0.05 = 0.50
+                assertThat(scoreCom - scoreSem).isCloseTo(10 * ScoreService.GOL_PESO_DEFESAS_DIFICEIS, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve penalizar gols sofridos (GS) no score do goleiro")
+            void devePenalizarGolsSofridos() {
+                var semGS = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .golsSofridos(0).build();
+                var comGS = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .golsSofridos(20).build();
+
+                double scoreSem = scoreService.calcularScores(List.of(semGS), Set.of(), Set.of()).get(0).getScore();
+                double scoreCom = scoreService.calcularScores(List.of(comGS), Set.of(), Set.of()).get(0).getScore();
+
+                // delta = -(20 * GOL_PENALIZACAO_GOLS_SFD) = -(20 * 0.02) = -0.40
+                assertThat(scoreSem - scoreCom).isCloseTo(20 * ScoreService.GOL_PENALIZACAO_GOLS_SFD, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve adicionar bonus por penaltis defendidos (DP) no score do goleiro")
+            void deveAdicionarBonusPenaltisDefendidos() {
+                var semDP = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .penaltisDefendidos(0).build();
+                var comDP = base().posicao(Posicao.GOL).mediaPontos(0.0).valorizacao(0.0)
+                        .penaltisDefendidos(3).build();
+
+                double scoreSem = scoreService.calcularScores(List.of(semDP), Set.of(), Set.of()).get(0).getScore();
+                double scoreCom = scoreService.calcularScores(List.of(comDP), Set.of(), Set.of()).get(0).getScore();
+
+                // delta = 3 * GOL_PESO_PENALTIS_DEF = 3 * 0.05 = 0.15
+                assertThat(scoreCom - scoreSem).isCloseTo(3 * ScoreService.GOL_PESO_PENALTIS_DEF, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve calcular score diferente da formula padrao para goleiro com mesmos dados")
+            void deveCalcularScoreDiferenteDaPadrao() {
+                var goleiro = base().posicao(Posicao.GOL).build();
+                var meia    = base().posicao(Posicao.MEI).build();
+
+                double scoreGol = scoreService.calcularScores(List.of(goleiro), Set.of(), Set.of()).get(0).getScore();
+                double scoreMei = scoreService.calcularScores(List.of(meia),    Set.of(), Set.of()).get(0).getScore();
+
+                assertThat(scoreGol).isNotEqualTo(scoreMei);
+            }
+        }
+
+        @Nested
+        @DisplayName("Atacante (ATA)")
+        class Atacante {
+
+            @Test
+            @DisplayName("deve adicionar bonus por gols (G) no score do atacante")
+            void deveAdicionarBonusGols() {
+                var semGols = base().posicao(Posicao.ATA).mediaPontos(0.0).valorizacao(0.0)
+                        .gols(0).build();
+                var comGols = base().posicao(Posicao.ATA).mediaPontos(0.0).valorizacao(0.0)
+                        .gols(15).build();
+
+                double scoreSem = scoreService.calcularScores(List.of(semGols), Set.of(), Set.of()).get(0).getScore();
+                double scoreCom = scoreService.calcularScores(List.of(comGols), Set.of(), Set.of()).get(0).getScore();
+
+                // delta = 15 * ATA_PESO_GOLS = 15 * 0.08 = 1.20
+                assertThat(scoreCom - scoreSem).isCloseTo(15 * ScoreService.ATA_PESO_GOLS, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve adicionar bonus por assistencias (A) no score do atacante")
+            void deveAdicionarBonusAssistencias() {
+                var semA = base().posicao(Posicao.ATA).mediaPontos(0.0).valorizacao(0.0)
+                        .assistencias(0).build();
+                var comA = base().posicao(Posicao.ATA).mediaPontos(0.0).valorizacao(0.0)
+                        .assistencias(8).build();
+
+                double scoreSem = scoreService.calcularScores(List.of(semA), Set.of(), Set.of()).get(0).getScore();
+                double scoreCom = scoreService.calcularScores(List.of(comA), Set.of(), Set.of()).get(0).getScore();
+
+                // delta = 8 * ATA_PESO_ASSISTENCIAS = 8 * 0.05 = 0.40
+                assertThat(scoreCom - scoreSem).isCloseTo(8 * ScoreService.ATA_PESO_ASSISTENCIAS, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve calcular score diferente da formula padrao para atacante com mesmos dados")
+            void deveCalcularScoreDiferenteDaPadrao() {
+                var atacante = base().posicao(Posicao.ATA).build();
+                var meia     = base().posicao(Posicao.MEI).build();
+
+                double scoreAta = scoreService.calcularScores(List.of(atacante), Set.of(), Set.of()).get(0).getScore();
+                double scoreMei = scoreService.calcularScores(List.of(meia),     Set.of(), Set.of()).get(0).getScore();
+
+                assertThat(scoreAta).isNotEqualTo(scoreMei);
+            }
+
+            @Test
+            @DisplayName("deve combinar gols, assistencias e time favorito no score do atacante")
+            void deveCombinarScoutsETimeFavorito() {
+                var atacante = base().posicao(Posicao.ATA).atletaId(99).clubeId(99)
+                        .nomeClubeNorm("palmeiras").mediaPontos(0.0).valorizacao(0.0)
+                        .gols(10).assistencias(5).build();
+
+                var resultado = scoreService.calcularScores(
+                        List.of(atacante), Set.of(), Set.of("palmeiras"));
+
+                // gols=10*0.08=0.80 + assist=5*0.05=0.25 + timeFav=10*0.10=1.00 = 2.05
+                assertThat(resultado.get(0).getScore()).isCloseTo(2.05, within(0.001));
+            }
+        }
+
+        @Nested
+        @DisplayName("Fallback para posições sem regra específica")
+        class Fallback {
+
+            @Test
+            @DisplayName("deve usar formula padrao configuravel para MEI")
+            void deveUsarFormulaPadraoParaMEI() {
+                // media=10, desempenho=proxy=10: 10*0.40 + 0*0.20 + 10*0.20 = 4.0+2.0=6.0
+                var meia = base().posicao(Posicao.MEI).mediaPontos(10.0).valorizacao(0.0).build();
+                var resultado = scoreService.calcularScores(List.of(meia), Set.of(), Set.of());
+                assertThat(resultado.get(0).getScore()).isCloseTo(6.0, within(0.001));
+            }
+
+            @Test
+            @DisplayName("deve usar formula padrao configuravel para ZAG")
+            void deveUsarFormulaPadraoParaZAG() {
+                // media=10, desempenho=proxy=10: 10*0.40 + 0*0.20 + 10*0.20 = 6.0
+                var zagueiro = base().posicao(Posicao.ZAG).mediaPontos(10.0).valorizacao(0.0).build();
+                var resultado = scoreService.calcularScores(List.of(zagueiro), Set.of(), Set.of());
+                assertThat(resultado.get(0).getScore()).isCloseTo(6.0, within(0.001));
+            }
+        }
+    }
+
     // ── Helper ──────────────────────────────────────────────────────
 
     private Atleta.AtletaBuilder base() {
@@ -200,6 +363,11 @@ class ScoreServiceTest {
                 .mediaPontos(5.0)
                 .valorizacao(2.0)
                 .preco(15.0)
+                .defesasDificeis(0)
+                .golsSofridos(0)
+                .penaltisDefendidos(0)
+                .gols(0)
+                .assistencias(0)
                 .desempenhoRecente(0.0)
                 .score(0.0);
     }

@@ -106,8 +106,18 @@ public class CartolaDataService {
                 .mediaPontos(item.getMediaNum() != null ? item.getMediaNum() : 0.0)
                 .valorizacao(item.getVariacaoNum() != null ? item.getVariacaoNum() : 0.0)
                 .preco(preco)
+                .defesasDificeis(getScout(item, "DD"))
+                .golsSofridos(getScout(item, "GS"))
+                .penaltisDefendidos(getScout(item, "DP"))
+                .gols(getScout(item, "G"))
+                .assistencias(getScout(item, "A"))
                 .desempenhoRecente(0.0)  // preenchido pelo ScoreService
                 .score(0.0)
                 .build();
+    }
+
+    private int getScout(AtletaResponse.AtletaItem item, String key) {
+        if (item.getScout() == null) return 0;
+        return item.getScout().getOrDefault(key, 0);
     }
 }

@@ -304,12 +304,32 @@ Para cada jogo da Odds API:
 
 ### Fórmula do score
 
+O score é calculado com fórmulas distintas por posição, priorizando os indicadores mais relevantes para cada função. Os bônus `fatorCasa` e `timeFavorito` valem `10.0` quando verdadeiros, `0.0` caso contrário, e são configuráveis via `PATCH /api/config`.
+
+**Posições sem regra específica (LAT, ZAG, MEI, TEC) — fallback configurável:**
+
 ```
 score = (mediaPontos × 0.40) + (valorização × 0.20) + (desempenho × 0.20)
       + (fatorCasa × 0.10)  + (timeFavorito × 0.10)
 ```
 
-`fatorCasa` e `timeFavorito` valem `10.0` quando verdadeiros, `0.0` caso contrário.
+**Goleiro (GOL) — scouts defensivos com maior peso:**
+
+```
+score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (defesasDifíceis × 0.05) + (pênaltisDefendidos × 0.05) − (golsSofridos × 0.02)
+      + (fatorCasa × peso) + (timeFavorito × peso)
+```
+
+**Atacante (ATA) — participação ofensiva com maior peso:**
+
+```
+score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (gols × 0.08) + (assistências × 0.05)
+      + (fatorCasa × peso) + (timeFavorito × peso)
+```
+
+Os scouts (DD, GS, DP, G, A) são totais acumulados da temporada extraídos de `/atletas/mercado`. Quando não disponíveis na resposta da API, são tratados como 0 sem impacto no cálculo.
 
 **Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`.
 Fallback automático para `mediaPontos` da temporada quando o histórico não estiver disponível.
@@ -411,7 +431,7 @@ mvn test jacoco:report
 | `OddsServiceTest` | 19 — buscarFavoritos + buscarFavoritosDetalhado |
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 12 — filtros de status/preço/favorito |
-| `ScoreServiceTest` | 16 — pesos, bônus, desempenho real vs proxy, fallback |
+| `ScoreServiceTest` | 27 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA) |
 | `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |

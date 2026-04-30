@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import java.util.Map;
 
 @Getter
 @Setter
@@ -46,5 +47,9 @@ public class AtletaResponse {
 
         @JsonProperty("preco_num")
         private Double precoNum;
+
+        // Scouts da temporada: mapa de código (ex: "DD", "GS", "G", "A") -> total acumulado
+        @JsonProperty("scout")
+        private Map<String, Integer> scout;
     }
 }

@@ -17,6 +17,23 @@ public class ScoreService {
 
     private final ConfiguracaoService configuracaoService;
 
+    // --- Pesos específicos por posição: Goleiro ---
+    // Prioriza desempenho recente e scouts defensivos (DD, DP) com penalização por gols sofridos
+    static final double GOL_PESO_DESEMPENHO       = 0.35;
+    static final double GOL_PESO_MEDIA_PONTOS      = 0.25;
+    static final double GOL_PESO_VALORIZACAO       = 0.10;
+    static final double GOL_PESO_DEFESAS_DIFICEIS  = 0.05;
+    static final double GOL_PESO_PENALTIS_DEF      = 0.05;
+    static final double GOL_PENALIZACAO_GOLS_SFD   = 0.02;
+
+    // --- Pesos específicos por posição: Atacante ---
+    // Prioriza participação ofensiva: gols e assistências além do desempenho recente
+    static final double ATA_PESO_DESEMPENHO   = 0.25;
+    static final double ATA_PESO_MEDIA_PONTOS  = 0.25;
+    static final double ATA_PESO_VALORIZACAO   = 0.10;
+    static final double ATA_PESO_GOLS          = 0.08;
+    static final double ATA_PESO_ASSISTENCIAS  = 0.05;
+
     public List<Atleta> calcularScores(List<Atleta> atletas,
                                        Set<Integer> timesCasa,
                                        Set<String>  favoritos,
@@ -31,11 +48,11 @@ public class ScoreService {
                     double desempenho = desempenhoMap.getOrDefault(a.getAtletaId(), 0.0);
                     if (desempenho == 0.0) desempenho = a.getMediaPontos();
 
-                    double score = (a.getMediaPontos() * config.getPesoMediaPontos())
-                                 + (a.getValorizacao()  * config.getPesoValorizacao())
-                                 + (desempenho          * config.getPesoDesempenho())
-                                 + (fatorCasa           * config.getPesoFatorCasa())
-                                 + (timeFavorito        * config.getPesoTimeFavorito());
+                    double score = switch (a.getPosicao()) {
+                        case GOL -> calcularGoleiro(a, desempenho, fatorCasa, timeFavorito, config);
+                        case ATA -> calcularAtacante(a, desempenho, fatorCasa, timeFavorito, config);
+                        default  -> calcularDefault(a, desempenho, fatorCasa, timeFavorito, config);
+                    };
 
                     return a.withDesempenhoRecente(desempenho)
                             .withScore(Math.round(score * 10000.0) / 10000.0);
@@ -53,5 +70,43 @@ public class ScoreService {
                                        Set<Integer> timesCasa,
                                        Set<String>  favoritos) {
         return calcularScores(atletas, timesCasa, favoritos, Map.of());
+    }
+
+    // Goleiro: maior peso em desempenho e scouts defensivos
+    private double calcularGoleiro(Atleta a, double desempenho,
+                                   double fatorCasa, double timeFavorito,
+                                   Configuracao config) {
+        return (desempenho              * GOL_PESO_DESEMPENHO)
+             + (a.getMediaPontos()      * GOL_PESO_MEDIA_PONTOS)
+             + (a.getValorizacao()      * GOL_PESO_VALORIZACAO)
+             + (a.getDefesasDificeis()  * GOL_PESO_DEFESAS_DIFICEIS)
+             + (a.getPenaltisDefendidos() * GOL_PESO_PENALTIS_DEF)
+             - (a.getGolsSofridos()     * GOL_PENALIZACAO_GOLS_SFD)
+             + (fatorCasa               * config.getPesoFatorCasa())
+             + (timeFavorito            * config.getPesoTimeFavorito());
+    }
+
+    // Atacante: maior peso em participação ofensiva (gols e assistências)
+    private double calcularAtacante(Atleta a, double desempenho,
+                                    double fatorCasa, double timeFavorito,
+                                    Configuracao config) {
+        return (desempenho          * ATA_PESO_DESEMPENHO)
+             + (a.getMediaPontos()  * ATA_PESO_MEDIA_PONTOS)
+             + (a.getValorizacao()  * ATA_PESO_VALORIZACAO)
+             + (a.getGols()         * ATA_PESO_GOLS)
+             + (a.getAssistencias() * ATA_PESO_ASSISTENCIAS)
+             + (fatorCasa           * config.getPesoFatorCasa())
+             + (timeFavorito        * config.getPesoTimeFavorito());
+    }
+
+    // Fallback para posições sem regra específica (LAT, ZAG, MEI, TEC)
+    private double calcularDefault(Atleta a, double desempenho,
+                                   double fatorCasa, double timeFavorito,
+                                   Configuracao config) {
+        return (a.getMediaPontos() * config.getPesoMediaPontos())
+             + (a.getValorizacao()  * config.getPesoValorizacao())
+             + (desempenho          * config.getPesoDesempenho())
+             + (fatorCasa           * config.getPesoFatorCasa())
+             + (timeFavorito        * config.getPesoTimeFavorito());
     }
 }
