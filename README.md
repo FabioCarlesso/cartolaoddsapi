@@ -318,7 +318,7 @@ score = (mediaPontos × 0.40) + (valorização × 0.20) + (desempenho × 0.20)
 ```
 score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (defesasDifíceis × 0.05) + (pênaltisDefendidos × 0.05) − (golsSofridos × 0.02)
-      + (fatorCasa × peso) + (timeFavorito × peso)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
 ```
 
 **Atacante (ATA) — participação ofensiva com maior peso:**
@@ -326,10 +326,11 @@ score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
 ```
 score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (gols × 0.08) + (assistências × 0.05)
-      + (fatorCasa × peso) + (timeFavorito × peso)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
 ```
 
 Os scouts (DD, GS, DP, G, A) são totais acumulados da temporada extraídos de `/atletas/mercado`. Quando não disponíveis na resposta da API, são tratados como 0 sem impacto no cálculo.
+Os pesos base de GOL e ATA são constantes no `ScoreService`; para essas posições, apenas `pesoFatorCasa` e `pesoTimeFavorito` continuam configuráveis via `PATCH /api/config`.
 
 **Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`.
 Fallback automático para `mediaPontos` da temporada quando o histórico não estiver disponível.

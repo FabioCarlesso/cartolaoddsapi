@@ -118,6 +118,7 @@ public class CartolaDataService {
 
     private int getScout(AtletaResponse.AtletaItem item, String key) {
         if (item.getScout() == null) return 0;
-        return item.getScout().getOrDefault(key, 0);
+        Integer value = item.getScout().get(key);
+        return value != null ? value : 0;
     }
 }

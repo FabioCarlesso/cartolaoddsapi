@@ -15,6 +15,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -147,6 +148,27 @@ class CartolaDataServiceTest {
             var resultado = service.buscarAtletasFiltrados(Set.of());
 
             assertThat(resultado.get(0).getPosicao()).isEqualTo(Posicao.GOL);
+        }
+
+        @Test
+        @DisplayName("deve mapear scouts e tratar valores ausentes ou nulos como zero")
+        void deveMapearScoutsComFallbackZero() {
+            var item = atletaItem(1, 1, 7, 10.0, 8.0, 15.0);
+            var scout = new HashMap<String, Integer>();
+            scout.put("DD", 4);
+            scout.put("GS", null);
+            scout.put("DP", 1);
+            item.setScout(scout);
+            configurarMocks(item);
+
+            var resultado = service.buscarAtletasFiltrados(Set.of());
+
+            assertThat(resultado).hasSize(1);
+            assertThat(resultado.get(0).getDefesasDificeis()).isEqualTo(4);
+            assertThat(resultado.get(0).getGolsSofridos()).isZero();
+            assertThat(resultado.get(0).getPenaltisDefendidos()).isEqualTo(1);
+            assertThat(resultado.get(0).getGols()).isZero();
+            assertThat(resultado.get(0).getAssistencias()).isZero();
         }
 
         @Test

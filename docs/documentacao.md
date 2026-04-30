@@ -359,13 +359,39 @@ Favorito: Fortaleza (3.30 > 3.0) ⛔ descartado
 
 ### 5.3 Fórmula do Score
 
+O `ScoreService` usa fórmulas específicas por posição para GOL e ATA, mantendo o fallback configurável para LAT, ZAG, MEI e TEC. `fatorCasa` e `timeFavorito` valem `10.0` quando verdadeiros e `0.0` caso contrário.
+
+**Fallback configurável (LAT, ZAG, MEI, TEC):**
+
 ```
-score = (mediaPontos  × 0.40)
-      + (valorização  × 0.20)
-      + (desempenho   × 0.20)   ← proxy: mediaPontos
-      + (fatorCasa    × 0.10)   ← 10.0 se mandante, 0 caso contrário
-      + (timeFavorito × 0.10)   ← 10.0 se favorito pelas odds, 0 caso contrário
+score = (mediaPontos × pesoMediaPontos)
+      + (valorização × pesoValorizacao)
+      + (desempenho × pesoDesempenho)
+      + (fatorCasa × pesoFatorCasa)
+      + (timeFavorito × pesoTimeFavorito)
 ```
+
+**Goleiro (GOL):**
+
+```
+score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (defesasDificeis × 0.05) + (penaltisDefendidos × 0.05) - (golsSofridos × 0.02)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+```
+
+**Atacante (ATA):**
+
+```
+score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (gols × 0.08) + (assistencias × 0.05)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+```
+
+Os scouts são acumulados da temporada vindos de `/atletas/mercado`: `DD` -> `defesasDificeis`, `GS` -> `golsSofridos`, `DP` -> `penaltisDefendidos`, `G` -> `gols`, `A` -> `assistencias`. Valores ausentes ou nulos são tratados como `0`.
+
+Os pesos do fallback e os bônus situacionais são configuráveis via `PATCH /api/config`. Os pesos base de GOL e ATA são constantes centralizadas no `ScoreService`.
+
+**Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`. Quando o histórico não está disponível, usa `mediaPontos` como proxy.
 
 ### 5.4 Formação 4-3-3
 
@@ -635,14 +661,14 @@ Busca odds da API e retorna nomes normalizados dos times com `odd ≤ ODD_LIMITE
 Retorna `Set.of()` se API indisponível ou chave não configurada.
 
 ### `CartolaDataService.buscarAtletasFiltrados(Set<String> favoritos) → List<Atleta>`
-Busca atletas, clubes e partidas. Aplica filtros de status, preço e time favorito.  
+Busca atletas, clubes, partidas e scouts acumulados da temporada. Aplica filtros de status, preço e time favorito.
 Quando `favoritos` está vazio, ignora o filtro por time.
 
 ### `CartolaDataService.buscarTimesCasa() → Set<Integer>`
 Retorna IDs dos times mandantes da rodada atual.
 
 ### `ScoreService.calcularScores(atletas, timesCasa, favoritos) → List<Atleta>`
-Retorna nova lista imutável com campo `score` preenchido para cada atleta.
+Retorna nova lista imutável com campo `score` preenchido para cada atleta, usando fórmulas específicas para GOL/ATA e fallback configurável para as demais posições.
 
 ### `MontadorTimeService.montar(pool, rodada, avisoMercado) → Time`
 Seleciona titulares, aplica a regra configurável de defesa sem clube repetido, reservas (exceto TEC), capitão, reserva de luxo e substitutos.
@@ -690,6 +716,11 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `mediaPontos` | double | `media_num` | Média da temporada |
 | `valorizacao` | double | `variacao_num` | Variação última rodada |
 | `preco` | double | `preco_num` | Preço em cartoletas (C$) |
+| `defesasDificeis` | int | `scout.DD` | Defesas difíceis acumuladas |
+| `golsSofridos` | int | `scout.GS` | Gols sofridos acumulados |
+| `penaltisDefendidos` | int | `scout.DP` | Pênaltis defendidos acumulados |
+| `gols` | int | `scout.G` | Gols marcados acumulados |
+| `assistencias` | int | `scout.A` | Assistências acumuladas |
 | `score` | double | `ScoreService` | Score ponderado calculado |
 | `substitutoProvavel` | Atleta | `MontadorTimeService` | Preenchido somente para dúvidas |
 
