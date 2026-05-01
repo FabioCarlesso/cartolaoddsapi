@@ -114,19 +114,22 @@ Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome
 
 O projeto inclui **Spring Boot Actuator** com **Micrometer** e o registry **Prometheus** para coleta de métricas.
 
-Endpoints expostos via `management.endpoints.web.exposure.include=health,info,metrics,prometheus`:
+O Actuator roda em porta separada via `management.server.port` (padrão `9090`) e ligado a `management.server.address` (padrão `127.0.0.1`) para não expor métricas na porta pública da API. No Docker Compose, `MANAGEMENT_SERVER_ADDRESS=0.0.0.0` deixa a porta acessível apenas na rede interna do compose para scrape por Prometheus.
+
+Endpoints expostos na porta de gerenciamento via `management.endpoints.web.exposure.include=health,info,metrics,prometheus`:
 
 | Endpoint | Descrição |
 |---|---|
-| `/actuator/health` | Saúde da aplicação |
-| `/actuator/metrics` | Lista de métricas coletadas |
-| `/actuator/prometheus` | Métricas em formato Prometheus (scrape) |
+| `:9090/actuator/health` | Saúde da aplicação |
+| `:9090/actuator/metrics` | Lista de métricas coletadas |
+| `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
+| `:9090/actuator/prometheus` | Métricas em formato Prometheus (scrape) |
 
 Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos.
 
 A tag `application=cartolaoddsapi` é adicionada a todas as métricas via `management.metrics.tags.application`.
 
-Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus`.
+Para scrape com Prometheus, aponte o job para `GET :9090/actuator/prometheus`.
 
 ### Filtro de Atletas
 
@@ -187,9 +190,10 @@ com.cartola.odds/
 | `PATCH` | `/api/config` | Atualiza parâmetros em runtime |
 | `POST` | `/api/config/reset` | Restaura defaults |
 | `GET` | `/swagger-ui.html` | Documentação interativa |
-| `GET` | `/actuator/health` | Status de saúde da aplicação |
-| `GET` | `/actuator/metrics` | Lista de métricas disponíveis |
-| `GET` | `/actuator/prometheus` | Métricas no formato Prometheus |
+| `GET` | `:9090/actuator/health` | Status de saúde da aplicação |
+| `GET` | `:9090/actuator/metrics` | Lista de métricas disponíveis |
+| `GET` | `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
+| `GET` | `:9090/actuator/prometheus` | Métricas no formato Prometheus |
 
 ---
 
@@ -202,6 +206,8 @@ com.cartola.odds/
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
 | `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
 | `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
+| `MANAGEMENT_SERVER_PORT` | `9090` | Porta dos endpoints Actuator |
+| `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | Interface onde o Actuator escuta |
 
 Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via banco de dados — não precisam de variáveis de ambiente.
 
@@ -209,7 +215,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-301 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+305 cenários distribuídos em 20 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

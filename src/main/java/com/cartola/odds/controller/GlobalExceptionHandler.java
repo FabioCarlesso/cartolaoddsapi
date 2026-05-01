@@ -10,6 +10,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @Hidden
@@ -51,6 +52,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_GATEWAY)
                 .body(ErrorResponse.of(502, "Erro de comunicacao com API externa", ex.getMessage()));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException ex) {
+        log.warn("Recurso nao encontrado: {}", ex.getResourcePath());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of(404, "Recurso nao encontrado", ex.getResourcePath()));
     }
 
     @ExceptionHandler(Exception.class)
