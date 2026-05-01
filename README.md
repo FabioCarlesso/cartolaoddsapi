@@ -22,6 +22,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 12 | **Reserva de Luxo por Reserva** | Reserva de luxo é sempre a reserva com maior score |
 | 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
 
 
 ---
@@ -36,6 +37,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 - [Endpoints](#endpoints)
 - [Regras de Negócio](#regras-de-negócio)
 - [Estrutura do Projeto](#estrutura-do-projeto)
+- [Observabilidade](#observabilidade)
 - [Testes](#testes)
 
 ---
@@ -52,6 +54,8 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | Caffeine Cache | 3.x |
 | PostgreSQL | 16 |
 | Flyway | 10.x |
+| Micrometer | 1.14.x |
+| Prometheus Client | 1.3.x |
 
 ---
 
@@ -186,6 +190,10 @@ odds.api.key=SUA_API_KEY_AQUI
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
+| `GET` | `/actuator/health` | Saúde da aplicação |
+| `GET` | `/actuator/metrics` | Lista de métricas disponíveis |
+| `GET` | `/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
+| `GET` | `/actuator/prometheus` | Métricas no formato Prometheus (scrape) |
 
 ### Exemplo — `GET /api/favoritos`
 
@@ -408,11 +416,54 @@ cartola/
     │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
     │           └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     └── test/
-        ├── java/                            # 18 classes de teste — 258 cenários
+        ├── java/                            # 19 classes de teste — 301 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
 ```
+
+---
+
+## Observabilidade
+
+A aplicação expõe endpoints de monitoramento via **Spring Boot Actuator** com métricas coletadas pelo **Micrometer** e exportadas no formato **Prometheus**.
+
+### Endpoints expostos
+
+| Endpoint | Descrição |
+|---|---|
+| `GET /actuator/health` | Status de saúde (`UP` / `DOWN`) |
+| `GET /actuator/metrics` | Lista todas as métricas disponíveis |
+| `GET /actuator/metrics/{nome}` | Detalhe de uma métrica (ex: `http.server.requests`) |
+| `GET /actuator/prometheus` | Métricas em formato Prometheus para scrape |
+
+### Exemplo — `GET /actuator/health`
+
+```json
+{ "status": "UP" }
+```
+
+### Exemplo — `GET /actuator/prometheus` (trecho)
+
+```
+# HELP http_server_requests_seconds Duration of HTTP server request handling
+# TYPE http_server_requests_seconds summary
+http_server_requests_seconds_count{application="cartolaoddsapi",...} 42
+```
+
+### Integração com Prometheus/Grafana
+
+Para integrar com Prometheus, adicione o job no `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'cartolaoddsapi'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['localhost:8080']
+```
+
+> Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
 ---
 
@@ -448,6 +499,7 @@ mvn test jacoco:report
 | `AtletaTest` | 5 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
+| `ActuatorEndpointsTest` | 6 — health (200 + UP), metrics (200 + names), prometheus (200 + formato) |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---
