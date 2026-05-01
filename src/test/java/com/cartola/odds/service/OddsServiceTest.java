@@ -75,6 +75,15 @@ class OddsServiceTest {
         }
 
         @Test
+        @DisplayName("deve aplicar alias no nome do favorito")
+        void deveAplicarAliasNoFavorito() {
+            when(oddsClient.buscarOdds())
+                    .thenReturn(List.of(jogo("Inter", 1.95, "Fluminense FC", 4.20)));
+
+            assertThat(oddsService.buscarFavoritos()).containsExactly("internacional");
+        }
+
+        @Test
         @DisplayName("deve processar multiplos jogos retornando todos os favoritos validos")
         void deveProcessarMultiplosJogos() {
             when(oddsClient.buscarOdds()).thenReturn(List.of(
