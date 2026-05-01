@@ -23,6 +23,13 @@ public class Atleta {
     private final double valorizacao;
     private final double preco;
 
+    // Scouts acumulados da temporada (0 quando não disponível na resposta da API)
+    private final int defesasDificeis;   // DD - defesas difíceis (goleiros)
+    private final int golsSofridos;      // GS - gols sofridos (goleiros)
+    private final int penaltisDefendidos; // DP - pênaltis defendidos (goleiros)
+    private final int gols;              // G  - gols marcados (atacantes)
+    private final int assistencias;      // A  - assistências (atacantes)
+
     /**
      * Media de pontuacao das ultimas {@code DesempenhoService.RODADAS_HISTORICO} rodadas.
      * Preenchido pelo ScoreService quando o historico estiver disponivel.

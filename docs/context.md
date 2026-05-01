@@ -41,13 +41,40 @@ O `PipelineService` orquestra a montagem em etapas:
 
 ### Fórmula de Score
 
+O `ScoreService` aplica fórmulas distintas conforme a posição do atleta, priorizando os indicadores mais relevantes para cada função. Os bônus situacionais (`fatorCasa` e `timeFavorito`) são configuráveis via banco de dados e se aplicam a todas as posições.
+
+#### Posições sem regra específica (LAT, ZAG, MEI, TEC) — fallback configurável
+
 ```
-score = (mediaPontos × peso) + (valorização × peso) + (desempenho × peso)
-      + (fatorCasa × peso)   + (timeFavorito × peso)
+score = (mediaPontos × 0.40) + (valorização × 0.20) + (desempenho × 0.20)
+      + (fatorCasa × 0.10)   + (timeFavorito × 0.10)
 ```
 
-Os pesos padrão são: `mediaPontos=0.40, valorização=0.20, desempenho=0.20, fatorCasa=0.10, timeFavorito=0.10`.
-Todos os parâmetros são configuráveis em runtime via `PATCH /api/config` sem restart.
+Todos os pesos do fallback são configuráveis em runtime via `PATCH /api/config` sem restart.
+
+#### Goleiro (GOL) — prioridade em scouts defensivos
+
+```
+score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (defesasDificeis × 0.05) + (penaltisDefendidos × 0.05) − (golsSofridos × 0.02)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+```
+
+`defesasDificeis` (DD), `penaltisDefendidos` (DP) e `golsSofridos` (GS) são scouts acumulados da temporada extraídos de `/atletas/mercado`. Quando não disponíveis na resposta da API, os scouts são tratados como 0 sem impacto no cálculo.
+
+#### Atacante (ATA) — prioridade em participação ofensiva
+
+```
+score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
+      + (gols × 0.08) + (assistencias × 0.05)
+      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+```
+
+`gols` (G) e `assistencias` (A) são scouts acumulados da temporada. O bônus `timeFavorito` reforça a preferência por atacantes de times com odds favoráveis.
+
+#### Constantes de peso por posição
+
+Os pesos específicos por posição são constantes centralizadas em `ScoreService` (prefixo `GOL_` e `ATA_`), fáceis de ajustar sem impactar a fórmula das demais posições.
 
 ### Configuração via Banco de Dados
 
@@ -161,7 +188,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-258 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
+269 cenários distribuídos em 18 classes de teste cobrindo serviços, controllers, domínio e utilitários.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
