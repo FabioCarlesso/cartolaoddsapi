@@ -131,6 +131,17 @@ class CartolaDataServiceTest {
         }
 
         @Test
+        @DisplayName("deve cruzar favoritos usando aliases do nome do clube")
+        void deveCruzarFavoritosUsandoAliases() {
+            configurarMocksComNomeClube(atletaItem(1, 5, 7, 10.0, 8.0, 15.0), "Fluminense FC");
+
+            var resultado = service.buscarAtletasFiltrados(Set.of("fluminense"));
+
+            assertThat(resultado).hasSize(1);
+            assertThat(resultado.get(0).getNomeClubeNorm()).isEqualTo("fluminense");
+        }
+
+        @Test
         @DisplayName("deve usar primeiras 3 letras do nome do clube como sigla quando abreviacao ausente")
         void deveUsarFallbackDeSigla() {
             configurarMocksComClubeSemAbreviacao(atletaItem(1, 5, 7, 10.0, 8.0, 15.0));
@@ -232,6 +243,24 @@ class CartolaDataServiceTest {
         var clube = new ClubeResponse();
         clube.setNome("Flamengo");
         clube.setAbreviacao(null);  // sem abreviacao
+
+        var atletaResp = new AtletaResponse();
+        atletaResp.setAtletas(List.of(item));
+
+        var partida = new PartidaResponse.PartidaItem();
+        partida.setClubeCasaId(1);
+        var partidaResp = new PartidaResponse();
+        partidaResp.setPartidas(List.of(partida));
+
+        when(cartolaClient.buscarClubes()).thenReturn(Map.of("1", clube));
+        when(cartolaClient.buscarAtletas()).thenReturn(atletaResp);
+        when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+    }
+
+    private void configurarMocksComNomeClube(AtletaResponse.AtletaItem item, String nomeClube) {
+        var clube = new ClubeResponse();
+        clube.setNome(nomeClube);
+        clube.setAbreviacao(nomeClube.length() >= 3 ? nomeClube.substring(0, 3).toUpperCase() : null);
 
         var atletaResp = new AtletaResponse();
         atletaResp.setAtletas(List.of(item));

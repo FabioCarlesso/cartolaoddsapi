@@ -364,7 +364,9 @@ Quando o limite impedir a escalação completa em uma posição, o montador tent
 
 ### Normalização de nomes de clubes
 
-Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, sem acentos, com hífens transformados em espaços, espaços duplicados colapsados e aliases aplicados. Exemplos: `Atlético-MG` → `atletico mg`, `Atlético Mineiro MG` → `atletico mg`, `Athletico Paranaense` → `athletico pr`, `Vasco da Gama` → `vasco`.
+Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, sem acentos, com hífens transformados em espaços, espaços duplicados colapsados e aliases aplicados. Exemplos: `Atlético-MG` → `atletico mg`, `Atlético Mineiro MG` → `atletico mg`, `Athletico Paranaense` → `athletico pr`, `São Paulo FC` → `sao paulo`, `Inter` → `internacional`, `Fluminense FC` → `fluminense`, `Vasco da Gama` → `vasco`.
+
+O dicionário central fica em `NormalizadorUtil`. Para adicionar um alias, normalize mentalmente a grafia de entrada (sem acento, minúscula, hífen como espaço) e inclua uma entrada no mapa `ALIASES` apontando para o nome canônico já usado no cruzamento.
 
 ---
 
@@ -445,7 +447,7 @@ mvn test jacoco:report
 | `TimeControllerTest` | 7 — HTTP completo |
 | `AtletaTest` | 5 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
-| `NormalizadorUtilTest` | 10 — normalização |
+| `NormalizadorUtilTest` | normalização e aliases de clubes |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---

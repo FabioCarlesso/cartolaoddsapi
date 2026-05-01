@@ -489,11 +489,15 @@ Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
 // colapsa espaços duplicados, elimina especiais e aplica aliases.
 NormalizadorUtil.normalizar("Atlético-MG")         // → "atletico mg"
 NormalizadorUtil.normalizar("Atlético Mineiro MG") // → "atletico mg"
-NormalizadorUtil.normalizar("São Paulo FC")        // → "sao paulo fc"
+NormalizadorUtil.normalizar("São Paulo FC")        // → "sao paulo"
 NormalizadorUtil.normalizar("Grêmio")              // → "gremio"
+NormalizadorUtil.normalizar("Inter")               // → "internacional"
+NormalizadorUtil.normalizar("Fluminense FC")       // → "fluminense"
 ```
 
-Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense` e `vasco da gama`.
+Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense`, `sao paulo fc`, `inter`, `fluminense fc` e `vasco da gama`.
+
+Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`. A chave deve estar no formato já normalizado pelo utilitário (sem acentos, lowercase, hífens como espaços e espaços duplicados colapsados) e o valor deve ser o nome canônico usado no cruzamento entre favoritos e clubes do Cartola.
 
 ---
 
@@ -695,7 +699,7 @@ Retorna o texto de aviso quando o mercado não está aberto; `null` quando abert
 Propagado para todos os responses via `Time.avisoMercado` e `RankingResponse.avisoMercado`.
 
 ### `NormalizadorUtil.normalizar(String) → String`
-Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espaço, remove caracteres especiais, colapsa espaços duplicados e aplica aliases de clubes.
+Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espaço, remove caracteres especiais, colapsa espaços duplicados e aplica aliases de clubes definidos no mapa central `ALIASES`.
 
 ### `GlobalExceptionHandler.handleValidation(MethodArgumentNotValidException) → ErrorResponse`
 Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e todas as mensagens de campos inválidos concatenadas com `"; "` no corpo da resposta.
@@ -785,7 +789,7 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
-| `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência |
+| `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência e aliases |
 
 Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
 
@@ -989,7 +993,7 @@ mvn spring-boot:run
 
 ### Dados e Algoritmos
 - [ ] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
-- [ ] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
+- [x] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
 - [ ] Ponderar a odd como **variável contínua** em vez de bônus binário
 
 ### Infraestrutura

@@ -15,13 +15,13 @@ class NormalizadorUtilTest {
     @ParameterizedTest(name = "''{0}'' -> ''{1}''")
     @CsvSource({
         "Atletico-MG,        atletico mg",
-        "Sao Paulo FC,       sao paulo fc",
+        "Sao Paulo FC,       sao paulo",
         "Gremio,             gremio",
         "Athletico Paranaense, athletico pr",
         "Flamengo,           flamengo",
         "BOTAFOGO,           botafogo",
         "Vasco da Gama,      vasco",
-        "Coritiba FC,        coritiba fc",
+        "Fluminense FC,      fluminense",
     })
     @DisplayName("deve normalizar nomes de clubes corretamente")
     void deveNormalizarNomesDeClube(String entrada, String esperado) {
@@ -46,7 +46,7 @@ class NormalizadorUtilTest {
     @Test
     @DisplayName("deve remover barra e caracteres especiais")
     void deveRemoverCaracteresEspeciais() {
-        assertThat(NormalizadorUtil.normalizar("Sport/Recife")).isEqualTo("sportrecife");
+        assertThat(NormalizadorUtil.normalizar("Sport/Recife")).isEqualTo("sport");
     }
 
     @Test
@@ -78,7 +78,25 @@ class NormalizadorUtilTest {
         String cartola  = NormalizadorUtil.normalizar("Atletico Mineiro MG");
 
         // Ambos devem normalizar de forma que o cruzamento seja possivel
-        assertThat(oddsApi).doesNotContain("-");
-        assertThat(cartola).doesNotContain("-");
+        assertThat(oddsApi).isEqualTo("atletico mg");
+        assertThat(cartola).isEqualTo(oddsApi);
+    }
+
+    @ParameterizedTest(name = "''{0}'' e ''{1}'' -> ''{2}''")
+    @CsvSource({
+        "Atlético-MG,            Atletico Mineiro,       atletico mg",
+        "Athletico-PR,           Athletico Paranaense,   athletico pr",
+        "São Paulo,              Sao Paulo FC,           sao paulo",
+        "Internacional,          Inter,                  internacional",
+        "Fluminense,             Fluminense FC,          fluminense",
+        "Red Bull Bragantino,    Bragantino SP,          bragantino",
+        "Vasco da Gama,          CR Vasco da Gama,       vasco",
+        "Atlético-GO,            Atletico Goianiense,    atletico go",
+        "América-MG,             America Mineiro,        america mg"
+    })
+    @DisplayName("deve aplicar aliases para nomes divergentes entre APIs")
+    void deveAplicarAliasesParaNomesDivergentes(String primeiraGrafia, String segundaGrafia, String esperado) {
+        assertThat(NormalizadorUtil.normalizar(primeiraGrafia)).isEqualTo(esperado);
+        assertThat(NormalizadorUtil.normalizar(segundaGrafia)).isEqualTo(esperado);
     }
 }
