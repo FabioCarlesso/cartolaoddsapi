@@ -22,6 +22,7 @@ class NormalizadorUtilTest {
         "BOTAFOGO,           botafogo",
         "Vasco da Gama,      vasco",
         "Fluminense FC,      fluminense",
+        "Coritiba FC,        coritiba fc",
     })
     @DisplayName("deve normalizar nomes de clubes corretamente")
     void deveNormalizarNomesDeClube(String entrada, String esperado) {
@@ -91,8 +92,21 @@ class NormalizadorUtilTest {
         "Fluminense,             Fluminense FC,          fluminense",
         "Red Bull Bragantino,    Bragantino SP,          bragantino",
         "Vasco da Gama,          CR Vasco da Gama,       vasco",
-        "Atlético-GO,            Atletico Goianiense,    atletico go",
-        "América-MG,             America Mineiro,        america mg"
+        "Atlético-GO,                       Atletico Goianiense,             atletico go",
+        "América-MG,                        America Mineiro,                 america mg",
+        "Botafogo FR,                       Botafogo RJ,                     botafogo",
+        "Corinthians Paulista,              Sport Club Corinthians Paulista,  corinthians",
+        "Cruzeiro EC,                       Cruzeiro MG,                     cruzeiro",
+        "EC Bahia,                          Bahia,                           bahia",
+        "EC Vitoria,                        Vitoria BA,                      vitoria",
+        "Fortaleza EC,                      Fortaleza,                       fortaleza",
+        "Gremio FBPA,                       Gremio,                          gremio",
+        "Mirassol FC,                       Mirassol,                        mirassol",
+        "Palmeiras SP,                      SE Palmeiras,                    palmeiras",
+        "Santos FC,                         Santos,                          santos",
+        "Sport Recife,                      Sport,                           sport",
+        "America Futebol Clube,             America FC MG,                   america mg",
+        "EC Juventude,                      Juventude,                       juventude"
     })
     @DisplayName("deve aplicar aliases para nomes divergentes entre APIs")
     void deveAplicarAliasesParaNomesDivergentes(String primeiraGrafia, String segundaGrafia, String esperado) {

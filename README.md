@@ -447,7 +447,7 @@ mvn test jacoco:report
 | `TimeControllerTest` | 7 — HTTP completo |
 | `AtletaTest` | 5 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
-| `NormalizadorUtilTest` | normalização e aliases de clubes |
+| `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---

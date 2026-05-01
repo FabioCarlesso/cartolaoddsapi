@@ -495,7 +495,7 @@ NormalizadorUtil.normalizar("Inter")               // → "internacional"
 NormalizadorUtil.normalizar("Fluminense FC")       // → "fluminense"
 ```
 
-Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense`, `sao paulo fc`, `inter`, `fluminense fc` e `vasco da gama`.
+Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense`, `sao paulo fc`, `inter`, `fluminense fc`, `vasco da gama` e variantes como `botafogo fr`/`botafogo rj`, `ec bahia`, `cruzeiro ec`, `palmeiras sp`, `sport recife` e `santos fc`. Entradas como `sportrecife` (sem espaço) existem no mapa para cobrir casos em que uma barra é removida pelo pipeline antes da consulta ao dicionário (ex.: `Sport/Recife` → `sportrecife` após limpeza de caracteres especiais).
 
 Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`. A chave deve estar no formato já normalizado pelo utilitário (sem acentos, lowercase, hífens como espaços e espaços duplicados colapsados) e o valor deve ser o nome canônico usado no cruzamento entre favoritos e clubes do Cartola.
 

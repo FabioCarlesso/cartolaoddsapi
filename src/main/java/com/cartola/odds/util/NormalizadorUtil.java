@@ -32,7 +32,6 @@ public final class NormalizadorUtil {
             Map.entry("fluminense fc", "fluminense"),
             Map.entry("fortaleza ec", "fortaleza"),
             Map.entry("gremio fbpa", "gremio"),
-            Map.entry("internacional", "internacional"),
             Map.entry("inter", "internacional"),
             Map.entry("sc internacional", "internacional"),
             Map.entry("mirassol fc", "mirassol"),
