@@ -22,6 +22,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 12 | **Reserva de Luxo por Reserva** | Reserva de luxo é sempre a reserva com maior score |
 | 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
 
 
 ---
@@ -36,6 +37,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 - [Endpoints](#endpoints)
 - [Regras de Negócio](#regras-de-negócio)
 - [Estrutura do Projeto](#estrutura-do-projeto)
+- [Observabilidade](#observabilidade)
 - [Testes](#testes)
 
 ---
@@ -52,6 +54,8 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | Caffeine Cache | 3.x |
 | PostgreSQL | 16 |
 | Flyway | 10.x |
+| Micrometer | 1.14.x |
+| Prometheus Client | 1.3.x |
 
 ---
 
@@ -157,6 +161,8 @@ odds.api.key=SUA_API_KEY_AQUI
 | `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
 | `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
 | `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
+| `MANAGEMENT_SERVER_PORT` | `9090` | Porta dos endpoints Actuator |
+| `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | Interface onde o Actuator escuta |
 
 > **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
@@ -186,6 +192,10 @@ odds.api.key=SUA_API_KEY_AQUI
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
+| `GET` | `:9090/actuator/health` | Saúde da aplicação |
+| `GET` | `:9090/actuator/metrics` | Lista de métricas disponíveis |
+| `GET` | `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
+| `GET` | `:9090/actuator/prometheus` | Métricas no formato Prometheus (scrape) |
 
 ### Exemplo — `GET /api/favoritos`
 
@@ -406,13 +416,59 @@ cartola/
     │       └── db/migration/
     │           ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
-    │           └── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
+    │           ├── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
+    │           └── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
     └── test/
-        ├── java/                            # 18 classes de teste — 258 cenários
+        ├── java/                            # 20 classes de teste — 305 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
 ```
+
+---
+
+## Observabilidade
+
+A aplicação expõe endpoints de monitoramento via **Spring Boot Actuator** com métricas coletadas pelo **Micrometer** e exportadas no formato **Prometheus**.
+
+Por padrão, o Actuator roda em uma porta separada (`MANAGEMENT_SERVER_PORT`, padrão `9090`) e ligado ao endereço local (`MANAGEMENT_SERVER_ADDRESS`, padrão `127.0.0.1`). Isso mantém métricas fora da porta pública da API (`8080`) em execuções locais. No Docker Compose, a porta de gerenciamento fica disponível apenas na rede interna do compose para permitir scrape por Prometheus sem publicá-la no host.
+
+### Endpoints expostos
+
+| Endpoint | Descrição |
+|---|---|
+| `GET :9090/actuator/health` | Status de saúde (`UP` / `DOWN`) |
+| `GET :9090/actuator/metrics` | Lista todas as métricas disponíveis |
+| `GET :9090/actuator/metrics/{nome}` | Detalhe de uma métrica (ex: `http.server.requests`) |
+| `GET :9090/actuator/prometheus` | Métricas em formato Prometheus para scrape |
+
+### Exemplo — `GET :9090/actuator/health`
+
+```json
+{ "status": "UP" }
+```
+
+### Exemplo — `GET :9090/actuator/prometheus` (trecho)
+
+```
+# HELP http_server_requests_seconds Duration of HTTP server request handling
+# TYPE http_server_requests_seconds summary
+http_server_requests_seconds_count{application="cartolaoddsapi",...} 42
+```
+
+### Integração com Prometheus/Grafana
+
+Para integrar com Prometheus, adicione o job no `prometheus.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: 'cartolaoddsapi'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+```
+
+> Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
 ---
 
@@ -448,6 +504,7 @@ mvn test jacoco:report
 | `AtletaTest` | 5 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
+| `ActuatorEndpointsTest` | 10 — health, metrics, prometheus e bloqueio de endpoints sensíveis |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---
