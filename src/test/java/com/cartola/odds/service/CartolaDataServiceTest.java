@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -236,7 +237,7 @@ class CartolaDataServiceTest {
             ));
             when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
 
-            assertThat(service.buscarConfrontosRodadaAtual()).containsExactly("botafogo|flamengo");
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactlyInAnyOrder("botafogo|flamengo");
         }
 
         @Test
@@ -249,6 +250,29 @@ class CartolaDataServiceTest {
             when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
 
             assertThat(service.buscarConfrontosRodadaAtual()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve descartar silenciosamente partida cujo clube nao existe no mapa de clubes")
+        void deveDescartarPartidaComClubeDesconhecido() {
+            var partida = partida(99, 2);
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve propagar excecao quando o cliente Cartola falhar")
+        void devePropagarExcecaoDoCliente() {
+            when(cartolaClient.buscarClubes()).thenThrow(new RuntimeException("Cartola indisponivel"));
+
+            assertThrows(RuntimeException.class, () -> service.buscarConfrontosRodadaAtual());
         }
     }
 

@@ -2,6 +2,7 @@ package com.cartola.odds.service;
 
 import com.cartola.odds.client.OddsClient;
 import com.cartola.odds.model.Configuracao;
+import com.cartola.odds.model.response.FavoritosResponse;
 import com.cartola.odds.model.response.OddsResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -281,8 +282,12 @@ class OddsServiceTest {
             assertThat(resultado.getTotalJogos()).isEqualTo(2);
             assertThat(resultado.getTotalFavoritos()).isEqualTo(1);
             assertThat(resultado.getTotalDescartados()).isEqualTo(1);
-            assertThat(resultado.getFavoritos().get(0).getTimeFavorito()).isEqualTo("Flamengo");
-            assertThat(resultado.getDescartados().get(0).getTimeCasa()).isEqualTo("Fortaleza");
+            assertThat(resultado.getFavoritos())
+                    .extracting(FavoritosResponse.JogoFavoritoDto::getTimeFavorito)
+                    .containsExactlyInAnyOrder("Flamengo");
+            assertThat(resultado.getDescartados())
+                    .extracting(FavoritosResponse.JogoDescartadoDto::getTimeCasa)
+                    .containsExactlyInAnyOrder("Fortaleza");
         }
 
         @Test

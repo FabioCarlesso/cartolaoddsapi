@@ -29,11 +29,19 @@ public class OddsService {
     // ── API interna (usada pelo pipeline de time/ranking) ─────────────
 
     public Set<String> buscarFavoritos() {
-        return buscarFavoritos(configuracaoService.buscarConfig().getOddLimite());
+        return buscarFavoritos(configuracaoService.buscarConfig().getOddLimite(), buscarConfrontosComFallback());
+    }
+
+    public Set<String> buscarFavoritos(Set<String> confrontos) {
+        return buscarFavoritos(configuracaoService.buscarConfig().getOddLimite(), confrontos);
     }
 
     public Set<String> buscarFavoritos(double oddLimite) {
-        var response = processarOdds(oddsClient.buscarOdds(), oddLimite, buscarConfrontosRodadaAtual());
+        return buscarFavoritos(oddLimite, buscarConfrontosComFallback());
+    }
+
+    public Set<String> buscarFavoritos(double oddLimite, Set<String> confrontos) {
+        var response = processarOdds(oddsClient.buscarOdds(), oddLimite, confrontos);
         return response.getFavoritos().stream()
                 .map(j -> NormalizadorUtil.normalizar(j.getTimeFavorito()))
                 .collect(Collectors.toUnmodifiableSet());
@@ -57,7 +65,7 @@ public class OddsService {
                     .build();
         }
 
-        return processarOdds(odds, oddLimite, buscarConfrontosRodadaAtual());
+        return processarOdds(odds, oddLimite, buscarConfrontosComFallback());
     }
 
     // ── Privado ───────────────────────────────────────────────────────
@@ -84,7 +92,7 @@ public class OddsService {
                 .build();
     }
 
-    private Set<String> buscarConfrontosRodadaAtual() {
+    private Set<String> buscarConfrontosComFallback() {
         Set<String> confrontos;
         try {
             confrontos = cartolaDataService.buscarConfrontosRodadaAtual();
@@ -93,7 +101,7 @@ public class OddsService {
                     e.getMessage());
             return Set.of();
         }
-        if (confrontos == null || confrontos.isEmpty()) {
+        if (confrontos.isEmpty()) {
             log.warn("Nao foi possivel identificar confrontos da rodada atual. Processando todas as odds disponiveis.");
             return Set.of();
         }
@@ -101,7 +109,7 @@ public class OddsService {
     }
 
     private List<OddsResponse> filtrarOddsRodadaAtual(List<OddsResponse> odds, Set<String> confrontosRodadaAtual) {
-        if (confrontosRodadaAtual == null || confrontosRodadaAtual.isEmpty()) return odds;
+        if (confrontosRodadaAtual.isEmpty()) return odds;
 
         List<OddsResponse> filtradas = odds.stream()
                 .filter(jogo -> confrontosRodadaAtual.contains(

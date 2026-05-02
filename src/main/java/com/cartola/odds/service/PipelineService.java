@@ -43,8 +43,9 @@ public class PipelineService {
             log.info("Mercado aberto | Rodada: {}", statusResponse.getRodadaAtual());
         }
 
-        log.info("2 - Buscando odds e identificando favoritos...");
-        Set<String> favoritos = oddsService.buscarFavoritos();
+        log.info("2 - Buscando dados da rodada e identificando favoritos...");
+        var dadosRodada = cartolaDataService.buscarDadosRodada();
+        Set<String> favoritos = oddsService.buscarFavoritos(dadosRodada.confrontos());
 
         log.info("3 - Buscando atletas do Cartola...");
         var atletasFiltrados = cartolaDataService.buscarAtletasFiltrados(favoritos);
@@ -54,8 +55,8 @@ public class PipelineService {
                 "Nenhum atleta disponivel. Verifique a Odds API Key e o valor de ODD_LIMITE.");
         }
 
-        log.info("4 - Buscando times mandantes...");
-        Set<Integer> timesCasa = cartolaDataService.buscarTimesCasa();
+        log.info("4 - Identificando times mandantes...");
+        Set<Integer> timesCasa = dadosRodada.timesCasa();
 
         log.info("5 - Calculando desempenho das ultimas {} rodadas...", DesempenhoService.RODADAS_HISTORICO);
         var desempenhoMap = desempenhoService.calcularMediaUltimasRodadas(statusResponse.getRodadaAtual());

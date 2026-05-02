@@ -57,14 +57,20 @@ public class CartolaDataService {
         return atletas;
     }
 
+    public record DadosRodada(Set<Integer> timesCasa, Set<String> confrontos) {}
+
+    public DadosRodada buscarDadosRodada() {
+        Map<String, ClubeResponse> clubes = cartolaClient.buscarClubes();
+        PartidaResponse partidas = cartolaClient.buscarPartidas();
+        return new DadosRodada(extrairTimesCasa(partidas), extrairConfrontos(partidas, clubes));
+    }
+
     public Set<Integer> buscarTimesCasa() {
         return extrairTimesCasa(cartolaClient.buscarPartidas());
     }
 
     public Set<String> buscarConfrontosRodadaAtual() {
-        Map<String, ClubeResponse> clubesRaw = cartolaClient.buscarClubes();
-        PartidaResponse partidasRaw = cartolaClient.buscarPartidas();
-        return extrairConfrontos(partidasRaw, clubesRaw);
+        return buscarDadosRodada().confrontos();
     }
 
     // ── Privados ──────────────────────────────────────────────────────

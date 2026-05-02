@@ -70,9 +70,9 @@ class PipelineServiceTest {
             pipelineService.executar();
 
             verify(cartolaDataService, times(1)).buscarStatusMercado();
-            verify(oddsService,        times(1)).buscarFavoritos();
+            verify(cartolaDataService, times(1)).buscarDadosRodada();
+            verify(oddsService,        times(1)).buscarFavoritos(any());
             verify(cartolaDataService, times(1)).buscarAtletasFiltrados(any());
-            verify(cartolaDataService, times(1)).buscarTimesCasa();
             verify(desempenhoService,  times(1)).calcularMediaUltimasRodadas(15);
             verify(scoreService,       times(1)).calcularScores(any(), any(), any(), any());
             verify(montadorTimeService,times(1)).montar(any(), eq(15), any());
@@ -107,7 +107,9 @@ class PipelineServiceTest {
         @DisplayName("deve lancar IllegalStateException quando pool estiver vazio")
         void deveLancarExcecaoQuandoPoolVazio() {
             when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
-            when(oddsService.buscarFavoritos()).thenReturn(Set.of());
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
             when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(List.of());
 
             assertThatThrownBy(() -> pipelineService.executar())
@@ -119,7 +121,9 @@ class PipelineServiceTest {
         @DisplayName("nao deve chamar DesempenhoService quando pool estiver vazio")
         void naoDeveChamarDesempenhoQuandoPoolVazio() {
             when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
-            when(oddsService.buscarFavoritos()).thenReturn(Set.of());
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
             when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(List.of());
 
             try { pipelineService.executar(); } catch (IllegalStateException ignored) {}
@@ -138,9 +142,10 @@ class PipelineServiceTest {
 
             var atletas = atletasMinimos();
             when(cartolaDataService.buscarStatusMercado()).thenReturn(statusFechado);
-            when(oddsService.buscarFavoritos()).thenReturn(Set.of());
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
             when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
-            when(cartolaDataService.buscarTimesCasa()).thenReturn(Set.of());
             when(desempenhoService.calcularMediaUltimasRodadas(14)).thenReturn(Map.of());
             when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
             when(montadorTimeService.montar(any(), eq(14), any())).thenReturn(timeMock(14));
@@ -168,9 +173,10 @@ class PipelineServiceTest {
     private void configurarMocks(List<Atleta> atletas, Set<String> favoritos,
                                   Set<Integer> timesCasa, Map<Integer, Double> desempenhoMap) {
         when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
-        when(oddsService.buscarFavoritos()).thenReturn(favoritos);
+        when(cartolaDataService.buscarDadosRodada())
+                .thenReturn(new CartolaDataService.DadosRodada(timesCasa, Set.of()));
+        when(oddsService.buscarFavoritos(any())).thenReturn(favoritos);
         when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
-        when(cartolaDataService.buscarTimesCasa()).thenReturn(timesCasa);
         when(desempenhoService.calcularMediaUltimasRodadas(15)).thenReturn(desempenhoMap);
         when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
         when(montadorTimeService.montar(any(), eq(15), any())).thenReturn(timeMock(15));

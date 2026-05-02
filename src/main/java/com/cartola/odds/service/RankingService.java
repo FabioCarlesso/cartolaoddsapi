@@ -33,8 +33,9 @@ public class RankingService {
         log.info("Buscando ranking | posicao={} | limite={}",
                 posicao != null ? posicao : "TODAS", limiteValido);
 
-        Set<String>  favoritos       = oddsService.buscarFavoritos();
-        Set<Integer> timesCasa       = cartolaDataService.buscarTimesCasa();
+        var dadosRodada              = cartolaDataService.buscarDadosRodada();
+        Set<String>  favoritos       = oddsService.buscarFavoritos(dadosRodada.confrontos());
+        Set<Integer> timesCasa       = dadosRodada.timesCasa();
         var          statusResponse  = cartolaDataService.buscarStatusMercado();
         var          statusMercado   = statusResponse.getStatus();
 
