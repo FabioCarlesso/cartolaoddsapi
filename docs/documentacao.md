@@ -334,11 +334,15 @@ O cache `configuracao` é interno da camada de configuração e é invalidado au
 
 ### 5.1 Identificação de Times Favoritos
 
-1. Para cada jogo, seleciona o time com **menor odd** (maior probabilidade de vitória).
-2. Aplica `ODD_LIMITE` (padrão `3.0`):
+1. Cruza os jogos da Odds API com os confrontos da rodada atual do Cartola (`/partidas` + `/clubes`).
+2. Ignora odds de confrontos que não pertencem à rodada atual.
+3. Para cada jogo restante, seleciona o time com **menor odd** (maior probabilidade de vitória).
+4. Aplica `ODD_LIMITE` (padrão `3.0`):
    - `odd ≤ ODD_LIMITE` → time entra no conjunto `favoritos_norm`
    - `odd > ODD_LIMITE` → jogo descartado (equilibrado ou sem favorito claro)
-3. Nomes normalizados antes do cruzamento com dados do Cartola.
+5. Nomes normalizados antes do cruzamento com dados do Cartola.
+
+Se os confrontos da rodada atual não estiverem disponíveis, o processamento mantém o fallback resiliente e considera todas as odds retornadas.
 
 ```
 Flamengo x Palmeiras → odds: FLA 2.10 / PAL 3.40
@@ -463,13 +467,14 @@ Aplica os **mesmos filtros do `/api/time`** (status, preço e time favorito).
 
 ### 5.10 Endpoint de Favoritos (`GET /api/favoritos`)
 
-Lista todos os jogos da rodada classificados em **favoritos** e **descartados**.
+Lista os jogos da rodada atual classificados em **favoritos** e **descartados**.
 
 | Parâmetro | Tipo | Padrão | Descrição |
 |---|---|---|---|
 | `oddLimite` | double | *valor do properties* | Odd máxima para considerar um time favorito. Deve ser `> 1.0`. |
 
 **Lógica por jogo:**
+- Ignora odds de confrontos fora da rodada atual do Cartola.
 - Seleciona o time com menor odd (excluindo empate) como candidato a favorito.
 - Se a menor odd ≤ `oddLimite` → jogo entra em **favoritos** com todos os detalhes.
 - Se a menor odd > `oddLimite` → jogo entra em **descartados** com motivo legível.
@@ -661,7 +666,7 @@ Atualiza os campos não-nulos da configuração, valida a soma dos pesos e inval
 Restaura todos os campos para os valores padrão e invalida o cache.
 
 ### `OddsService.buscarFavoritos() → Set<String>`
-Busca odds da API e retorna nomes normalizados dos times com `odd ≤ ODD_LIMITE` (lido do banco).  
+Busca odds da API, filtra os confrontos da rodada atual e retorna nomes normalizados dos times com `odd ≤ ODD_LIMITE` (lido do banco).
 Retorna `Set.of()` se API indisponível ou chave não configurada.
 
 ### `CartolaDataService.buscarAtletasFiltrados(Set<String> favoritos) → List<Atleta>`
@@ -670,6 +675,9 @@ Quando `favoritos` está vazio, ignora o filtro por time.
 
 ### `CartolaDataService.buscarTimesCasa() → Set<Integer>`
 Retorna IDs dos times mandantes da rodada atual.
+
+### `CartolaDataService.buscarConfrontosRodadaAtual() → Set<String>`
+Retorna chaves normalizadas dos confrontos da rodada atual para limitar as odds processadas.
 
 ### `ScoreService.calcularScores(atletas, timesCasa, favoritos) → List<Atleta>`
 Retorna nova lista imutável com campo `score` preenchido para cada atleta, usando fórmulas específicas para GOL/ATA e fallback configurável para as demais posições.
@@ -782,8 +790,8 @@ Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e
 | `ConfiguracaoServiceTest` | Unitário (Mockito) | Atualização e reset da regra de defesa |
 | `AtletaTest` | Unitário | `formatado()`, `isDuvida()`, `isProvavel()`, imutabilidade `@With` |
 | `EnumsTest` | Unitário | `fromId()`, `fromSigla()`, `isEscalavel()`, `idsEscalaveis()` para todos os valores |
-| `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, múltiplos jogos, jogo sem bookmaker, set imutável |
-| `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa |
+| `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, filtro por rodada atual, fallback sem confrontos, múltiplos jogos, jogo sem bookmaker, set imutável |
+| `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa e confrontos da rodada |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
 | `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição sem TEC, dúvidas com substituto |
 | `DesempenhoServiceTest` | Unitário (Mockito) | Média rodadas, fallback null, atleta parcial |

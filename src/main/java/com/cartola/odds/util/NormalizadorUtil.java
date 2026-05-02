@@ -60,4 +60,13 @@ public final class NormalizadorUtil {
                 .strip();
         return ALIASES.getOrDefault(normalizado, normalizado);
     }
+
+    public static String chaveConfronto(String timeA, String timeB) {
+        String normalizadoA = normalizar(timeA);
+        String normalizadoB = normalizar(timeB);
+        if (normalizadoA.isBlank() || normalizadoB.isBlank()) return "";
+        return normalizadoA.compareTo(normalizadoB) <= 0
+                ? normalizadoA + "|" + normalizadoB
+                : normalizadoB + "|" + normalizadoA;
+    }
 }

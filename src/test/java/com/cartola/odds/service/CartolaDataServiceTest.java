@@ -21,6 +21,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -219,6 +220,62 @@ class CartolaDataServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("buscarConfrontosRodadaAtual")
+    class BuscarConfrontosRodadaAtual {
+
+        @Test
+        @DisplayName("deve retornar chaves normalizadas dos confrontos da rodada")
+        void deveRetornarConfrontosNormalizados() {
+            var partida = partida(1, 2);
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clube("Flamengo", "FLA"),
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactlyInAnyOrder("botafogo|flamengo");
+        }
+
+        @Test
+        @DisplayName("deve retornar vazio quando nao houver partidas")
+        void deveRetornarVazioSemPartidas() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of());
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of());
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve descartar silenciosamente partida cujo clube nao existe no mapa de clubes")
+        void deveDescartarPartidaComClubeDesconhecido() {
+            var partida = partida(99, 2);
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve propagar excecao quando o cliente Cartola falhar")
+        void devePropagarExcecaoDoCliente() {
+            when(cartolaClient.buscarClubes()).thenThrow(new RuntimeException("Cartola indisponivel"));
+
+            assertThrows(RuntimeException.class, () -> service.buscarConfrontosRodadaAtual());
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private void configurarMocks(AtletaResponse.AtletaItem item) {
@@ -287,5 +344,19 @@ class CartolaDataServiceTest {
         item.setVariacaoNum(variacao);
         item.setPrecoNum(preco);
         return item;
+    }
+
+    private PartidaResponse.PartidaItem partida(int clubeCasaId, int clubeVisitanteId) {
+        var partida = new PartidaResponse.PartidaItem();
+        partida.setClubeCasaId(clubeCasaId);
+        partida.setClubeVisitanteId(clubeVisitanteId);
+        return partida;
+    }
+
+    private ClubeResponse clube(String nome, String abreviacao) {
+        var clube = new ClubeResponse();
+        clube.setNome(nome);
+        clube.setAbreviacao(abreviacao);
+        return clube;
     }
 }

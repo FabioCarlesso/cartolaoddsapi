@@ -57,8 +57,20 @@ public class CartolaDataService {
         return atletas;
     }
 
+    public record DadosRodada(Set<Integer> timesCasa, Set<String> confrontos) {}
+
+    public DadosRodada buscarDadosRodada() {
+        Map<String, ClubeResponse> clubes = cartolaClient.buscarClubes();
+        PartidaResponse partidas = cartolaClient.buscarPartidas();
+        return new DadosRodada(extrairTimesCasa(partidas), extrairConfrontos(partidas, clubes));
+    }
+
     public Set<Integer> buscarTimesCasa() {
         return extrairTimesCasa(cartolaClient.buscarPartidas());
+    }
+
+    public Set<String> buscarConfrontosRodadaAtual() {
+        return buscarDadosRodada().confrontos();
     }
 
     // ── Privados ──────────────────────────────────────────────────────
@@ -68,6 +80,23 @@ public class CartolaDataService {
         return partidas.getPartidas().stream()
                 .map(PartidaResponse.PartidaItem::getClubeCasaId)
                 .collect(Collectors.toSet());
+    }
+
+    private Set<String> extrairConfrontos(PartidaResponse partidas, Map<String, ClubeResponse> clubes) {
+        if (partidas == null || partidas.getPartidas() == null || clubes == null) return Set.of();
+        return partidas.getPartidas().stream()
+                .map(p -> NormalizadorUtil.chaveConfronto(
+                        nomeClube(clubes.get(String.valueOf(p.getClubeCasaId()))),
+                        nomeClube(clubes.get(String.valueOf(p.getClubeVisitanteId())))
+                ))
+                .filter(chave -> !chave.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    private String nomeClube(ClubeResponse clube) {
+        if (clube == null) return "";
+        if (clube.getNomeFantasia() != null && !clube.getNomeFantasia().isBlank()) return clube.getNomeFantasia();
+        return clube.getNome() != null ? clube.getNome() : "";
     }
 
     private Atleta mapearAtleta(AtletaResponse.AtletaItem item,

@@ -44,9 +44,10 @@ class RankingServiceTest {
         statusPadrao.setStatusMercado(1);
         statusPadrao.setRodadaAtual(15);
 
-        when(oddsService.buscarFavoritos()).thenReturn(Set.of("flamengo"));
+        when(cartolaDataService.buscarDadosRodada())
+                .thenReturn(new CartolaDataService.DadosRodada(Set.of(1), Set.of()));
+        when(oddsService.buscarFavoritos(any())).thenReturn(Set.of("flamengo"));
         when(cartolaDataService.buscarStatusMercado()).thenReturn(statusPadrao);
-        when(cartolaDataService.buscarTimesCasa()).thenReturn(Set.of(1));
     }
 
     @Nested

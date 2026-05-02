@@ -297,10 +297,12 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 
 ### Identificação de favoritos
 
-Para cada jogo da Odds API:
+Para cada jogo da Odds API que corresponda a um confronto da rodada atual do Cartola:
 - O time com **menor odd** é candidato a favorito.
 - Se `odd ≤ ODD_LIMITE` → entra como favorito; jogadores desse time são incluídos no pool.
 - Se `odd > ODD_LIMITE` → jogo descartado; nenhum time desse jogo entra no pool.
+
+Odds de confrontos fora da rodada atual são ignoradas. Se não for possível obter os confrontos atuais via `/partidas`, a API mantém o comportamento resiliente anterior e processa todas as odds disponíveis.
 
 ### Filtros de atletas
 
@@ -419,7 +421,7 @@ cartola/
     │           ├── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     │           └── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
     └── test/
-        ├── java/                            # 20 classes de teste — 305 cenários
+        ├── java/                            # 21 classes de teste — 311 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -487,9 +489,9 @@ mvn test jacoco:report
 
 | Classe | Cenários |
 |---|---|
-| `OddsServiceTest` | 19 — buscarFavoritos + buscarFavoritosDetalhado |
+| `OddsServiceTest` | 22 — buscarFavoritos + buscarFavoritosDetalhado + filtro por rodada atual |
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
-| `CartolaDataServiceTest` | 12 — filtros de status/preço/favorito |
+| `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 27 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA) |
 | `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |

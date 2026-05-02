@@ -134,6 +134,7 @@ Para scrape com Prometheus, aponte o job para `GET :9090/actuator/prometheus`.
 ### Filtro de Atletas
 
 Apenas atletas com status **Provável (7)** ou **Dúvida (6)** e preço `> 0` são considerados.
+Antes de identificar favoritos, o `OddsService` cruza os jogos retornados pela The Odds API com os confrontos da rodada atual vindos de `/partidas`; odds de jogos fora da rodada atual são ignoradas.
 Quando odds não estão disponíveis, o filtro por time favorito é desativado e todos os elegíveis entram no pool.
 
 ### Normalização de Clubes
@@ -215,7 +216,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-305 cenários distribuídos em 20 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+311 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
