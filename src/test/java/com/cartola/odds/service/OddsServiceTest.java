@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -24,6 +25,7 @@ class OddsServiceTest {
 
     @Mock OddsClient          oddsClient;
     @Mock ConfiguracaoService configuracaoService;
+    @Mock CartolaDataService  cartolaDataService;
 
     @InjectMocks OddsService oddsService;
 
@@ -98,6 +100,21 @@ class OddsServiceTest {
         }
 
         @Test
+        @DisplayName("deve considerar somente favoritos dos confrontos da rodada atual")
+        void deveConsiderarSomenteConfrontosDaRodadaAtual() {
+            when(oddsClient.buscarOdds()).thenReturn(List.of(
+                jogo("Flamengo", 2.10, "Botafogo", 3.50),
+                jogo("Palmeiras", 1.85, "Santos", 4.20)
+            ));
+            when(cartolaDataService.buscarConfrontosRodadaAtual())
+                    .thenReturn(Set.of("botafogo|flamengo"));
+
+            var favoritos = oddsService.buscarFavoritos();
+
+            assertThat(favoritos).containsExactly("flamengo");
+        }
+
+        @Test
         @DisplayName("deve retornar set imutavel")
         void deveRetornarSetImutavel() {
             when(oddsClient.buscarOdds())
@@ -119,6 +136,17 @@ class OddsServiceTest {
             when(oddsClient.buscarOdds()).thenReturn(List.of(jogoSemBookmaker));
 
             assertThat(oddsService.buscarFavoritos()).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve manter processamento quando confrontos da rodada nao puderem ser buscados")
+        void deveManterProcessamentoQuandoConfrontosIndisponiveis() {
+            when(oddsClient.buscarOdds())
+                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+            doThrow(new IllegalStateException("Cartola indisponivel"))
+                    .when(cartolaDataService).buscarConfrontosRodadaAtual();
+
+            assertThat(oddsService.buscarFavoritos()).containsExactly("flamengo");
         }
     }
 
@@ -235,6 +263,26 @@ class OddsServiceTest {
             assertThat(resultado.getTotalDescartados()).isEqualTo(2);
             assertThat(resultado.getFavoritos()).hasSize(2);
             assertThat(resultado.getDescartados()).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("deve listar somente jogos da rodada atual no response detalhado")
+        void deveListarSomenteJogosDaRodadaAtualNoDetalhado() {
+            when(oddsClient.buscarOdds()).thenReturn(List.of(
+                jogo("Flamengo", 2.10, "Botafogo", 3.50),
+                jogo("Palmeiras", 1.85, "Santos", 4.20),
+                jogo("Fortaleza", 3.30, "Bahia", 3.40)
+            ));
+            when(cartolaDataService.buscarConfrontosRodadaAtual())
+                    .thenReturn(Set.of("botafogo|flamengo", "bahia|fortaleza"));
+
+            var resultado = oddsService.buscarFavoritosDetalhado(3.0);
+
+            assertThat(resultado.getTotalJogos()).isEqualTo(2);
+            assertThat(resultado.getTotalFavoritos()).isEqualTo(1);
+            assertThat(resultado.getTotalDescartados()).isEqualTo(1);
+            assertThat(resultado.getFavoritos().get(0).getTimeFavorito()).isEqualTo("Flamengo");
+            assertThat(resultado.getDescartados().get(0).getTimeCasa()).isEqualTo("Fortaleza");
         }
 
         @Test

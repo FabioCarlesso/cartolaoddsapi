@@ -219,6 +219,39 @@ class CartolaDataServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("buscarConfrontosRodadaAtual")
+    class BuscarConfrontosRodadaAtual {
+
+        @Test
+        @DisplayName("deve retornar chaves normalizadas dos confrontos da rodada")
+        void deveRetornarConfrontosNormalizados() {
+            var partida = partida(1, 2);
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clube("Flamengo", "FLA"),
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactly("botafogo|flamengo");
+        }
+
+        @Test
+        @DisplayName("deve retornar vazio quando nao houver partidas")
+        void deveRetornarVazioSemPartidas() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of());
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of());
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).isEmpty();
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private void configurarMocks(AtletaResponse.AtletaItem item) {
@@ -287,5 +320,19 @@ class CartolaDataServiceTest {
         item.setVariacaoNum(variacao);
         item.setPrecoNum(preco);
         return item;
+    }
+
+    private PartidaResponse.PartidaItem partida(int clubeCasaId, int clubeVisitanteId) {
+        var partida = new PartidaResponse.PartidaItem();
+        partida.setClubeCasaId(clubeCasaId);
+        partida.setClubeVisitanteId(clubeVisitanteId);
+        return partida;
+    }
+
+    private ClubeResponse clube(String nome, String abreviacao) {
+        var clube = new ClubeResponse();
+        clube.setNome(nome);
+        clube.setAbreviacao(abreviacao);
+        return clube;
     }
 }

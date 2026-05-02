@@ -83,6 +83,16 @@ class NormalizadorUtilTest {
         assertThat(cartola).isEqualTo(oddsApi);
     }
 
+    @Test
+    @DisplayName("deve gerar chave de confronto independente da ordem e grafia")
+    void deveGerarChaveConfrontoIndependenteDaOrdem() {
+        String primeira = NormalizadorUtil.chaveConfronto("Botafogo FR", "Flamengo");
+        String segunda = NormalizadorUtil.chaveConfronto("Flamengo", "Botafogo RJ");
+
+        assertThat(primeira).isEqualTo("botafogo|flamengo");
+        assertThat(segunda).isEqualTo(primeira);
+    }
+
     @ParameterizedTest(name = "''{0}'' e ''{1}'' -> ''{2}''")
     @CsvSource({
         "Atlético-MG,            Atletico Mineiro,       atletico mg",

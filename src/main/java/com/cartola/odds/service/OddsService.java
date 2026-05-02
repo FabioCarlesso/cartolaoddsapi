@@ -24,6 +24,7 @@ public class OddsService {
 
     private final OddsClient           oddsClient;
     private final ConfiguracaoService  configuracaoService;
+    private final CartolaDataService   cartolaDataService;
 
     // ── API interna (usada pelo pipeline de time/ranking) ─────────────
 
@@ -32,7 +33,7 @@ public class OddsService {
     }
 
     public Set<String> buscarFavoritos(double oddLimite) {
-        var response = processarOdds(oddsClient.buscarOdds(), oddLimite);
+        var response = processarOdds(oddsClient.buscarOdds(), oddLimite, buscarConfrontosRodadaAtual());
         return response.getFavoritos().stream()
                 .map(j -> NormalizadorUtil.normalizar(j.getTimeFavorito()))
                 .collect(Collectors.toUnmodifiableSet());
@@ -56,30 +57,59 @@ public class OddsService {
                     .build();
         }
 
-        return processarOdds(odds, oddLimite);
+        return processarOdds(odds, oddLimite, buscarConfrontosRodadaAtual());
     }
 
     // ── Privado ───────────────────────────────────────────────────────
 
-    private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite) {
+    private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite, Set<String> confrontosRodadaAtual) {
         List<JogoFavoritoDto>   favoritos   = new ArrayList<>();
         List<JogoDescartadoDto> descartados = new ArrayList<>();
+        List<OddsResponse> oddsRodadaAtual = filtrarOddsRodadaAtual(odds, confrontosRodadaAtual);
 
-        for (OddsResponse jogo : odds) {
+        for (OddsResponse jogo : oddsRodadaAtual) {
             processarJogo(jogo, oddLimite, favoritos, descartados);
         }
 
         log.info("Favoritos: {} | Descartados: {} | Total jogos: {}",
-                favoritos.size(), descartados.size(), odds.size());
+                favoritos.size(), descartados.size(), oddsRodadaAtual.size());
 
         return FavoritosResponse.builder()
                 .oddLimite(oddLimite)
-                .totalJogos(odds.size())
+                .totalJogos(oddsRodadaAtual.size())
                 .totalFavoritos(favoritos.size())
                 .totalDescartados(descartados.size())
                 .favoritos(favoritos)
                 .descartados(descartados)
                 .build();
+    }
+
+    private Set<String> buscarConfrontosRodadaAtual() {
+        Set<String> confrontos;
+        try {
+            confrontos = cartolaDataService.buscarConfrontosRodadaAtual();
+        } catch (RuntimeException e) {
+            log.warn("Nao foi possivel buscar confrontos da rodada atual: {}. Processando todas as odds disponiveis.",
+                    e.getMessage());
+            return Set.of();
+        }
+        if (confrontos == null || confrontos.isEmpty()) {
+            log.warn("Nao foi possivel identificar confrontos da rodada atual. Processando todas as odds disponiveis.");
+            return Set.of();
+        }
+        return confrontos;
+    }
+
+    private List<OddsResponse> filtrarOddsRodadaAtual(List<OddsResponse> odds, Set<String> confrontosRodadaAtual) {
+        if (confrontosRodadaAtual == null || confrontosRodadaAtual.isEmpty()) return odds;
+
+        List<OddsResponse> filtradas = odds.stream()
+                .filter(jogo -> confrontosRodadaAtual.contains(
+                        NormalizadorUtil.chaveConfronto(jogo.getHomeTeam(), jogo.getAwayTeam())))
+                .toList();
+
+        log.info("Odds filtradas pela rodada atual: {} de {} jogos", filtradas.size(), odds.size());
+        return filtradas;
     }
 
     private void processarJogo(OddsResponse jogo, double oddLimite,
