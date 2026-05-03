@@ -92,6 +92,7 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V2__alter_configuracao_numeric_to_double.sql` — converte colunas para `DOUBLE PRECISION`
 - `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para não repetir clubes entre GOL, LAT e ZAG
 - `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
+- `V5__add_budget_maximo.sql` — adiciona constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
 
 ### Cache Caffeine (in-memory)
 
@@ -148,9 +149,13 @@ Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita re
 ### Limite por Clube no Time Titular
 
 O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, incluindo o **treinador (TEC)**. O limite é configurável em runtime via `PATCH /api/config` no campo `limiteAtletasPorClube` (padrão `4`). O montador aplica um fallback em três níveis:
-1. **Primário** — respeita regra de defesa (sem clube repetido em GOL/LAT/ZAG) e limite por clube.
-2. **Intermediário** — relaxa a regra de defesa, mas mantém o limite máximo por clube.
-3. **Último recurso** — relaxa também o limite por clube para preservar a formação completa.
+1. **Primário** — respeita regra de defesa (sem clube repetido em GOL/LAT/ZAG), limite por clube e budget.
+2. **Intermediário** — relaxa a regra de defesa, mas mantém o limite máximo por clube e budget.
+3. **Último recurso** — relaxa também o limite por clube, mas mantém o budget.
+
+### Budget Máximo (C$)
+
+O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O budget é configurável em runtime via `PATCH /api/config` no campo `budgetMaximo`. Quando `budgetMaximo = 0` (padrão), a constraint é desativada e o custo não é limitado. Quando definido, o montador rastreia o saldo restante globalmente durante a seleção: ao avaliar cada candidato, verifica se `preço ≤ saldo restante`; caso contrário, o atleta é descartado e o próximo melhor é tentado. Isso se aplica nos três níveis de fallback, priorizando sempre o maior score dentro do orçamento disponível.
 
 ### Reserva de Luxo
 
@@ -216,7 +221,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-311 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+321 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

@@ -59,7 +59,8 @@ class ConfiguracaoControllerTest {
                     .andExpect(jsonPath("$.formacaoAta").value(3))
                     .andExpect(jsonPath("$.formacaoTec").value(1))
                     .andExpect(jsonPath("$.evitarMesmoClubeDefesa").value(true))
-                    .andExpect(jsonPath("$.limiteAtletasPorClube").value(4));
+                    .andExpect(jsonPath("$.limiteAtletasPorClube").value(4))
+                    .andExpect(jsonPath("$.budgetMaximo").value(0.0));
         }
 
         @Test
@@ -157,6 +158,28 @@ class ConfiguracaoControllerTest {
             mockMvc.perform(patch("/api/config")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"pesoMediaPontos\": 1.5}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("deve retornar 200 ao atualizar budget maximo")
+        void deveAtualizarBudgetMaximo() throws Exception {
+            when(configuracaoService.atualizar(any())).thenReturn(responsePadrao);
+
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"budgetMaximo\": 120.0}"))
+                    .andExpect(status().isOk());
+
+            verify(configuracaoService).atualizar(any());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 para budgetMaximo negativo")
+        void deveRetornar400ParaBudgetMaximoNegativo() throws Exception {
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"budgetMaximo\": -10.0}"))
                     .andExpect(status().isBadRequest());
         }
 

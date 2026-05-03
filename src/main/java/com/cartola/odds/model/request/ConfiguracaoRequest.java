@@ -73,4 +73,8 @@ public class ConfiguracaoRequest {
     @Min(value = 1, message = "limiteAtletasPorClube deve ser >= 1")
     @Schema(description = "Limite maximo de titulares do mesmo clube (inclui TEC)", example = "4")
     private Integer limiteAtletasPorClube;
+
+    @DecimalMin(value = "0.0", message = "budgetMaximo deve ser >= 0.0 (0 = sem limite)")
+    @Schema(description = "Budget maximo em C$ para os titulares (0 = sem limite)", example = "100.0")
+    private Double budgetMaximo;
 }

@@ -54,6 +54,9 @@ public class ConfiguracaoResponse {
     @Schema(description = "Limite maximo de titulares do mesmo clube (inclui TEC)", example = "4")
     private final int limiteAtletasPorClube;
 
+    @Schema(description = "Budget maximo em C$ para os titulares (0 = sem limite)", example = "100.0")
+    private final double budgetMaximo;
+
     @Schema(description = "Data e hora da ultima atualizacao")
     private final LocalDateTime updatedAt;
 
@@ -73,6 +76,7 @@ public class ConfiguracaoResponse {
                 .formacaoTec(c.getFormacaoTec())
                 .evitarMesmoClubeDefesa(c.isEvitarMesmoClubeDefesa())
                 .limiteAtletasPorClube(c.getLimiteAtletasPorClube())
+                .budgetMaximo(c.getBudgetMaximo())
                 .updatedAt(c.getUpdatedAt())
                 .build();
     }
