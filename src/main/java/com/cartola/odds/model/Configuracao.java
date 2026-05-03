@@ -64,6 +64,9 @@ public class Configuracao {
     @Column(name = "limite_atletas_por_clube", nullable = false)
     private int limiteAtletasPorClube;
 
+    @Column(name = "budget_maximo", nullable = false)
+    private double budgetMaximo;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
@@ -95,6 +98,7 @@ public class Configuracao {
         c.setFormacaoTec(1);
         c.setEvitarMesmoClubeDefesa(true);
         c.setLimiteAtletasPorClube(4);
+        c.setBudgetMaximo(0.0);
         c.setUpdatedAt(LocalDateTime.now());
         return c;
     }

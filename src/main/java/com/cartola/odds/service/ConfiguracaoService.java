@@ -78,6 +78,9 @@ public class ConfiguracaoService {
         if (req.getLimiteAtletasPorClube() != null) {
             config.setLimiteAtletasPorClube(req.getLimiteAtletasPorClube());
         }
+        if (req.getBudgetMaximo() != null) {
+            config.setBudgetMaximo(req.getBudgetMaximo());
+        }
     }
 
     private void validarPesos(Configuracao config) {
@@ -107,5 +110,6 @@ public class ConfiguracaoService {
         config.setFormacaoTec(1);
         config.setEvitarMesmoClubeDefesa(true);
         config.setLimiteAtletasPorClube(4);
+        config.setBudgetMaximo(0.0);
     }
 }

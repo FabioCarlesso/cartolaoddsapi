@@ -427,6 +427,76 @@ class MontadorTimeServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("constraint de budget maximo")
+    class BudgetMaximo {
+
+        @Test
+        @DisplayName("deve excluir jogadores caros quando budget e insuficiente para o preco deles")
+        void deveSelecionarJogadoresDentroDoOrcamento() {
+            config.setBudgetMaximo(24.0); // 12 titulares × C$2.0 = C$24.0
+
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null);
+
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
+            time.getTitulares().values().stream().flatMap(List::stream)
+                    .forEach(a -> assertThat(a.getPreco()).isLessThan(50.0));
+        }
+
+        @Test
+        @DisplayName("custo total dos titulares nao deve ultrapassar o budget maximo")
+        void custoTotalNaoDeveUltrapassarBudgetMaximo() {
+            config.setBudgetMaximo(24.0);
+
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null);
+
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(24.0);
+        }
+
+        @Test
+        @DisplayName("deve reservar budget para completar as posicoes restantes")
+        void deveReservarBudgetParaCompletarPosicoesRestantes() {
+            config.setBudgetMaximo(24.0); // 12 titulares × C$2.0 = C$24.0
+
+            var time = service.montar(criarPoolPrecosMistos(10.0, 2.0), 1, null);
+
+            assertThat(time.getTitulares().get(Posicao.GOL))
+                    .singleElement()
+                    .extracting(Atleta::getPreco)
+                    .isEqualTo(2.0);
+            assertThat(time.getTitulares().values().stream().mapToLong(List::size).sum()).isEqualTo(12L);
+            assertThat(time.getCustoTotal()).isEqualTo(24.0);
+        }
+
+        @Test
+        @DisplayName("quando budget e zero nao aplica constraint de custo")
+        void quandoBudgetZeroNaoAplicaConstraint() {
+            config.setBudgetMaximo(0.0);
+
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null);
+
+            // Sem constraint, todos os titulares devem ser os mais caros (maior score)
+            time.getTitulares().values().stream().flatMap(List::stream)
+                    .forEach(a -> assertThat(a.getPreco()).isEqualTo(50.0));
+        }
+
+        @Test
+        @DisplayName("quando budget insuficiente para qualquer jogador nao lanca excecao")
+        void quandoBudgetInsuficienteNaoLancaExcecao() {
+            config.setBudgetMaximo(1.0); // menor que qualquer preco disponivel
+
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null);
+
+            assertThat(time).isNotNull();
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(1.0);
+        }
+    }
+
     private List<Integer> titularesDefesa(com.cartola.odds.model.Time time) {
         return List.of(Posicao.GOL, Posicao.LAT, Posicao.ZAG).stream()
                 .flatMap(posicao -> time.getTitulares().getOrDefault(posicao, List.of()).stream())
@@ -557,5 +627,53 @@ class MontadorTimeServiceTest {
                 .preco(preco)
                 .desempenhoRecente(0.0)
                 .score(score);
+    }
+
+    /**
+     * Pool com dois precos: jogadores de maior score custam precoExpensive,
+     * jogadores de menor score custam precoBarato. Cada posicao tem jogadores
+     * suficientes para preencher a formacao com apenas os baratos.
+     */
+    private List<Atleta> criarPoolPrecosMistos(double precoExpensive, double precoBarato) {
+        List<Atleta> pool = new ArrayList<>();
+        int id = 1;
+
+        pool.add(atletaBuilder(Posicao.GOL, id++, 10.0, precoExpensive, 10).build());
+        pool.add(atletaBuilder(Posicao.GOL, id++,  5.0, precoBarato,   11).build());
+        pool.add(atletaBuilder(Posicao.GOL, id++,  4.0, precoBarato,   12).build());
+
+        pool.add(atletaBuilder(Posicao.LAT, id++,  9.0, precoExpensive, 20).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++,  8.0, precoExpensive, 21).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++,  4.0, precoBarato,   22).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++,  3.0, precoBarato,   23).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++,  2.0, precoBarato,   24).build());
+
+        pool.add(atletaBuilder(Posicao.ZAG, id++,  9.0, precoExpensive, 30).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++,  8.0, precoExpensive, 31).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++,  4.0, precoBarato,   32).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++,  3.0, precoBarato,   33).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++,  2.0, precoBarato,   34).build());
+
+        pool.add(atletaBuilder(Posicao.MEI, id++,  9.0, precoExpensive, 40).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  8.0, precoExpensive, 41).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  7.0, precoExpensive, 42).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  4.0, precoBarato,   43).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  3.0, precoBarato,   44).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  2.0, precoBarato,   45).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++,  1.0, precoBarato,   46).build());
+
+        pool.add(atletaBuilder(Posicao.ATA, id++,  9.0, precoExpensive, 50).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  8.0, precoExpensive, 51).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  7.0, precoExpensive, 52).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  4.0, precoBarato,   53).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  3.0, precoBarato,   54).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  2.0, precoBarato,   55).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++,  1.0, precoBarato,   56).build());
+
+        pool.add(atletaBuilder(Posicao.TEC, id++,  9.0, precoExpensive, 60).build());
+        pool.add(atletaBuilder(Posicao.TEC, id++,  4.0, precoBarato,   61).build());
+        pool.add(atletaBuilder(Posicao.TEC, id,    3.0, precoBarato,   62).build());
+
+        return pool;
     }
 }

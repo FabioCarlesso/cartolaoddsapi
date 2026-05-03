@@ -39,11 +39,21 @@ public class MontadorTimeService {
 
         Map<Posicao, List<Atleta>> porPosicao = pool.stream()
                 .collect(Collectors.groupingBy(Atleta::getPosicao));
+        Map<Posicao, List<Atleta>> candidatosPorPosicao = new EnumMap<>(Posicao.class);
+        porPosicao.forEach((posicao, atletas) -> candidatosPorPosicao.put(
+                posicao,
+                atletas.stream()
+                        .sorted(Comparator.comparingDouble(Atleta::getScore).reversed())
+                        .toList()
+        ));
 
         Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
         Map<Posicao, Atleta>       reservas  = new EnumMap<>(Posicao.class);
         Set<Integer> clubesDefesaEscalados = new HashSet<>();
         Map<Integer, Integer> contagemClubesTitulares = new HashMap<>();
+
+        // Budget tracking: Double.MAX_VALUE when no constraint (budgetMaximo == 0)
+        double[] budgetRestante = { config.getBudgetMaximo() > 0 ? config.getBudgetMaximo() : Double.MAX_VALUE };
 
         for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
@@ -53,9 +63,7 @@ public class MontadorTimeService {
             }
 
             int qtd = slot.getValue();
-            List<Atleta> candidatos = porPosicao.getOrDefault(posicao, List.of()).stream()
-                    .sorted(Comparator.comparingDouble(Atleta::getScore).reversed())
-                    .toList();
+            List<Atleta> candidatos = candidatosPorPosicao.getOrDefault(posicao, List.of());
 
             if (candidatos.isEmpty()) {
                 log.warn("Sem jogadores para posicao {}", posicao);
@@ -63,7 +71,8 @@ public class MontadorTimeService {
             }
 
             List<Atleta> escolhidos = escolherTitulares(
-                    candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares
+                    candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
+                    budgetRestante, candidatosPorPosicao
             );
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
@@ -175,21 +184,25 @@ public class MontadorTimeService {
                                            Posicao posicao,
                                            Configuracao config,
                                            Set<Integer> clubesDefesaEscalados,
-                                           Map<Integer, Integer> contagemClubesTitulares) {
+                                           Map<Integer, Integer> contagemClubesTitulares,
+                                           double[] budgetRestante,
+                                           Map<Posicao, List<Atleta>> candidatosPorPosicao) {
         List<Atleta> escolhidos = new ArrayList<>();
         for (Atleta candidato : candidatos) {
             if (escolhidos.size() == quantidade) {
                 break;
             }
-            if (podeEscalar(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares)) {
+            if (podeEscalar(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
+                    budgetRestante, escolhidos, quantidade, candidatosPorPosicao)) {
                 escolhidos.add(candidato);
-                registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
+                registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares, budgetRestante);
             }
         }
 
         if (escolhidos.size() < quantidade) {
             completarMantendoLimitePorClube(
-                    candidatos, quantidade, posicao, escolhidos, config, contagemClubesTitulares, clubesDefesaEscalados
+                    candidatos, quantidade, posicao, escolhidos, config, contagemClubesTitulares,
+                    clubesDefesaEscalados, budgetRestante, candidatosPorPosicao
             );
         }
 
@@ -201,10 +214,12 @@ public class MontadorTimeService {
                     .collect(Collectors.toSet());
             for (Atleta candidato : candidatos) {
                 if (escolhidos.size() == quantidade) break;
-                if (apelidosEscolhidos.add(candidato.getApelido())) {
-                    escolhidos.add(candidato);
-                    registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares);
+                if (!apelidosEscolhidos.add(candidato.getApelido())) continue;
+                if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
+                    continue;
                 }
+                escolhidos.add(candidato);
+                registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares, budgetRestante);
             }
         }
 
@@ -217,7 +232,9 @@ public class MontadorTimeService {
                                                   List<Atleta> escolhidos,
                                                   Configuracao config,
                                                   Map<Integer, Integer> contagemClubesTitulares,
-                                                  Set<Integer> clubesDefesaEscalados) {
+                                                  Set<Integer> clubesDefesaEscalados,
+                                                  double[] budgetRestante,
+                                                  Map<Posicao, List<Atleta>> candidatosPorPosicao) {
         if (escolhidos.size() >= quantidade) {
             return;
         }
@@ -239,8 +256,11 @@ public class MontadorTimeService {
             if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
                 continue;
             }
+            if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
+                continue;
+            }
             escolhidos.add(candidato);
-            registrarEscalacao(candidato, posicao, false, clubesDefesaEscalados, contagemClubesTitulares);
+            registrarEscalacao(candidato, posicao, false, clubesDefesaEscalados, contagemClubesTitulares, budgetRestante);
         }
     }
 
@@ -248,8 +268,16 @@ public class MontadorTimeService {
                                 Posicao posicao,
                                 Configuracao config,
                                 Set<Integer> clubesDefesaEscalados,
-                                Map<Integer, Integer> contagemClubesTitulares) {
+                                Map<Integer, Integer> contagemClubesTitulares,
+                                double[] budgetRestante,
+                                List<Atleta> escolhidos,
+                                int quantidade,
+                                Map<Posicao, List<Atleta>> candidatosPorPosicao) {
         if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
+            return false;
+        }
+
+        if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
             return false;
         }
 
@@ -264,12 +292,76 @@ public class MontadorTimeService {
         return contagemClubesTitulares.getOrDefault(clubeId, 0) >= limite;
     }
 
+    private boolean cabeNoBudgetComReserva(Atleta candidato,
+                                           Posicao posicao,
+                                           List<Atleta> escolhidos,
+                                           int quantidade,
+                                           Configuracao config,
+                                           double[] budgetRestante,
+                                           Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+        if (candidato.getPreco() > budgetRestante[0]) {
+            return false;
+        }
+
+        double custoMinimoRestante = calcularCustoMinimoRestante(
+                candidato, posicao, escolhidos, quantidade, config, candidatosPorPosicao);
+        return candidato.getPreco() + custoMinimoRestante <= budgetRestante[0] + 0.000001;
+    }
+
+    private double calcularCustoMinimoRestante(Atleta candidato,
+                                               Posicao posicaoAtual,
+                                               List<Atleta> escolhidos,
+                                               int quantidadeAtual,
+                                               Configuracao config,
+                                               Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+        double custoMinimo = 0.0;
+        boolean posicaoAtualEncontrada = false;
+
+        for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
+            Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
+            if (posicao == null) {
+                continue;
+            }
+
+            int vagasRestantes;
+            if (posicao == posicaoAtual) {
+                posicaoAtualEncontrada = true;
+                vagasRestantes = Math.max(0, quantidadeAtual - escolhidos.size() - 1);
+            } else if (posicaoAtualEncontrada) {
+                vagasRestantes = slot.getValue();
+            } else {
+                continue;
+            }
+
+            if (vagasRestantes == 0) {
+                continue;
+            }
+
+            Set<String> apelidosIgnorados = new HashSet<>();
+            if (posicao == posicaoAtual) {
+                escolhidos.stream().map(Atleta::getApelido).forEach(apelidosIgnorados::add);
+                apelidosIgnorados.add(candidato.getApelido());
+            }
+
+            custoMinimo += candidatosPorPosicao.getOrDefault(posicao, List.of()).stream()
+                    .filter(a -> !apelidosIgnorados.contains(a.getApelido()))
+                    .mapToDouble(Atleta::getPreco)
+                    .sorted()
+                    .limit(vagasRestantes)
+                    .sum();
+        }
+
+        return custoMinimo;
+    }
+
     private void registrarEscalacao(Atleta atleta,
                                     Posicao posicao,
                                     boolean atualizarDefesa,
                                     Set<Integer> clubesDefesaEscalados,
-                                    Map<Integer, Integer> contagemClubesTitulares) {
+                                    Map<Integer, Integer> contagemClubesTitulares,
+                                    double[] budgetRestante) {
         contagemClubesTitulares.merge(atleta.getClubeId(), 1, Integer::sum);
+        budgetRestante[0] -= atleta.getPreco();
         if (atualizarDefesa && POSICOES_DEFESA.contains(posicao)) {
             clubesDefesaEscalados.add(atleta.getClubeId());
         }

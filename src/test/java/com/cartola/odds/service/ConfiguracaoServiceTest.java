@@ -59,6 +59,37 @@ class ConfiguracaoServiceTest {
     }
 
     @Test
+    @DisplayName("deve atualizar budget maximo sem alterar demais campos")
+    void deveAtualizarBudgetMaximo() {
+        var config = Configuracao.defaults();
+        var request = new ConfiguracaoRequest();
+        request.setBudgetMaximo(120.0);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.atualizar(request);
+
+        assertThat(response.getBudgetMaximo()).isEqualTo(120.0);
+        assertThat(config.getBudgetMaximo()).isEqualTo(120.0);
+        assertThat(config.getOddLimite()).isEqualTo(3.0);
+    }
+
+    @Test
+    @DisplayName("reset deve restaurar budget maximo para o valor padrao")
+    void resetDeveRestaurarBudgetMaximoPadrao() {
+        var config = Configuracao.defaults();
+        config.setBudgetMaximo(999.0);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.resetar();
+
+        assertThat(response.getBudgetMaximo()).isEqualTo(0.0);
+    }
+
+    @Test
     @DisplayName("reset deve reativar regra de defesa")
     void resetDeveReativarRegraDefesa() {
         var config = Configuracao.defaults();
