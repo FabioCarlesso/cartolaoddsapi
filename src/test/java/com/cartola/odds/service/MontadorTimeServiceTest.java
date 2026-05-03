@@ -459,6 +459,21 @@ class MontadorTimeServiceTest {
         }
 
         @Test
+        @DisplayName("deve reservar budget para completar as posicoes restantes")
+        void deveReservarBudgetParaCompletarPosicoesRestantes() {
+            config.setBudgetMaximo(24.0); // 12 titulares × C$2.0 = C$24.0
+
+            var time = service.montar(criarPoolPrecosMistos(10.0, 2.0), 1, null);
+
+            assertThat(time.getTitulares().get(Posicao.GOL))
+                    .singleElement()
+                    .extracting(Atleta::getPreco)
+                    .isEqualTo(2.0);
+            assertThat(time.getTitulares().values().stream().mapToLong(List::size).sum()).isEqualTo(12L);
+            assertThat(time.getCustoTotal()).isEqualTo(24.0);
+        }
+
+        @Test
         @DisplayName("quando budget e zero nao aplica constraint de custo")
         void quandoBudgetZeroNaoAplicaConstraint() {
             config.setBudgetMaximo(0.0);

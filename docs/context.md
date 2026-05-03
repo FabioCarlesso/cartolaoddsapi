@@ -155,7 +155,7 @@ O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, inc
 
 ### Budget Máximo (C$)
 
-O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O budget é configurável em runtime via `PATCH /api/config` no campo `budgetMaximo`. Quando `budgetMaximo = 0` (padrão), a constraint é desativada e o custo não é limitado. Quando definido, o montador rastreia o saldo restante globalmente durante a seleção: ao avaliar cada candidato, verifica se `preço ≤ saldo restante`; caso contrário, o atleta é descartado e o próximo melhor é tentado. Isso se aplica nos três níveis de fallback, priorizando sempre o maior score dentro do orçamento disponível.
+O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O budget é configurável em runtime via `PATCH /api/config` no campo `budgetMaximo`. Quando `budgetMaximo = 0` (padrão), a constraint é desativada e o custo não é limitado. Quando definido, o montador rastreia o saldo restante globalmente durante a seleção: ao avaliar cada candidato, verifica se `preço ≤ saldo restante` e se ainda sobra budget para preencher as vagas restantes da formação com o menor custo disponível; caso contrário, o atleta é descartado e o próximo melhor é tentado. Isso se aplica nos três níveis de fallback, priorizando sempre o maior score dentro do orçamento disponível sem gastar o saldo necessário para completar o time quando há alternativas suficientes.
 
 ### Reserva de Luxo
 
@@ -221,7 +221,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-321 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+322 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash
