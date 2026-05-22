@@ -52,6 +52,7 @@ public class ScoreService {
                     double desempenho   = temHistorico ? desempenhoAtleta.mediaPontos() : a.getMediaPontos();
                     // O desvio só existe para o histórico real; o proxy não tem volatilidade associada
                     double desvioPadrao = temHistorico ? desempenhoAtleta.desvioPadrao() : 0.0;
+                    int rodadasConsideradas = temHistorico ? desempenhoAtleta.rodadasConsideradas() : 0;
 
                     double score = switch (a.getPosicao()) {
                         case GOL -> calcularGoleiro(a, desempenho, fatorCasa, timeFavorito, config);
@@ -63,6 +64,8 @@ public class ScoreService {
                     score -= desvioPadrao * config.getPesoDesvio();
 
                     return a.withDesempenhoRecente(desempenho)
+                            .withDesvioPadrao(Math.round(desvioPadrao * 10000.0) / 10000.0)
+                            .withRodadasConsideradas(rodadasConsideradas)
                             .withScore(Math.round(score * 10000.0) / 10000.0);
                 })
                 .toList();

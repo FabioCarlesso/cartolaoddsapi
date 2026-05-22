@@ -77,6 +77,16 @@ public class RankingResponse {
         @Schema(description = "Score calculado pelo sistema", example = "8.5400")
         private final double score;
 
+        @Schema(description = "Desvio padrao das pontuacoes nas ultimas rodadas consideradas. "
+                            + "0.0 quando ha menos de 2 rodadas ou sem historico recente.",
+                example = "1.2500")
+        private final double desvioPadrao;
+
+        @Schema(description = "Quantidade de rodadas com pontuacao usadas no calculo do desempenho. "
+                            + "0 quando o atleta nao possui historico recente.",
+                example = "5")
+        private final int rodadasConsideradas;
+
         @Schema(description = "Indica se o atleta esta em duvida para a partida", example = "false")
         private final boolean emDuvida;
 
@@ -93,6 +103,8 @@ public class RankingResponse {
                     .valorizacao(atleta.getValorizacao())
                     .preco(atleta.getPreco())
                     .score(atleta.getScore())
+                    .desvioPadrao(atleta.getDesvioPadrao())
+                    .rodadasConsideradas(atleta.getRodadasConsideradas())
                     .emDuvida(atleta.isDuvida())
                     .build();
         }

@@ -37,6 +37,18 @@ public class Atleta {
      */
     private final double desempenhoRecente;
 
+    /**
+     * Desvio padrao populacional das pontuacoes das ultimas rodadas consideradas.
+     * Preenchido pelo ScoreService; 0.0 quando ha menos de 2 rodadas ou sem historico recente (proxy).
+     */
+    private final double desvioPadrao;
+
+    /**
+     * Numero de rodadas com pontuacao disponivel usadas no calculo do desempenho.
+     * Preenchido pelo ScoreService; 0 quando o atleta nao possui historico recente (proxy).
+     */
+    private final int rodadasConsideradas;
+
     private final double score;
     private final Atleta substitutoProvavel;
 

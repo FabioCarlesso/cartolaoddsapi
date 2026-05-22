@@ -130,7 +130,9 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.capitao.status").exists())
                     .andExpect(jsonPath("$.capitao.mediaPontos").exists())
                     .andExpect(jsonPath("$.capitao.preco").exists())
-                    .andExpect(jsonPath("$.capitao.score").exists());
+                    .andExpect(jsonPath("$.capitao.score").exists())
+                    .andExpect(jsonPath("$.capitao.desvioPadrao").value(1.25))
+                    .andExpect(jsonPath("$.capitao.rodadasConsideradas").value(5));
         }
 
         @Test
@@ -172,6 +174,8 @@ class TimeControllerTest {
                 .valorizacao(3.2)
                 .preco(22.0)
                 .score(8.54)
+                .desvioPadrao(1.25)
+                .rodadasConsideradas(5)
                 .build();
 
         Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);

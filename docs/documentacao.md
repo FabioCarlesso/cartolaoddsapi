@@ -406,6 +406,8 @@ Os pesos do fallback e os bônus situacionais são configuráveis via `PATCH /ap
 
 **Penalização por volatilidade:** o `DesempenhoService` retorna um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional) e `rodadasConsideradas`. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes. `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`); com menos de 2 rodadas o `desvioPadrao` é `0.0`, anulando a penalidade. Quando o atleta não tem histórico recente e cai para o proxy (`mediaPontos` da temporada), nenhuma penalidade é aplicada.
 
+**Exposição na API:** o `desvioPadrao` (arredondado para 4 casas decimais) e `rodadasConsideradas` são propagados para o modelo `Atleta` e retornados nos DTOs `AtletaDto` (`GET /api/time`) e `AtletaRankingDto` (`GET /api/ranking`), permitindo ao frontend exibir um indicador de consistência. Atletas que usam o proxy retornam `desvioPadrao = 0.0` e `rodadasConsideradas = 0`. Os campos são documentados no schema OpenAPI via anotações `@Schema` e ficam disponíveis em `/v3/api-docs`.
+
 ### 5.4 Formação 4-3-3
 
 | Slot | `posicao_id` | Qtd | Pool elegível |

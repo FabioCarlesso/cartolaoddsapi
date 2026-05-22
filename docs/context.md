@@ -79,6 +79,8 @@ score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
 
 O `DesempenhoService` retorna, para cada atleta, um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional, divisão por N) e `rodadasConsideradas` das últimas rodadas. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes e priorizando consistência em situações de empate técnico. O `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`). Atletas com menos de 2 rodadas disponíveis têm `desvioPadrao = 0.0`, anulando a penalidade sem quebrar por dados insuficientes. Atletas sem histórico recente (ausentes do mapa) caem para o proxy `mediaPontos` da temporada e não recebem penalidade.
 
+O `ScoreService` propaga `desvioPadrao` (arredondado para 4 casas) e `rodadasConsideradas` para o modelo `Atleta`, e ambos são expostos nos DTOs de resposta `AtletaDto` (`GET /api/time`) e `AtletaRankingDto` (`GET /api/ranking`). Para atletas que usam o proxy (sem histórico recente), os campos valem `0.0` e `0`. Esses valores alimentam o indicador de consistência exibido no frontend.
+
 #### Constantes de peso por posição
 
 Os pesos específicos por posição são constantes centralizadas em `ScoreService` (prefixo `GOL_` e `ATA_`), fáceis de ajustar sem impactar a fórmula das demais posições.

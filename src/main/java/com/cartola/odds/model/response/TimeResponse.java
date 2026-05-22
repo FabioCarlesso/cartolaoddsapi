@@ -99,6 +99,16 @@ public class TimeResponse {
         @Schema(description = "Score calculado pelo sistema", example = "7.8400")
         private final double score;
 
+        @Schema(description = "Desvio padrao das pontuacoes nas ultimas rodadas consideradas. "
+                            + "0.0 quando ha menos de 2 rodadas ou sem historico recente.",
+                example = "1.2500")
+        private final double desvioPadrao;
+
+        @Schema(description = "Quantidade de rodadas com pontuacao usadas no calculo do desempenho. "
+                            + "0 quando o atleta nao possui historico recente.",
+                example = "5")
+        private final int rodadasConsideradas;
+
         @Schema(description = "Substituto sugerido caso o atleta esteja em Duvida (null se Provavel)")
         private final AtletaDto substitutoProvavel;
 
@@ -113,6 +123,8 @@ public class TimeResponse {
                     .valorizacao(a.getValorizacao())
                     .preco(a.getPreco())
                     .score(a.getScore())
+                    .desvioPadrao(a.getDesvioPadrao())
+                    .rodadasConsideradas(a.getRodadasConsideradas())
                     .substitutoProvavel(a.getSubstitutoProvavel() != null
                             ? AtletaDto.from(a.getSubstitutoProvavel()) : null)
                     .build();
