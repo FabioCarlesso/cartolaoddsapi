@@ -62,6 +62,28 @@ class AtletaTest {
     }
 
     @Test
+    @DisplayName("withDesvioPadrao deve criar nova instancia sem modificar a original")
+    void withDesvioPadraoDevePreservarImutabilidade() {
+        var original = base().desvioPadrao(0.0).build();
+        var comDesvio = original.withDesvioPadrao(2.5);
+
+        assertThat(original.getDesvioPadrao()).isEqualTo(0.0);
+        assertThat(comDesvio.getDesvioPadrao()).isEqualTo(2.5);
+        assertThat(comDesvio.getApelido()).isEqualTo(original.getApelido());
+    }
+
+    @Test
+    @DisplayName("withRodadasConsideradas deve criar nova instancia sem modificar a original")
+    void withRodadasConsideradasDevePreservarImutabilidade() {
+        var original = base().rodadasConsideradas(0).build();
+        var comRodadas = original.withRodadasConsideradas(5);
+
+        assertThat(original.getRodadasConsideradas()).isEqualTo(0);
+        assertThat(comRodadas.getRodadasConsideradas()).isEqualTo(5);
+        assertThat(comRodadas.getApelido()).isEqualTo(original.getApelido());
+    }
+
+    @Test
     @DisplayName("withSubstitutoProvavel deve injetar substituto sem modificar o original")
     void withSubstitutoDevePreservarImutabilidade() {
         var titular = base().build();
@@ -89,6 +111,8 @@ class AtletaTest {
                 .valorizacao(2.0)
                 .preco(22.0)
                 .desempenhoRecente(0.0)
+                .desvioPadrao(0.0)
+                .rodadasConsideradas(0)
                 .score(0.0);
     }
 }

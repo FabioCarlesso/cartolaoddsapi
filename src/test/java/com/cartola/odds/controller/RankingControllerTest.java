@@ -114,6 +114,8 @@ class RankingControllerTest {
                     .andExpect(jsonPath("$.atletas[0].score").isNumber())
                     .andExpect(jsonPath("$.atletas[0].preco").isNumber())
                     .andExpect(jsonPath("$.atletas[0].mediaPontos").isNumber())
+                    .andExpect(jsonPath("$.atletas[0].desvioPadrao").value(1.25))
+                    .andExpect(jsonPath("$.atletas[0].rodadasConsideradas").value(5))
                     .andExpect(jsonPath("$.atletas[0].emDuvida").isBoolean());
         }
 
@@ -199,6 +201,8 @@ class RankingControllerTest {
                     .valorizacao(1.0)
                     .preco(20.0 - i)
                     .score(10.0 - i)
+                    .desvioPadrao(1.25)
+                    .rodadasConsideradas(5)
                     .emDuvida(false)
                     .build());
         }

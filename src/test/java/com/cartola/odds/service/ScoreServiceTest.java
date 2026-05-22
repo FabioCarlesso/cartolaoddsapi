@@ -439,6 +439,49 @@ class ScoreServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("calcularScores — exposicao de desvioPadrao e rodadasConsideradas")
+    class CamposDeDesempenhoExpostos {
+
+        @Test
+        @DisplayName("deve preencher desvioPadrao e rodadasConsideradas com o historico real")
+        void devePreencherCamposComHistoricoReal() {
+            var atleta = base().atletaId(10).mediaPontos(5.0).build();
+            var desempenho = new DesempenhoService.DesempenhoAtleta(8.0, 2.5, 4);
+
+            var resultado = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(10, desempenho)).get(0);
+
+            assertThat(resultado.getDesvioPadrao()).isCloseTo(2.5, within(0.001));
+            assertThat(resultado.getRodadasConsideradas()).isEqualTo(4);
+        }
+
+        @Test
+        @DisplayName("deve zerar desvioPadrao e rodadasConsideradas quando atleta usa proxy")
+        void deveZerarCamposComProxy() {
+            var atleta = base().atletaId(99).mediaPontos(10.0).build();
+
+            var resultado = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(1, desemp(5.0, 9.0))).get(0);
+
+            assertThat(resultado.getDesvioPadrao()).isEqualTo(0.0);
+            assertThat(resultado.getRodadasConsideradas()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("deve arredondar desvioPadrao para 4 casas decimais")
+        void deveArredondarDesvioPadrao() {
+            var atleta = base().atletaId(7).mediaPontos(5.0).build();
+            // desvio com muitas casas: 1.2345678 -> 1.2346
+            var desempenho = new DesempenhoService.DesempenhoAtleta(8.0, 1.2345678, 5);
+
+            var resultado = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(7, desempenho)).get(0);
+
+            assertThat(resultado.getDesvioPadrao()).isEqualTo(1.2346);
+        }
+    }
+
     // ── Helper ──────────────────────────────────────────────────────
 
     private DesempenhoService.DesempenhoAtleta desemp(double media) {

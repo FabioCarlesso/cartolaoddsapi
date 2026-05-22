@@ -237,12 +237,14 @@ odds.api.key=SUA_API_KEY_AQUI
   "limite": 3,
   "totalDisponivel": 18,
   "atletas": [
-    { "rank": 1, "apelido": "Hulk", "formatado": "Hulk (ATM)", "score": 8.54, "preco": 22.0, "emDuvida": false },
-    { "rank": 2, "apelido": "Cano",  "formatado": "Cano (FLU)",  "score": 7.90, "preco": 18.3, "emDuvida": false },
-    { "rank": 3, "apelido": "Pedro", "formatado": "Pedro (FLA) ⚠️ DÚVIDA", "score": 7.70, "preco": 17.0, "emDuvida": true }
+    { "rank": 1, "apelido": "Hulk", "formatado": "Hulk (ATM)", "score": 8.54, "preco": 22.0, "desvioPadrao": 1.25, "rodadasConsideradas": 5, "emDuvida": false },
+    { "rank": 2, "apelido": "Cano",  "formatado": "Cano (FLU)",  "score": 7.90, "preco": 18.3, "desvioPadrao": 2.10, "rodadasConsideradas": 5, "emDuvida": false },
+    { "rank": 3, "apelido": "Pedro", "formatado": "Pedro (FLA) ⚠️ DÚVIDA", "score": 7.70, "preco": 17.0, "desvioPadrao": 0.0, "rodadasConsideradas": 0, "emDuvida": true }
   ]
 }
 ```
+
+> Os campos `desvioPadrao` e `rodadasConsideradas` expõem o desvio padrão populacional das pontuações e a quantidade de rodadas usadas no cálculo do desempenho recente. Disponíveis também no `GET /api/time`. Valem `0.0` e `0` quando o atleta não tem histórico recente (menos de 2 rodadas ou ausente do histórico), caso em que nenhuma penalidade por volatilidade é aplicada.
 
 ### Exemplo — `DELETE /api/cache`
 
@@ -428,7 +430,7 @@ cartola/
     │           ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
     │           └── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     └── test/
-        ├── java/                            # 21 classes de teste — 336 cenários
+        ├── java/                            # 21 classes de teste — 341 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -499,7 +501,7 @@ mvn test jacoco:report
 | `OddsServiceTest` | 22 — buscarFavoritos + buscarFavoritosDetalhado + filtro por rodada atual |
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
-| `ScoreServiceTest` | 28 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio |
+| `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
 | `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
@@ -510,7 +512,7 @@ mvn test jacoco:report
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 7 — HTTP completo |
-| `AtletaTest` | 5 — domínio e imutabilidade |
+| `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
 | `ActuatorEndpointsTest` | 10 — health, metrics, prometheus e bloqueio de endpoints sensíveis |
