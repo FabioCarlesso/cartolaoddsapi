@@ -424,6 +424,19 @@ class ScoreServiceTest {
             // penalidade = 4.0 * 0.05 = 0.20
             assertThat(semDesvio - comDesvio).isCloseTo(0.20, within(0.001));
         }
+
+        @Test
+        @DisplayName("nao deve penalizar quando atleta usa proxy (ausente do mapa)")
+        void naoPenalizaQuandoUsaProxy() {
+            var atleta = base().atletaId(1).mediaPontos(10.0).valorizacao(0.0).build();
+
+            // mapa nao contem o atleta -> usa media da temporada como proxy, sem desvio associado
+            var resultado = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(2, desemp(5.0, 9.0)));
+
+            // score = 10*0.40 + 0 + 10*0.20 = 6.0, sem qualquer penalidade
+            assertThat(resultado.get(0).getScore()).isCloseTo(6.0, within(0.001));
+        }
     }
 
     // ── Helper ──────────────────────────────────────────────────────

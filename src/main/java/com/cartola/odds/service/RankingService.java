@@ -45,7 +45,7 @@ public class RankingService {
         }
 
         var atletasFiltrados = cartolaDataService.buscarAtletasFiltrados(favoritos);
-        var desempenhoMap    = desempenhoService.calcularMediaUltimasRodadas(statusResponse.getRodadaAtual());
+        var desempenhoMap    = desempenhoService.calcularDesempenhoUltimasRodadas(statusResponse.getRodadaAtual());
         var atletasComScore  = scoreService.calcularScores(atletasFiltrados, timesCasa, favoritos, desempenhoMap);
 
         Stream<Atleta> stream = atletasComScore.stream()

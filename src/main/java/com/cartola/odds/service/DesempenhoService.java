@@ -51,7 +51,7 @@ public class DesempenhoService {
      * @return mapa {atletaId -> DesempenhoAtleta das ultimas 5 rodadas}
      *         Atletas sem historico nao aparecem no mapa (fallback para mediaPontos da temporada).
      */
-    public Map<Integer, DesempenhoAtleta> calcularMediaUltimasRodadas(int rodadaAtual) {
+    public Map<Integer, DesempenhoAtleta> calcularDesempenhoUltimasRodadas(int rodadaAtual) {
         // Determina quais rodadas buscar (ate 5 anteriores a atual)
         int primeiraRodada = Math.max(1, rodadaAtual - RODADAS_HISTORICO);
         List<Integer> rodadasAlvo = IntStream.range(primeiraRodada, rodadaAtual)
@@ -116,7 +116,7 @@ public class DesempenhoService {
     private double calcularDesvio(List<Double> pontos, double media) {
         if (pontos.size() < 2) return 0.0;
         double variancia = pontos.stream()
-                .mapToDouble(p -> Math.pow(p - media, 2))
+                .mapToDouble(p -> (p - media) * (p - media))
                 .average()
                 .orElse(0.0);
         return Math.sqrt(variancia);

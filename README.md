@@ -350,7 +350,7 @@ Os pesos base de GOL e ATA são constantes no `ScoreService`; para essas posiç�
 **Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`.
 Fallback automático para `mediaPontos` da temporada quando o histórico não estiver disponível.
 
-**Penalização por volatilidade:** o `DesempenhoService` calcula o desvio padrão populacional das últimas rodadas. A penalidade `desvioPadrão × pesoDesvio` é subtraída do score em todas as posições, priorizando atletas consistentes em situações de empate técnico. `pesoDesvio` é configurável via `PATCH /api/config` (default `0.05`); o desvio padrão é `0.0` quando há menos de 2 rodadas disponíveis, anulando a penalidade.
+**Penalização por volatilidade:** o `DesempenhoService` calcula o desvio padrão populacional das últimas rodadas. A penalidade `desvioPadrão × pesoDesvio` é subtraída do score em todas as posições, priorizando atletas consistentes em situações de empate técnico. `pesoDesvio` é configurável via `PATCH /api/config` (default `0.05`); o desvio padrão é `0.0` quando há menos de 2 rodadas disponíveis, anulando a penalidade. Atletas sem histórico recente caem para o proxy `mediaPontos` e não são penalizados.
 
 ### Formação 4-3-3
 
@@ -428,7 +428,7 @@ cartola/
     │           ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
     │           └── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     └── test/
-        ├── java/                            # 21 classes de teste — 335 cenários
+        ├── java/                            # 21 classes de teste — 336 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -499,7 +499,7 @@ mvn test jacoco:report
 | `OddsServiceTest` | 22 — buscarFavoritos + buscarFavoritosDetalhado + filtro por rodada atual |
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
-| `ScoreServiceTest` | 27 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA) |
+| `ScoreServiceTest` | 28 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio |
 | `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |

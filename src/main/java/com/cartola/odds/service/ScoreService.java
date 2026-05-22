@@ -46,9 +46,12 @@ public class ScoreService {
                     double timeFavorito = favoritos.contains(a.getNomeClubeNorm()) ? 10.0 : 0.0;
 
                     DesempenhoService.DesempenhoAtleta desempenhoAtleta = desempenhoMap.get(a.getAtletaId());
-                    double desempenho  = desempenhoAtleta != null ? desempenhoAtleta.mediaPontos() : 0.0;
-                    if (desempenho == 0.0) desempenho = a.getMediaPontos();
-                    double desvioPadrao = desempenhoAtleta != null ? desempenhoAtleta.desvioPadrao() : 0.0;
+                    boolean temHistorico = desempenhoAtleta != null && desempenhoAtleta.rodadasConsideradas() > 0;
+
+                    // Com histórico real, usa a média das últimas rodadas; sem ele, cai para a média da temporada (proxy)
+                    double desempenho   = temHistorico ? desempenhoAtleta.mediaPontos() : a.getMediaPontos();
+                    // O desvio só existe para o histórico real; o proxy não tem volatilidade associada
+                    double desvioPadrao = temHistorico ? desempenhoAtleta.desvioPadrao() : 0.0;
 
                     double score = switch (a.getPosicao()) {
                         case GOL -> calcularGoleiro(a, desempenho, fatorCasa, timeFavorito, config);

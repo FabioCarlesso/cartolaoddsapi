@@ -404,7 +404,7 @@ Os pesos do fallback e os bônus situacionais são configuráveis via `PATCH /ap
 
 **Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`. Quando o histórico não está disponível, usa `mediaPontos` como proxy.
 
-**Penalização por volatilidade:** o `DesempenhoService` retorna um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional) e `rodadasConsideradas`. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes. `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`); com menos de 2 rodadas o `desvioPadrao` é `0.0`, anulando a penalidade.
+**Penalização por volatilidade:** o `DesempenhoService` retorna um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional) e `rodadasConsideradas`. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes. `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`); com menos de 2 rodadas o `desvioPadrao` é `0.0`, anulando a penalidade. Quando o atleta não tem histórico recente e cai para o proxy (`mediaPontos` da temporada), nenhuma penalidade é aplicada.
 
 ### 5.4 Formação 4-3-3
 
@@ -698,9 +698,9 @@ Seleciona titulares, aplica a regra configurável de defesa sem clube repetido, 
 Retorna `Time` completo com alertas de dúvida.
 
 
-### `DesempenhoService.calcularMediaUltimasRodadas(rodadaAtual) → Map<Integer, Double>`
+### `DesempenhoService.calcularDesempenhoUltimasRodadas(rodadaAtual) → Map<Integer, DesempenhoAtleta>`
 Busca até 5 rodadas anteriores via `/atletas/pontuados` (cacheadas por rodada).
-Retorna `{atletaId → médiaUltimasRodadas}`. Atletas sem histórico não aparecem no mapa (o `ScoreService` usa `mediaPontos` como fallback).
+Retorna `{atletaId → DesempenhoAtleta(mediaPontos, desvioPadrao, rodadasConsideradas)}`. Atletas sem histórico não aparecem no mapa (o `ScoreService` usa `mediaPontos` como fallback e não aplica penalidade por desvio).
 
 ### `OddsService.buscarFavoritosDetalhado(oddLimite) → FavoritosResponse`
 Processa todos os jogos da Odds API e classifica cada um em favorito ou descartado.
