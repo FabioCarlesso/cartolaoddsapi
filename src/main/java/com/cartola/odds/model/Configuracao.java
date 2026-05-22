@@ -40,6 +40,9 @@ public class Configuracao {
     @Column(name = "peso_time_favorito", nullable = false)
     private double pesoTimeFavorito;
 
+    @Column(name = "peso_desvio", nullable = false)
+    private double pesoDesvio;
+
     @Column(name = "formacao_gol", nullable = false)
     private int formacaoGol;
 
@@ -90,6 +93,7 @@ public class Configuracao {
         c.setPesoDesempenho(0.20);
         c.setPesoFatorCasa(0.10);
         c.setPesoTimeFavorito(0.10);
+        c.setPesoDesvio(0.05);
         c.setFormacaoGol(1);
         c.setFormacaoLat(2);
         c.setFormacaoZag(2);

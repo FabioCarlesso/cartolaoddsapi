@@ -156,6 +156,8 @@ Os parâmetros de negócio (odd limite, pesos do score, formação e regras) sã
 - `V2__alter_configuracao_numeric_to_double.sql` — converte as colunas de pesos/odds para `DOUBLE PRECISION` (necessário para compatibilidade com o mapeamento Hibernate de `double`)
 - `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para evitar clubes repetidos entre GOL, LAT e ZAG
 - `V4__add_limite_atletas_por_clube.sql` — adiciona o limite configurável de atletas titulares por clube
+- `V5__add_budget_maximo.sql` — adiciona a constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
+- `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
 
 ```sql
 -- V1: estrutura inicial
@@ -196,6 +198,7 @@ CREATE TABLE configuracao (
   "pesoDesempenho": 0.20,
   "pesoFatorCasa": 0.10,
   "pesoTimeFavorito": 0.10,
+  "pesoDesvio": 0.05,
   "formacaoGol": 1,
   "formacaoLat": 2,
   "formacaoZag": 2,
@@ -204,6 +207,7 @@ CREATE TABLE configuracao (
   "formacaoTec": 1,
   "evitarMesmoClubeDefesa": true,
   "limiteAtletasPorClube": 4,
+  "budgetMaximo": 0.0,
   "updatedAt": "2025-06-01T15:30:00"
 }
 ```
@@ -373,6 +377,7 @@ score = (mediaPontos × pesoMediaPontos)
       + (desempenho × pesoDesempenho)
       + (fatorCasa × pesoFatorCasa)
       + (timeFavorito × pesoTimeFavorito)
+      - (desvioPadrao × pesoDesvio)
 ```
 
 **Goleiro (GOL):**
@@ -381,6 +386,7 @@ score = (mediaPontos × pesoMediaPontos)
 score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (defesasDificeis × 0.05) + (penaltisDefendidos × 0.05) - (golsSofridos × 0.02)
       + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+      - (desvioPadrao × pesoDesvio)
 ```
 
 **Atacante (ATA):**
@@ -389,6 +395,7 @@ score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
 score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (gols × 0.08) + (assistencias × 0.05)
       + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+      - (desvioPadrao × pesoDesvio)
 ```
 
 Os scouts são acumulados da temporada vindos de `/atletas/mercado`: `DD` -> `defesasDificeis`, `GS` -> `golsSofridos`, `DP` -> `penaltisDefendidos`, `G` -> `gols`, `A` -> `assistencias`. Valores ausentes ou nulos são tratados como `0`.
@@ -396,6 +403,8 @@ Os scouts são acumulados da temporada vindos de `/atletas/mercado`: `DD` -> `de
 Os pesos do fallback e os bônus situacionais são configuráveis via `PATCH /api/config`. Os pesos base de GOL e ATA são constantes centralizadas no `ScoreService`.
 
 **Desempenho:** usa a média real das últimas 5 rodadas via `/atletas/pontuados`. Quando o histórico não está disponível, usa `mediaPontos` como proxy.
+
+**Penalização por volatilidade:** o `DesempenhoService` retorna um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional) e `rodadasConsideradas`. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes. `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`); com menos de 2 rodadas o `desvioPadrao` é `0.0`, anulando a penalidade.
 
 ### 5.4 Formação 4-3-3
 
@@ -622,7 +631,9 @@ cartola/
     │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │       ├── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
     │       ├── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
-    │       └── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
+    │       ├── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
+    │       ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
+    │       └── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     └── test/
         ├── java/com/cartola/odds/
         │   ├── CartolaOddsApplicationTests.java

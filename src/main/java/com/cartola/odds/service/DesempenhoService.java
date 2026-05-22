@@ -13,12 +13,13 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /**
- * Calcula a media de pontuacao dos atletas nas ultimas N rodadas.
+ * Calcula o desempenho dos atletas nas ultimas N rodadas.
  *
  * A API do Cartola FC expoe /atletas/pontuados com os dados da rodada atual.
  * Para obter historico, buscamos as rodadas anteriores (rodada_atual - 1, -2, ...).
  *
- * Resultado retornado: Map<atletaId, mediaUltimasRodadas>
+ * Resultado retornado: Map<atletaId, DesempenhoAtleta> com media, desvio padrao
+ * e numero de rodadas consideradas.
  */
 @Slf4j
 @Service
@@ -30,14 +31,27 @@ public class DesempenhoService {
     private final CartolaClient cartolaClient;
 
     /**
-     * Calcula a media de pontuacao das ultimas {@code RODADAS_HISTORICO} rodadas
+     * Desempenho recente de um atleta nas ultimas rodadas.
+     *
+     * @param mediaPontos         media de pontuacao das rodadas consideradas
+     * @param desvioPadrao        desvio padrao populacional das pontuacoes (0.0 com menos de 2 rodadas)
+     * @param rodadasConsideradas quantidade de rodadas com pontuacao disponivel para o atleta
+     */
+    public record DesempenhoAtleta(
+            double mediaPontos,
+            double desvioPadrao,
+            int rodadasConsideradas
+    ) {}
+
+    /**
+     * Calcula o desempenho das ultimas {@code RODADAS_HISTORICO} rodadas
      * para cada atleta disponivel no historico.
      *
      * @param rodadaAtual rodada atual retornada pelo /mercado/status
-     * @return mapa {atletaId -> media de pontuacao das ultimas 5 rodadas}
+     * @return mapa {atletaId -> DesempenhoAtleta das ultimas 5 rodadas}
      *         Atletas sem historico nao aparecem no mapa (fallback para mediaPontos da temporada).
      */
-    public Map<Integer, Double> calcularMediaUltimasRodadas(int rodadaAtual) {
+    public Map<Integer, DesempenhoAtleta> calcularMediaUltimasRodadas(int rodadaAtual) {
         // Determina quais rodadas buscar (ate 5 anteriores a atual)
         int primeiraRodada = Math.max(1, rodadaAtual - RODADAS_HISTORICO);
         List<Integer> rodadasAlvo = IntStream.range(primeiraRodada, rodadaAtual)
@@ -76,18 +90,35 @@ public class DesempenhoService {
             });
         }
 
-        // Calcula media por atleta
-        var medias = pontuacoesPorAtleta.entrySet().stream()
+        // Calcula media e desvio padrao por atleta
+        var desempenhos = pontuacoesPorAtleta.entrySet().stream()
                 .collect(Collectors.toMap(
                         Map.Entry::getKey,
-                        e -> e.getValue().stream()
-                                .mapToDouble(Double::doubleValue)
-                                .average()
-                                .orElse(0.0)
+                        e -> {
+                            List<Double> pontos = e.getValue();
+                            double media = pontos.stream()
+                                    .mapToDouble(Double::doubleValue)
+                                    .average()
+                                    .orElse(0.0);
+                            return new DesempenhoAtleta(media, calcularDesvio(pontos, media), pontos.size());
+                        }
                 ));
 
-        log.info("Medias calculadas para {} atletas (baseado em {} rodadas)",
-                medias.size(), rodadasAlvo.size());
-        return medias;
+        log.info("Desempenho calculado para {} atletas (baseado em {} rodadas)",
+                desempenhos.size(), rodadasAlvo.size());
+        return desempenhos;
+    }
+
+    /**
+     * Desvio padrao populacional (divisao por N) das pontuacoes.
+     * Retorna 0.0 quando ha menos de 2 rodadas, sem quebrar por dados insuficientes.
+     */
+    private double calcularDesvio(List<Double> pontos, double media) {
+        if (pontos.size() < 2) return 0.0;
+        double variancia = pontos.stream()
+                .mapToDouble(p -> Math.pow(p - media, 2))
+                .average()
+                .orElse(0.0);
+        return Math.sqrt(variancia);
     }
 }

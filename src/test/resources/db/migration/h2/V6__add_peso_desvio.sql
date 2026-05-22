@@ -1,0 +1,2 @@
+ALTER TABLE configuracao
+    ADD COLUMN peso_desvio DOUBLE PRECISION NOT NULL DEFAULT 0.05;

@@ -53,7 +53,7 @@ class PipelineServiceTest {
         @DisplayName("deve executar pipeline completo e retornar Time preenchido")
         void deveExecutarPipelineCompleto() {
             var atletas = atletasMinimos();
-            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of(1, 8.0));
+            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of(1, desemp(8.0)));
 
             var resultado = pipelineService.executar();
 
@@ -95,7 +95,7 @@ class PipelineServiceTest {
             var atletas        = atletasMinimos();
             var favoritos      = Set.of("fla");
             var timesCasa      = Set.of(1);
-            var desempenhoMap  = Map.of(1, 9.5);
+            var desempenhoMap  = Map.of(1, desemp(9.5));
             configurarMocks(atletas, favoritos, timesCasa, desempenhoMap);
 
             pipelineService.executar();
@@ -170,8 +170,13 @@ class PipelineServiceTest {
 
     // ── Helpers ──────────────────────────────────────────────────────
 
+    private DesempenhoService.DesempenhoAtleta desemp(double media) {
+        return new DesempenhoService.DesempenhoAtleta(media, 0.0, DesempenhoService.RODADAS_HISTORICO);
+    }
+
     private void configurarMocks(List<Atleta> atletas, Set<String> favoritos,
-                                  Set<Integer> timesCasa, Map<Integer, Double> desempenhoMap) {
+                                  Set<Integer> timesCasa,
+                                  Map<Integer, DesempenhoService.DesempenhoAtleta> desempenhoMap) {
         when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
         when(cartolaDataService.buscarDadosRodada())
                 .thenReturn(new CartolaDataService.DadosRodada(timesCasa, Set.of()));
