@@ -53,7 +53,7 @@ class PipelineServiceTest {
         @DisplayName("deve executar pipeline completo e retornar Time preenchido")
         void deveExecutarPipelineCompleto() {
             var atletas = atletasMinimos();
-            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of(1, 8.0));
+            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of(1, desemp(8.0)));
 
             var resultado = pipelineService.executar();
 
@@ -73,7 +73,7 @@ class PipelineServiceTest {
             verify(cartolaDataService, times(1)).buscarDadosRodada();
             verify(oddsService,        times(1)).buscarFavoritos(any());
             verify(cartolaDataService, times(1)).buscarAtletasFiltrados(any());
-            verify(desempenhoService,  times(1)).calcularMediaUltimasRodadas(15);
+            verify(desempenhoService,  times(1)).calcularDesempenhoUltimasRodadas(15);
             verify(scoreService,       times(1)).calcularScores(any(), any(), any(), any());
             verify(montadorTimeService,times(1)).montar(any(), eq(15), any());
         }
@@ -86,7 +86,7 @@ class PipelineServiceTest {
 
             pipelineService.executar();
 
-            verify(desempenhoService).calcularMediaUltimasRodadas(15);
+            verify(desempenhoService).calcularDesempenhoUltimasRodadas(15);
         }
 
         @Test
@@ -95,7 +95,7 @@ class PipelineServiceTest {
             var atletas        = atletasMinimos();
             var favoritos      = Set.of("fla");
             var timesCasa      = Set.of(1);
-            var desempenhoMap  = Map.of(1, 9.5);
+            var desempenhoMap  = Map.of(1, desemp(9.5));
             configurarMocks(atletas, favoritos, timesCasa, desempenhoMap);
 
             pipelineService.executar();
@@ -128,7 +128,7 @@ class PipelineServiceTest {
 
             try { pipelineService.executar(); } catch (IllegalStateException ignored) {}
 
-            verify(desempenhoService, never()).calcularMediaUltimasRodadas(anyInt());
+            verify(desempenhoService, never()).calcularDesempenhoUltimasRodadas(anyInt());
             verify(scoreService,      never()).calcularScores(any(), any(), any(), any());
             verify(montadorTimeService, never()).montar(any(), anyInt(), any());
         }
@@ -146,7 +146,7 @@ class PipelineServiceTest {
                     .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
             when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
             when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
-            when(desempenhoService.calcularMediaUltimasRodadas(14)).thenReturn(Map.of());
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(14)).thenReturn(Map.of());
             when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
             when(montadorTimeService.montar(any(), eq(14), any())).thenReturn(timeMock(14));
 
@@ -170,14 +170,19 @@ class PipelineServiceTest {
 
     // ── Helpers ──────────────────────────────────────────────────────
 
+    private DesempenhoService.DesempenhoAtleta desemp(double media) {
+        return new DesempenhoService.DesempenhoAtleta(media, 0.0, DesempenhoService.RODADAS_HISTORICO);
+    }
+
     private void configurarMocks(List<Atleta> atletas, Set<String> favoritos,
-                                  Set<Integer> timesCasa, Map<Integer, Double> desempenhoMap) {
+                                  Set<Integer> timesCasa,
+                                  Map<Integer, DesempenhoService.DesempenhoAtleta> desempenhoMap) {
         when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
         when(cartolaDataService.buscarDadosRodada())
                 .thenReturn(new CartolaDataService.DadosRodada(timesCasa, Set.of()));
         when(oddsService.buscarFavoritos(any())).thenReturn(favoritos);
         when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
-        when(desempenhoService.calcularMediaUltimasRodadas(15)).thenReturn(desempenhoMap);
+        when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(desempenhoMap);
         when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
         when(montadorTimeService.montar(any(), eq(15), any())).thenReturn(timeMock(15));
     }

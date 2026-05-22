@@ -24,13 +24,13 @@ class DesempenhoServiceTest {
     @InjectMocks DesempenhoService service;
 
     @Nested
-    @DisplayName("calcularMediaUltimasRodadas")
+    @DisplayName("calcularDesempenhoUltimasRodadas")
     class CalcularMedia {
 
         @Test
         @DisplayName("deve retornar mapa vazio quando rodadaAtual for 1 (sem historico)")
         void deveRetornarVazioSemHistorico() {
-            var resultado = service.calcularMediaUltimasRodadas(1);
+            var resultado = service.calcularDesempenhoUltimasRodadas(1);
             assertThat(resultado).isEmpty();
             verifyNoInteractions(cartolaClient);
         }
@@ -42,10 +42,10 @@ class DesempenhoServiceTest {
             when(cartolaClient.buscarPontuados(1)).thenReturn(pontuados("10", 6.0));
             when(cartolaClient.buscarPontuados(2)).thenReturn(pontuados("10", 8.0));
 
-            var resultado = service.calcularMediaUltimasRodadas(3);
+            var resultado = service.calcularDesempenhoUltimasRodadas(3);
 
             assertThat(resultado).containsKey(10);
-            assertThat(resultado.get(10)).isCloseTo(7.0, within(0.001)); // (6+8)/2
+            assertThat(resultado.get(10).mediaPontos()).isCloseTo(7.0, within(0.001)); // (6+8)/2
         }
 
         @Test
@@ -58,10 +58,10 @@ class DesempenhoServiceTest {
             when(cartolaClient.buscarPontuados(5)).thenReturn(pontuados("5", 10.0));
             when(cartolaClient.buscarPontuados(6)).thenReturn(pontuados("5", 7.0));
 
-            var resultado = service.calcularMediaUltimasRodadas(7);
+            var resultado = service.calcularDesempenhoUltimasRodadas(7);
 
             // (4+6+8+10+7)/5 = 35/5 = 7.0
-            assertThat(resultado.get(5)).isCloseTo(7.0, within(0.001));
+            assertThat(resultado.get(5).mediaPontos()).isCloseTo(7.0, within(0.001));
         }
 
         @Test
@@ -72,7 +72,7 @@ class DesempenhoServiceTest {
                 when(cartolaClient.buscarPontuados(r)).thenReturn(pontuados("1", 5.0));
             }
 
-            service.calcularMediaUltimasRodadas(20);
+            service.calcularDesempenhoUltimasRodadas(20);
 
             for (int r = 15; r < 20; r++) {
                 verify(cartolaClient, times(1)).buscarPontuados(r);
@@ -88,11 +88,11 @@ class DesempenhoServiceTest {
             when(cartolaClient.buscarPontuados(1)).thenReturn(null);
             when(cartolaClient.buscarPontuados(2)).thenReturn(pontuados("3", 9.0));
 
-            var resultado = service.calcularMediaUltimasRodadas(3);
+            var resultado = service.calcularDesempenhoUltimasRodadas(3);
 
             // apenas a rodada 2 contribuiu
             assertThat(resultado).containsKey(3);
-            assertThat(resultado.get(3)).isCloseTo(9.0, within(0.001));
+            assertThat(resultado.get(3).mediaPontos()).isCloseTo(9.0, within(0.001));
         }
 
         @Test
@@ -102,7 +102,7 @@ class DesempenhoServiceTest {
             semAtletas.setAtletas(null);
             when(cartolaClient.buscarPontuados(1)).thenReturn(semAtletas);
 
-            var resultado = service.calcularMediaUltimasRodadas(2);
+            var resultado = service.calcularDesempenhoUltimasRodadas(2);
 
             assertThat(resultado).isEmpty();
         }
@@ -116,7 +116,7 @@ class DesempenhoServiceTest {
             resp.setAtletas(Map.of("99", pontuado));
             when(cartolaClient.buscarPontuados(1)).thenReturn(resp);
 
-            var resultado = service.calcularMediaUltimasRodadas(2);
+            var resultado = service.calcularDesempenhoUltimasRodadas(2);
 
             assertThat(resultado).doesNotContainKey(99);
         }
@@ -130,10 +130,10 @@ class DesempenhoServiceTest {
             resp.setAtletas(Map.of("1", p1, "2", p2));
             when(cartolaClient.buscarPontuados(1)).thenReturn(resp);
 
-            var resultado = service.calcularMediaUltimasRodadas(2);
+            var resultado = service.calcularDesempenhoUltimasRodadas(2);
 
-            assertThat(resultado.get(1)).isCloseTo(10.0, within(0.001));
-            assertThat(resultado.get(2)).isCloseTo(4.0,  within(0.001));
+            assertThat(resultado.get(1).mediaPontos()).isCloseTo(10.0, within(0.001));
+            assertThat(resultado.get(2).mediaPontos()).isCloseTo(4.0,  within(0.001));
         }
 
         @Test
@@ -143,10 +143,63 @@ class DesempenhoServiceTest {
             when(cartolaClient.buscarPontuados(1)).thenReturn(pontuados("99", 5.0));
             when(cartolaClient.buscarPontuados(2)).thenReturn(pontuados("7", 8.0));
 
-            var resultado = service.calcularMediaUltimasRodadas(3);
+            var resultado = service.calcularDesempenhoUltimasRodadas(3);
 
-            assertThat(resultado.get(7)).isCloseTo(8.0, within(0.001));
-            assertThat(resultado.get(99)).isCloseTo(5.0, within(0.001));
+            assertThat(resultado.get(7).mediaPontos()).isCloseTo(8.0, within(0.001));
+            assertThat(resultado.get(99).mediaPontos()).isCloseTo(5.0, within(0.001));
+        }
+    }
+
+    @Nested
+    @DisplayName("desvio padrao")
+    class DesvioPadrao {
+
+        @Test
+        @DisplayName("deve retornar desvio 0.0 quando todas as rodadas sao identicas")
+        void deveRetornarDesvioZeroParaRodadasIdenticas() {
+            // rodadaAtual=6 -> busca rodadas 1..5, todas com 7.0
+            for (int r = 1; r <= 5; r++) {
+                when(cartolaClient.buscarPontuados(r)).thenReturn(pontuados("10", 7.0));
+            }
+
+            var resultado = service.calcularDesempenhoUltimasRodadas(6);
+
+            assertThat(resultado.get(10).mediaPontos()).isCloseTo(7.0, within(0.001));
+            assertThat(resultado.get(10).desvioPadrao()).isCloseTo(0.0, within(0.001));
+            assertThat(resultado.get(10).rodadasConsideradas()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("deve calcular desvio padrao populacional para rodadas variadas")
+        void deveCalcularDesvioParaRodadasVariadas() {
+            // pontos: 2, 12, 2, 12, 7 -> media 7.0
+            // variancia populacional = ((-5)^2 + 5^2 + (-5)^2 + 5^2 + 0^2)/5 = 100/5 = 20
+            // desvio = sqrt(20) = 4.4721...
+            when(cartolaClient.buscarPontuados(1)).thenReturn(pontuados("10", 2.0));
+            when(cartolaClient.buscarPontuados(2)).thenReturn(pontuados("10", 12.0));
+            when(cartolaClient.buscarPontuados(3)).thenReturn(pontuados("10", 2.0));
+            when(cartolaClient.buscarPontuados(4)).thenReturn(pontuados("10", 12.0));
+            when(cartolaClient.buscarPontuados(5)).thenReturn(pontuados("10", 7.0));
+
+            var resultado = service.calcularDesempenhoUltimasRodadas(6);
+
+            assertThat(resultado.get(10).mediaPontos()).isCloseTo(7.0, within(0.001));
+            assertThat(resultado.get(10).desvioPadrao()).isCloseTo(Math.sqrt(20), within(0.001));
+            assertThat(resultado.get(10).rodadasConsideradas()).isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("deve retornar desvio 0.0 quando atleta tem apenas 1 rodada (sem excecao)")
+        void deveRetornarDesvioZeroParaUmaRodada() {
+            // atleta 7 so aparece na rodada 2
+            when(cartolaClient.buscarPontuados(1)).thenReturn(pontuados("99", 5.0));
+            when(cartolaClient.buscarPontuados(2)).thenReturn(pontuados("7", 8.0));
+
+            var resultado = service.calcularDesempenhoUltimasRodadas(3);
+
+            assertThat(resultado.get(7).mediaPontos()).isCloseTo(8.0, within(0.001));
+            assertThat(resultado.get(7).desvioPadrao()).isCloseTo(0.0, within(0.001));
+            assertThat(resultado.get(7).rodadasConsideradas()).isEqualTo(1);
         }
     }
 

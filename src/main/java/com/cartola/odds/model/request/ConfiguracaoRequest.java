@@ -43,6 +43,11 @@ public class ConfiguracaoRequest {
     @Schema(description = "Peso do bonus de time favorito pelas odds (0.0–1.0)", example = "0.10")
     private Double pesoTimeFavorito;
 
+    @DecimalMin(value = "0.0", message = "Peso deve ser >= 0.0")
+    @DecimalMax(value = "1.0", message = "Peso deve ser <= 1.0")
+    @Schema(description = "Peso da penalidade por volatilidade (desvio padrao) do desempenho (0.0–1.0)", example = "0.05")
+    private Double pesoDesvio;
+
     @Min(value = 0, message = "Quantidade de GOL deve ser >= 0")
     @Schema(description = "Numero de goleiros na formacao", example = "1")
     private Integer formacaoGol;

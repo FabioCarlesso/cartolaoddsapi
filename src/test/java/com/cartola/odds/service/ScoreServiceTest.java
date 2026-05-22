@@ -129,7 +129,7 @@ class ScoreServiceTest {
             // desempenho real = 8.0, mediaPontos = 4.0
             // score = 4.0*0.40 + 0*0.20 + 8.0*0.20 = 1.6 + 0 + 1.6 = 3.2
             var atleta = base().atletaId(42).mediaPontos(4.0).valorizacao(0.0).build();
-            var desempenhoMap = Map.of(42, 8.0);
+            var desempenhoMap = Map.of(42, desemp(8.0));
 
             var resultado = scoreService.calcularScores(
                     List.of(atleta), Set.of(), Set.of(), desempenhoMap);
@@ -141,7 +141,7 @@ class ScoreServiceTest {
         @DisplayName("deve usar mediaPontos como fallback quando atletaId ausente do mapa")
         void deveUsarFallbackQuandoIdAusenteDoMapa() {
             var atleta = base().atletaId(99).mediaPontos(10.0).valorizacao(0.0).build();
-            var desempenhoMap = Map.of(1, 5.0);
+            var desempenhoMap = Map.of(1, desemp(5.0));
 
             var semMapa = scoreService.calcularScores(List.of(atleta), Set.of(), Set.of()).get(0).getScore();
             var comMapa = scoreService.calcularScores(List.of(atleta), Set.of(), Set.of(), desempenhoMap).get(0).getScore();
@@ -154,7 +154,7 @@ class ScoreServiceTest {
         void devePreencherDesempenhoRecente() {
             var atleta = base().atletaId(10).mediaPontos(5.0).build();
             var resultado = scoreService.calcularScores(
-                    List.of(atleta), Set.of(), Set.of(), Map.of(10, 9.0));
+                    List.of(atleta), Set.of(), Set.of(), Map.of(10, desemp(9.0)));
 
             assertThat(resultado.get(0).getDesempenhoRecente()).isEqualTo(9.0);
         }
@@ -166,7 +166,7 @@ class ScoreServiceTest {
             var comProxy = scoreService.calcularScores(
                     List.of(atleta), Set.of(), Set.of(), Map.of()).get(0).getScore();
             var comReal = scoreService.calcularScores(
-                    List.of(atleta), Set.of(), Set.of(), Map.of(5, 10.0)).get(0).getScore();
+                    List.of(atleta), Set.of(), Set.of(), Map.of(5, desemp(10.0))).get(0).getScore();
 
             assertThat(comReal).isGreaterThan(comProxy);
         }
@@ -178,7 +178,7 @@ class ScoreServiceTest {
                     .mediaPontos(0.0).valorizacao(0.0).build();
 
             var resultado = scoreService.calcularScores(
-                    List.of(atleta), Set.of(7), Set.of("fla"), Map.of(7, 6.0));
+                    List.of(atleta), Set.of(7), Set.of("fla"), Map.of(7, desemp(6.0)));
 
             // desempenho=6.0*0.20=1.2 + casa=10*0.10=1.0 + favorito=10*0.10=1.0 = 3.2
             assertThat(resultado.get(0).getScore()).isCloseTo(3.2, within(0.001));
@@ -200,7 +200,7 @@ class ScoreServiceTest {
                 // score = 8*0.35 + 6*0.25 + 0*0.10 = 2.80 + 1.50 = 4.30
                 var goleiro = base().posicao(Posicao.GOL).mediaPontos(6.0).valorizacao(0.0).atletaId(10).build();
                 var resultado = scoreService.calcularScores(
-                        List.of(goleiro), Set.of(), Set.of(), Map.of(10, 8.0));
+                        List.of(goleiro), Set.of(), Set.of(), Map.of(10, desemp(8.0)));
 
                 assertThat(resultado.get(0).getScore()).isCloseTo(4.30, within(0.001));
             }
@@ -348,7 +348,112 @@ class ScoreServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("calcularScores — penalidade por desvio padrao")
+    class PenalidadePorDesvio {
+
+        @Test
+        @DisplayName("atleta com mesma media e menor desvio deve receber score maior")
+        void atletaMaisConsistenteRecebeScoreMaior() {
+            var constante = base().atletaId(1).mediaPontos(0.0).valorizacao(0.0).build();
+            var instavel  = base().atletaId(2).mediaPontos(0.0).valorizacao(0.0).build();
+
+            var scoreConstante = scoreService.calcularScores(
+                    List.of(constante), Set.of(), Set.of(), Map.of(1, desemp(7.0, 0.0))).get(0).getScore();
+            var scoreInstavel = scoreService.calcularScores(
+                    List.of(instavel), Set.of(), Set.of(), Map.of(2, desemp(7.0, 4.0))).get(0).getScore();
+
+            assertThat(scoreConstante).isGreaterThan(scoreInstavel);
+        }
+
+        @Test
+        @DisplayName("pesoDesvio = 0.0 deve manter o score neutro (sem penalidade)")
+        void pesoDesvioZeroNaoAlteraScore() {
+            when(configuracaoService.buscarConfig()).thenReturn(configComPesoDesvio(0.0));
+
+            var atleta = base().atletaId(1).mediaPontos(0.0).valorizacao(0.0).build();
+
+            var semDesvio = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(1, desemp(7.0, 0.0))).get(0).getScore();
+            var comDesvio = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(1, desemp(7.0, 4.0))).get(0).getScore();
+
+            assertThat(comDesvio).isCloseTo(semDesvio, within(0.001));
+        }
+
+        @Test
+        @DisplayName("pesoDesvio = 0.05 com desvio = 4.0 deve aplicar penalidade de 0.20")
+        void deveAplicarPenalidadeDe020() {
+            // fallback: media=10*0.40 + 0*0.20 + desempenho=10*0.20 = 6.0 ; penalidade = 4.0*0.05 = 0.20
+            var atleta = base().atletaId(1).mediaPontos(10.0).valorizacao(0.0).build();
+
+            var semDesvio = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(1, desemp(10.0, 0.0))).get(0).getScore();
+            var comDesvio = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(1, desemp(10.0, 4.0))).get(0).getScore();
+
+            assertThat(semDesvio).isCloseTo(6.0, within(0.001));
+            assertThat(comDesvio).isCloseTo(5.80, within(0.001));
+            assertThat(semDesvio - comDesvio).isCloseTo(0.20, within(0.001));
+        }
+
+        @Test
+        @DisplayName("goleiro com desvio deve ser penalizado pela formula especifica")
+        void devePenalizarGoleiro() {
+            var goleiro = base().posicao(Posicao.GOL).atletaId(1).mediaPontos(6.0).valorizacao(0.0).build();
+
+            var semDesvio = scoreService.calcularScores(
+                    List.of(goleiro), Set.of(), Set.of(), Map.of(1, desemp(8.0, 0.0))).get(0).getScore();
+            var comDesvio = scoreService.calcularScores(
+                    List.of(goleiro), Set.of(), Set.of(), Map.of(1, desemp(8.0, 4.0))).get(0).getScore();
+
+            // penalidade = 4.0 * 0.05 = 0.20
+            assertThat(semDesvio - comDesvio).isCloseTo(0.20, within(0.001));
+        }
+
+        @Test
+        @DisplayName("atacante com desvio deve ser penalizado pela formula especifica")
+        void devePenalizarAtacante() {
+            var atacante = base().posicao(Posicao.ATA).atletaId(1).mediaPontos(6.0).valorizacao(0.0).build();
+
+            var semDesvio = scoreService.calcularScores(
+                    List.of(atacante), Set.of(), Set.of(), Map.of(1, desemp(8.0, 0.0))).get(0).getScore();
+            var comDesvio = scoreService.calcularScores(
+                    List.of(atacante), Set.of(), Set.of(), Map.of(1, desemp(8.0, 4.0))).get(0).getScore();
+
+            // penalidade = 4.0 * 0.05 = 0.20
+            assertThat(semDesvio - comDesvio).isCloseTo(0.20, within(0.001));
+        }
+
+        @Test
+        @DisplayName("nao deve penalizar quando atleta usa proxy (ausente do mapa)")
+        void naoPenalizaQuandoUsaProxy() {
+            var atleta = base().atletaId(1).mediaPontos(10.0).valorizacao(0.0).build();
+
+            // mapa nao contem o atleta -> usa media da temporada como proxy, sem desvio associado
+            var resultado = scoreService.calcularScores(
+                    List.of(atleta), Set.of(), Set.of(), Map.of(2, desemp(5.0, 9.0)));
+
+            // score = 10*0.40 + 0 + 10*0.20 = 6.0, sem qualquer penalidade
+            assertThat(resultado.get(0).getScore()).isCloseTo(6.0, within(0.001));
+        }
+    }
+
     // ── Helper ──────────────────────────────────────────────────────
+
+    private DesempenhoService.DesempenhoAtleta desemp(double media) {
+        return desemp(media, 0.0);
+    }
+
+    private DesempenhoService.DesempenhoAtleta desemp(double media, double desvio) {
+        return new DesempenhoService.DesempenhoAtleta(media, desvio, DesempenhoService.RODADAS_HISTORICO);
+    }
+
+    private Configuracao configComPesoDesvio(double pesoDesvio) {
+        var config = Configuracao.defaults();
+        config.setPesoDesvio(pesoDesvio);
+        return config;
+    }
 
     private Atleta.AtletaBuilder base() {
         return Atleta.builder()

@@ -52,6 +52,7 @@ class ConfiguracaoControllerTest {
                     .andExpect(jsonPath("$.pesoDesempenho").value(0.20))
                     .andExpect(jsonPath("$.pesoFatorCasa").value(0.10))
                     .andExpect(jsonPath("$.pesoTimeFavorito").value(0.10))
+                    .andExpect(jsonPath("$.pesoDesvio").value(0.05))
                     .andExpect(jsonPath("$.formacaoGol").value(1))
                     .andExpect(jsonPath("$.formacaoLat").value(2))
                     .andExpect(jsonPath("$.formacaoZag").value(2))
@@ -180,6 +181,37 @@ class ConfiguracaoControllerTest {
             mockMvc.perform(patch("/api/config")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content("{\"budgetMaximo\": -10.0}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("deve retornar 200 ao atualizar pesoDesvio")
+        void deveAtualizarPesoDesvio() throws Exception {
+            when(configuracaoService.atualizar(any())).thenReturn(responsePadrao);
+
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pesoDesvio\": 0.10}"))
+                    .andExpect(status().isOk());
+
+            verify(configuracaoService).atualizar(any());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 para pesoDesvio > 1.0")
+        void deveRetornar400ParaPesoDesvioMaiorQueUm() throws Exception {
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pesoDesvio\": 1.5}"))
+                    .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 para pesoDesvio negativo")
+        void deveRetornar400ParaPesoDesvioNegativo() throws Exception {
+            mockMvc.perform(patch("/api/config")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"pesoDesvio\": -0.10}"))
                     .andExpect(status().isBadRequest());
         }
 

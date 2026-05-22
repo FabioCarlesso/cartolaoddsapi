@@ -30,6 +30,9 @@ public class ConfiguracaoResponse {
     @Schema(description = "Peso do bonus de time favorito", example = "0.10")
     private final double pesoTimeFavorito;
 
+    @Schema(description = "Peso da penalidade por volatilidade (desvio padrao) do desempenho", example = "0.05")
+    private final double pesoDesvio;
+
     @Schema(description = "Numero de goleiros na formacao", example = "1")
     private final int formacaoGol;
 
@@ -68,6 +71,7 @@ public class ConfiguracaoResponse {
                 .pesoDesempenho(c.getPesoDesempenho())
                 .pesoFatorCasa(c.getPesoFatorCasa())
                 .pesoTimeFavorito(c.getPesoTimeFavorito())
+                .pesoDesvio(c.getPesoDesvio())
                 .formacaoGol(c.getFormacaoGol())
                 .formacaoLat(c.getFormacaoLat())
                 .formacaoZag(c.getFormacaoZag())

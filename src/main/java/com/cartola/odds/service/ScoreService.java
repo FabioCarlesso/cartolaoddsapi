@@ -37,7 +37,7 @@ public class ScoreService {
     public List<Atleta> calcularScores(List<Atleta> atletas,
                                        Set<Integer> timesCasa,
                                        Set<String>  favoritos,
-                                       Map<Integer, Double> desempenhoMap) {
+                                       Map<Integer, DesempenhoService.DesempenhoAtleta> desempenhoMap) {
         Configuracao config = configuracaoService.buscarConfig();
 
         var resultado = atletas.stream()
@@ -45,14 +45,22 @@ public class ScoreService {
                     double fatorCasa    = timesCasa.contains(a.getClubeId()) ? 10.0 : 0.0;
                     double timeFavorito = favoritos.contains(a.getNomeClubeNorm()) ? 10.0 : 0.0;
 
-                    double desempenho = desempenhoMap.getOrDefault(a.getAtletaId(), 0.0);
-                    if (desempenho == 0.0) desempenho = a.getMediaPontos();
+                    DesempenhoService.DesempenhoAtleta desempenhoAtleta = desempenhoMap.get(a.getAtletaId());
+                    boolean temHistorico = desempenhoAtleta != null && desempenhoAtleta.rodadasConsideradas() > 0;
+
+                    // Com histórico real, usa a média das últimas rodadas; sem ele, cai para a média da temporada (proxy)
+                    double desempenho   = temHistorico ? desempenhoAtleta.mediaPontos() : a.getMediaPontos();
+                    // O desvio só existe para o histórico real; o proxy não tem volatilidade associada
+                    double desvioPadrao = temHistorico ? desempenhoAtleta.desvioPadrao() : 0.0;
 
                     double score = switch (a.getPosicao()) {
                         case GOL -> calcularGoleiro(a, desempenho, fatorCasa, timeFavorito, config);
                         case ATA -> calcularAtacante(a, desempenho, fatorCasa, timeFavorito, config);
                         default  -> calcularDefault(a, desempenho, fatorCasa, timeFavorito, config);
                     };
+
+                    // Penaliza volatilidade: atletas inconsistentes perdem pontos em empate tecnico
+                    score -= desvioPadrao * config.getPesoDesvio();
 
                     return a.withDesempenhoRecente(desempenho)
                             .withScore(Math.round(score * 10000.0) / 10000.0);

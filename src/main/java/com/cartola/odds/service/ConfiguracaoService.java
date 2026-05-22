@@ -66,6 +66,7 @@ public class ConfiguracaoService {
         if (req.getPesoDesempenho()   != null) config.setPesoDesempenho(req.getPesoDesempenho());
         if (req.getPesoFatorCasa()    != null) config.setPesoFatorCasa(req.getPesoFatorCasa());
         if (req.getPesoTimeFavorito() != null) config.setPesoTimeFavorito(req.getPesoTimeFavorito());
+        if (req.getPesoDesvio()       != null) config.setPesoDesvio(req.getPesoDesvio());
         if (req.getFormacaoGol()      != null) config.setFormacaoGol(req.getFormacaoGol());
         if (req.getFormacaoLat()      != null) config.setFormacaoLat(req.getFormacaoLat());
         if (req.getFormacaoZag()      != null) config.setFormacaoZag(req.getFormacaoZag());
@@ -102,6 +103,7 @@ public class ConfiguracaoService {
         config.setPesoDesempenho(0.20);
         config.setPesoFatorCasa(0.10);
         config.setPesoTimeFavorito(0.10);
+        config.setPesoDesvio(0.05);
         config.setFormacaoGol(1);
         config.setFormacaoLat(2);
         config.setFormacaoZag(2);

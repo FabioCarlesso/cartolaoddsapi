@@ -269,7 +269,7 @@ class RankingServiceTest {
 
     private void configurarPool(List<Atleta> pool) {
         when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(pool);
-        when(desempenhoService.calcularMediaUltimasRodadas(anyInt())).thenReturn(java.util.Map.of());
+        when(desempenhoService.calcularDesempenhoUltimasRodadas(anyInt())).thenReturn(java.util.Map.of());
         when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(pool);
     }
 

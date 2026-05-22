@@ -59,7 +59,7 @@ public class PipelineService {
         Set<Integer> timesCasa = dadosRodada.timesCasa();
 
         log.info("5 - Calculando desempenho das ultimas {} rodadas...", DesempenhoService.RODADAS_HISTORICO);
-        var desempenhoMap = desempenhoService.calcularMediaUltimasRodadas(statusResponse.getRodadaAtual());
+        var desempenhoMap = desempenhoService.calcularDesempenhoUltimasRodadas(statusResponse.getRodadaAtual());
 
         log.info("6 - Calculando scores com desempenho real...");
         var atletasComScore = scoreService.calcularScores(atletasFiltrados, timesCasa, favoritos, desempenhoMap);

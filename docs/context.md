@@ -35,7 +35,7 @@ O `PipelineService` orquestra a montagem em etapas:
 1. Buscar status do mercado (`/mercado/status`)
 2. Buscar odds e identificar times favoritos (`OddsService`)
 3. Buscar e filtrar atletas do Cartola (`CartolaDataService`)
-4. Calcular desempenho das últimas 5 rodadas (`DesempenhoService` via `/atletas/pontuados`)
+4. Calcular desempenho das últimas 5 rodadas — média e desvio padrão (`DesempenhoService` via `/atletas/pontuados`)
 5. Calcular score de cada atleta (`ScoreService`)
 6. Montar o time em formação configurável (`MontadorTimeService`)
 
@@ -48,6 +48,7 @@ O `ScoreService` aplica fórmulas distintas conforme a posição do atleta, prio
 ```
 score = (mediaPontos × 0.40) + (valorização × 0.20) + (desempenho × 0.20)
       + (fatorCasa × 0.10)   + (timeFavorito × 0.10)
+      − (desvioPadrao × pesoDesvio)
 ```
 
 Todos os pesos do fallback são configuráveis em runtime via `PATCH /api/config` sem restart.
@@ -58,6 +59,7 @@ Todos os pesos do fallback são configuráveis em runtime via `PATCH /api/config
 score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (defesasDificeis × 0.05) + (penaltisDefendidos × 0.05) − (golsSofridos × 0.02)
       + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+      − (desvioPadrao × pesoDesvio)
 ```
 
 `defesasDificeis` (DD), `penaltisDefendidos` (DP) e `golsSofridos` (GS) são scouts acumulados da temporada extraídos de `/atletas/mercado`. Quando não disponíveis na resposta da API, os scouts são tratados como 0 sem impacto no cálculo.
@@ -68,9 +70,14 @@ score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
 score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
       + (gols × 0.08) + (assistencias × 0.05)
       + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
+      − (desvioPadrao × pesoDesvio)
 ```
 
 `gols` (G) e `assistencias` (A) são scouts acumulados da temporada. O bônus `timeFavorito` reforça a preferência por atacantes de times com odds favoráveis.
+
+### Penalização por Volatilidade (Desvio Padrão)
+
+O `DesempenhoService` retorna, para cada atleta, um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional, divisão por N) e `rodadasConsideradas` das últimas rodadas. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes e priorizando consistência em situações de empate técnico. O `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`). Atletas com menos de 2 rodadas disponíveis têm `desvioPadrao = 0.0`, anulando a penalidade sem quebrar por dados insuficientes. Atletas sem histórico recente (ausentes do mapa) caem para o proxy `mediaPontos` da temporada e não recebem penalidade.
 
 #### Constantes de peso por posição
 
@@ -93,6 +100,7 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para não repetir clubes entre GOL, LAT e ZAG
 - `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
 - `V5__add_budget_maximo.sql` — adiciona constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
+- `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
 
 ### Cache Caffeine (in-memory)
 
@@ -221,7 +229,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-322 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+336 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

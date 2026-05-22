@@ -76,6 +76,37 @@ class ConfiguracaoServiceTest {
     }
 
     @Test
+    @DisplayName("deve atualizar peso do desvio sem alterar demais campos")
+    void deveAtualizarPesoDesvio() {
+        var config = Configuracao.defaults();
+        var request = new ConfiguracaoRequest();
+        request.setPesoDesvio(0.10);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.atualizar(request);
+
+        assertThat(response.getPesoDesvio()).isEqualTo(0.10);
+        assertThat(config.getPesoDesvio()).isEqualTo(0.10);
+        assertThat(config.getPesoMediaPontos()).isEqualTo(0.40);
+    }
+
+    @Test
+    @DisplayName("reset deve restaurar peso do desvio para o valor padrao")
+    void resetDeveRestaurarPesoDesvioPadrao() {
+        var config = Configuracao.defaults();
+        config.setPesoDesvio(0.50);
+
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
+        when(repository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        var response = service.resetar();
+
+        assertThat(response.getPesoDesvio()).isEqualTo(0.05);
+    }
+
+    @Test
     @DisplayName("reset deve restaurar budget maximo para o valor padrao")
     void resetDeveRestaurarBudgetMaximoPadrao() {
         var config = Configuracao.defaults();
