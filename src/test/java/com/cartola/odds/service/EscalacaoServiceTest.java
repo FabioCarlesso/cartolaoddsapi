@@ -7,6 +7,7 @@ import com.cartola.odds.model.EscalacaoRodada;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
+import com.cartola.odds.model.response.MercadoStatusResponse;
 import com.cartola.odds.model.response.PontuadosResponse;
 import com.cartola.odds.repository.EscalacaoRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -83,7 +84,8 @@ class EscalacaoServiceTest {
     void devePreencherPontuacaoReal() {
         var hulk = registro(15, 1, "Hulk", true);
         var cano = registro(15, 2, "Cano", false);
-        when(repository.findByRodadaId(15)).thenReturn(List.of(hulk, cano));
+        when(repository.findByRodadaIdOrderById(15)).thenReturn(List.of(hulk, cano));
+        when(cartolaClient.buscarStatusMercado()).thenReturn(status(15));
         when(cartolaClient.buscarPontuados(15)).thenReturn(pontuados(Map.of(1, 8.5, 2, 5.0)));
 
         var response = service.atualizarPontuacaoReal(15);
@@ -99,7 +101,8 @@ class EscalacaoServiceTest {
     void deveManterNullQuandoAtletaAusente() {
         var hulk = registro(15, 1, "Hulk", true);
         var cano = registro(15, 2, "Cano", false);
-        when(repository.findByRodadaId(15)).thenReturn(List.of(hulk, cano));
+        when(repository.findByRodadaIdOrderById(15)).thenReturn(List.of(hulk, cano));
+        when(cartolaClient.buscarStatusMercado()).thenReturn(status(15));
         when(cartolaClient.buscarPontuados(15)).thenReturn(pontuados(Map.of(1, 8.5)));
 
         service.atualizarPontuacaoReal(15);
@@ -111,10 +114,23 @@ class EscalacaoServiceTest {
     @Test
     @DisplayName("deve lancar 404 ao atualizar rodada sem escalacao registrada")
     void deveLancar404AoAtualizarRodadaInexistente() {
-        when(repository.findByRodadaId(99)).thenReturn(List.of());
+        when(repository.findByRodadaIdOrderById(99)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.atualizarPontuacaoReal(99))
                 .isInstanceOf(RecursoNaoEncontradoException.class);
+
+        verify(repository, never()).saveAll(any());
+    }
+
+    @Test
+    @DisplayName("deve rejeitar atualizacao de rodada diferente da corrente")
+    void deveRejeitarRodadaNaoCorrente() {
+        when(repository.findByRodadaIdOrderById(14)).thenReturn(List.of(registro(14, 1, "Hulk", true)));
+        when(cartolaClient.buscarStatusMercado()).thenReturn(status(16));
+
+        assertThatThrownBy(() -> service.atualizarPontuacaoReal(14))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("rodada corrente");
 
         verify(repository, never()).saveAll(any());
     }
@@ -174,7 +190,7 @@ class EscalacaoServiceTest {
     @Test
     @DisplayName("deve retornar atletas com detalhes de uma rodada existente")
     void deveRetornarDetalheRodada() {
-        when(repository.findByRodadaId(15)).thenReturn(List.of(registro(15, 1, "Hulk", true)));
+        when(repository.findByRodadaIdOrderById(15)).thenReturn(List.of(registro(15, 1, "Hulk", true)));
 
         var response = service.buscarPorRodada(15);
 
@@ -187,7 +203,7 @@ class EscalacaoServiceTest {
     @Test
     @DisplayName("deve lancar 404 ao detalhar rodada inexistente")
     void deveLancar404AoDetalharRodadaInexistente() {
-        when(repository.findByRodadaId(99)).thenReturn(List.of());
+        when(repository.findByRodadaIdOrderById(99)).thenReturn(List.of());
 
         assertThatThrownBy(() -> service.buscarPorRodada(99))
                 .isInstanceOf(RecursoNaoEncontradoException.class);
@@ -239,6 +255,12 @@ class EscalacaoServiceTest {
         e.setCapitao(capitao);
         e.setCriadoEm(java.time.LocalDateTime.now());
         return e;
+    }
+
+    private MercadoStatusResponse status(int rodadaAtual) {
+        var s = new MercadoStatusResponse();
+        s.setRodadaAtual(rodadaAtual);
+        return s;
     }
 
     private PontuadosResponse pontuados(Map<Integer, Double> pontos) {

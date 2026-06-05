@@ -14,5 +14,5 @@ CREATE TABLE escalacao_rodada (
     criado_em           TIMESTAMP        NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_escalacao_rodada_atleta UNIQUE (rodada_id, atleta_id)
 );
-
-CREATE INDEX idx_escalacao_rodada_id ON escalacao_rodada (rodada_id);
+-- A UNIQUE (rodada_id, atleta_id) ja indexa rodada_id como coluna lider,
+-- atendendo as consultas por rodada — nenhum indice adicional e necessario.

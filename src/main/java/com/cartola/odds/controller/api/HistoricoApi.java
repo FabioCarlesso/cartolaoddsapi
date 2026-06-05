@@ -59,6 +59,10 @@ public interface HistoricoApi {
         description = """
             Consulta o /atletas/pontuados da rodada e preenche a pontuacao real dos atletas registrados.
 
+            **Janela de uso:** o /atletas/pontuados do Cartola expoe somente a rodada corrente.
+            Por isso so e possivel atualizar quando `rodadaId` for a rodada atual — chame este
+            endpoint logo apos o fechamento da rodada. Rodadas diferentes da corrente retornam `400`.
+
             **Idempotente:** pode ser chamado novamente para reprocessar a pontuacao.
             Atletas nao encontrados em /pontuados permanecem com pontuacao real nula.
             """
@@ -66,6 +70,8 @@ public interface HistoricoApi {
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Pontuacao real atualizada com sucesso",
             content = @Content(schema = @Schema(implementation = EscalacaoRodadaResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Rodada solicitada nao e a rodada corrente",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "404", description = "Nenhuma escalacao registrada para a rodada",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "502", description = "Erro de comunicacao com API externa",

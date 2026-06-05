@@ -280,6 +280,8 @@ Cada chamada a `GET /api/time` persiste automaticamente a escalação sugerida d
 
 Após o fechamento da rodada, `POST /api/historico/{rodadaId}/atualizar-pontuacao` consulta `/atletas/pontuados` e preenche a `pontuacaoReal` de cada atleta. Enquanto não for atualizada, `pontuacaoReal` permanece `null`. No total da rodada, a pontuação do capitão é contada em dobro.
 
+> **Janela de uso:** o `/atletas/pontuados` do Cartola expõe apenas a rodada corrente. Por isso `atualizar-pontuacao` só aceita a rodada atual — chame logo após o fechamento da rodada. Rodadas diferentes da corrente retornam `400 Bad Request`.
+
 #### Exemplo — `GET /api/historico`
 
 ```json
@@ -490,7 +492,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 23 classes de teste — 357 cenários
+        ├── java/                            # 23 classes de teste — 360 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -569,11 +571,11 @@ mvn test jacoco:report
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
 | `ConfiguracaoServiceTest` | 2 — atualização/reset da regra de defesa |
-| `EscalacaoServiceTest` | 9 — salvar (idempotência), atualizar pontuação real, resumo do histórico, 404 |
+| `EscalacaoServiceTest` | 10 — salvar (idempotência), atualizar pontuação real, rodada não corrente, resumo do histórico, 404 |
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 7 — HTTP completo |
+| `TimeControllerTest` | 11 — HTTP completo, persistência da escalação e comportamento não bloqueante |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |

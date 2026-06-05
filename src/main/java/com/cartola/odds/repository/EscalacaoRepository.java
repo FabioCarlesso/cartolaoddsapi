@@ -9,7 +9,7 @@ import java.util.List;
 @Repository
 public interface EscalacaoRepository extends JpaRepository<EscalacaoRodada, Long> {
 
-    List<EscalacaoRodada> findByRodadaId(Integer rodadaId);
+    List<EscalacaoRodada> findByRodadaIdOrderById(Integer rodadaId);
 
     boolean existsByRodadaId(Integer rodadaId);
 

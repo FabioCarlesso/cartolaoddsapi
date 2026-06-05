@@ -526,6 +526,8 @@ Cada chamada a `GET /api/time` persiste a escalação sugerida da rodada (titula
 
 Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atletas/pontuados` e preenche a `pontuacao_real` dos atletas encontrados (os ausentes permanecem `null`). No cálculo do total da rodada (`pontuacaoRealTotal`), a pontuação do capitão é contada em dobro.
 
+> **Restrição da rodada corrente:** o `/atletas/pontuados` do Cartola expõe somente a rodada atual. Para não gravar a pontuação de uma rodada em outra, `atualizarPontuacaoReal` valida `rodadaId == rodada corrente` (via `/mercado/status`) e lança `IllegalArgumentException` (→ `400`) caso contrário. A leitura e a chamada HTTP ocorrem fora de transação de escrita; apenas o `saveAll` final abre transação.
+
 **Tabela `escalacao_rodada` (migration `V7`):**
 
 ```sql

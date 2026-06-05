@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -79,8 +80,8 @@ public class EscalacaoService {
         e.setClube(atleta.getNomeClube());
         e.setScoreSugerido(atleta.getScore());
         e.setPreco(atleta.getPreco());
-        e.setCapitao(capitaoId != null && capitaoId == atleta.getAtletaId());
-        e.setReservaLuxo(reservaLuxoId != null && reservaLuxoId == atleta.getAtletaId());
+        e.setCapitao(capitaoId != null && capitaoId.equals(atleta.getAtletaId()));
+        e.setReservaLuxo(reservaLuxoId != null && reservaLuxoId.equals(atleta.getAtletaId()));
         e.setEmDuvida(atleta.isDuvida());
         e.setCriadoEm(LocalDateTime.now());
         registros.add(e);
@@ -89,20 +90,34 @@ public class EscalacaoService {
     /**
      * Consulta /atletas/pontuados da rodada e preenche a pontuacao real dos atletas registrados.
      *
+     * <p>O endpoint /atletas/pontuados do Cartola expoe somente a rodada corrente; por isso so
+     * permitimos atualizar quando {@code rodadaId} for a rodada atual, evitando gravar a pontuacao
+     * de uma rodada na outra. Chame logo apos o fechamento da rodada.
+     *
+     * <p>A leitura e a chamada HTTP externa acontecem fora de qualquer transacao de escrita; a
+     * persistencia final fica a cargo do {@code saveAll}, que abre a propria transacao.
+     *
      * @param rodadaId rodada a atualizar
      * @return escalacao detalhada com as pontuacoes preenchidas
      * @throws RecursoNaoEncontradoException se nao houver escalacao registrada para a rodada
+     * @throws IllegalArgumentException      se a rodada solicitada nao for a rodada corrente
      */
-    @Transactional
     public EscalacaoRodadaResponse atualizarPontuacaoReal(Integer rodadaId) {
-        List<EscalacaoRodada> escalacoes = escalacaoRepository.findByRodadaId(rodadaId);
+        List<EscalacaoRodada> escalacoes = escalacaoRepository.findByRodadaIdOrderById(rodadaId);
         if (escalacoes.isEmpty()) {
             throw new RecursoNaoEncontradoException(
                     "Nenhuma escalacao registrada para a rodada " + rodadaId);
         }
 
-        Map<Integer, Double> pontuacoes = buscarPontuacoes(rodadaId);
+        int rodadaAtual = cartolaClient.buscarStatusMercado().getRodadaAtual();
+        if (!rodadaId.equals(rodadaAtual)) {
+            throw new IllegalArgumentException(
+                    "So e possivel atualizar a pontuacao da rodada corrente (" + rodadaAtual
+                            + "). Rodada solicitada: " + rodadaId
+                            + ". Chame este endpoint logo apos o fechamento da rodada.");
+        }
 
+        Map<Integer, Double> pontuacoes = buscarPontuacoes(rodadaId);
         escalacoes.forEach(e -> {
             Double pontuacao = pontuacoes.get(e.getAtletaId());
             if (pontuacao != null) {
@@ -137,7 +152,7 @@ public class EscalacaoService {
     /** Retorna a escalacao detalhada de uma rodada especifica. */
     @Transactional(readOnly = true)
     public EscalacaoRodadaResponse buscarPorRodada(Integer rodadaId) {
-        List<EscalacaoRodada> escalacoes = escalacaoRepository.findByRodadaId(rodadaId);
+        List<EscalacaoRodada> escalacoes = escalacaoRepository.findByRodadaIdOrderById(rodadaId);
         if (escalacoes.isEmpty()) {
             throw new RecursoNaoEncontradoException(
                     "Nenhuma escalacao registrada para a rodada " + rodadaId);
@@ -180,7 +195,7 @@ public class EscalacaoService {
             return Map.of();
         }
 
-        Map<Integer, Double> pontuacoes = new java.util.HashMap<>();
+        Map<Integer, Double> pontuacoes = new HashMap<>();
         pontuados.getAtletas().forEach((idStr, pontuado) -> {
             if (pontuado.getPontuacaoNum() == null) return;
             try {
