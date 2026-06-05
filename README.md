@@ -14,7 +14,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 4 | **Config em Runtime** | `PATCH /api/config` atualiza parâmetros sem restart; `POST /api/config/reset` restaura defaults |
 | 5 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
 | 6 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
-| 7 | **5 Grupos de Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache`, `/api/config` |
+| 7 | **6 Grupos de Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache`, `/api/config`, `/api/historico` |
 | 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
 | 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
 | 10 | **Defesa sem Clube Repetido** | Regra configurável evita repetir clubes entre GOL, LAT e ZAG |
@@ -23,6 +23,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 | 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
+| 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
 
 
 ---
@@ -190,6 +191,9 @@ odds.api.key=SUA_API_KEY_AQUI
 | `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |
 | `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
+| `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
+| `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
+| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
 | `GET` | `:9090/actuator/health` | Saúde da aplicação |
@@ -269,6 +273,60 @@ odds.api.key=SUA_API_KEY_AQUI
 **Nomes de cache válidos:** `odds`, `atletas`, `clubes`, `partidas`, `pontuados`, `statusMercado`
 
 Passar um nome inválido retorna `400 Bad Request` com a lista de nomes aceitos.
+
+### Histórico de escalações
+
+Cada chamada a `GET /api/time` persiste automaticamente a escalação sugerida da rodada (titulares e reservas). A operação é **idempotente** (uma rodada já registrada não é sobrescrita) e **não bloqueante** — se a persistência falhar, o time é retornado normalmente e o erro é logado.
+
+Após o fechamento da rodada, `POST /api/historico/{rodadaId}/atualizar-pontuacao` consulta `/atletas/pontuados` e preenche a `pontuacaoReal` de cada atleta. Enquanto não for atualizada, `pontuacaoReal` permanece `null`. No total da rodada, a pontuação do capitão é contada em dobro.
+
+#### Exemplo — `GET /api/historico`
+
+```json
+{
+  "totalRodadas": 2,
+  "rodadas": [
+    {
+      "rodadaId": 14,
+      "criadoEm": "2025-05-10T10:30:00",
+      "totalAtletas": 12,
+      "scoreSugeridoTotal": 94.3,
+      "pontuacaoRealTotal": 87.5,
+      "pontuacaoRealDisponivel": true
+    },
+    {
+      "rodadaId": 15,
+      "criadoEm": "2025-05-17T09:15:00",
+      "totalAtletas": 12,
+      "scoreSugeridoTotal": 101.2,
+      "pontuacaoRealTotal": null,
+      "pontuacaoRealDisponivel": false
+    }
+  ]
+}
+```
+
+#### Exemplo — `GET /api/historico/14`
+
+```json
+{
+  "rodadaId": 14,
+  "atletas": [
+    {
+      "apelido": "Hulk",
+      "posicao": "ATA",
+      "clube": "Atletico MG",
+      "scoreSugerido": 9.2,
+      "pontuacaoReal": 8.5,
+      "capitao": true,
+      "reservaLuxo": false,
+      "emDuvida": false
+    }
+  ]
+}
+```
+
+Uma rodada sem escalação registrada retorna `404 Not Found` em `GET /api/historico/{rodadaId}` e `POST /api/historico/{rodadaId}/atualizar-pontuacao`.
 
 ### Aviso de mercado
 
@@ -408,16 +466,17 @@ cartola/
     │   │   ├── config/          (OddsProperties, CartolaProperties,
     │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig)
     │   │   ├── client/          (OddsClient, CartolaClient)
-    │   │   ├── repository/      (ConfiguracaoRepository)
+    │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository)
     │   │   ├── service/         (OddsService, CartolaDataService, ScoreService,
     │   │   │                     DesempenhoService, MontadorTimeService, PipelineService,
-    │   │   │                     RankingService, ConfiguracaoService)
+    │   │   │                     RankingService, ConfiguracaoService, EscalacaoService)
     │   │   ├── controller/api/  (TimeApi, RankingApi, FavoritosApi, CacheApi,
-    │   │   │                     ConfiguracaoApi — Swagger docs)
+    │   │   │                     ConfiguracaoApi, HistoricoApi — Swagger docs)
     │   │   ├── controller/      (TimeController, RankingController, FavoritosController,
-    │   │   │                     CacheController, ConfiguracaoController,
+    │   │   │                     CacheController, ConfiguracaoController, HistoricoController,
     │   │   │                     GlobalExceptionHandler)
-    │   │   ├── model/           (Atleta, Time, Configuracao, enums/,
+    │   │   ├── exception/       (RecursoNaoEncontradoException)
+    │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, enums/,
     │   │   │                     request/ConfiguracaoRequest, response/)
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
@@ -428,9 +487,10 @@ cartola/
     │           ├── V3__add_evitar_mesmo_clube_defesa.sql         # Regra configurável de defesa
     │           ├── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
     │           ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
-    │           └── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
+    │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
+    │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 21 classes de teste — 341 cenários
+        ├── java/                            # 23 classes de teste — 357 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -509,6 +569,8 @@ mvn test jacoco:report
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
 | `ConfiguracaoServiceTest` | 2 — atualização/reset da regra de defesa |
+| `EscalacaoServiceTest` | 9 — salvar (idempotência), atualizar pontuação real, resumo do histórico, 404 |
+| `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 7 — HTTP completo |

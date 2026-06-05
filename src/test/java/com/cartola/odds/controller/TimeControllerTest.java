@@ -4,6 +4,7 @@ import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
+import com.cartola.odds.service.EscalacaoService;
 import com.cartola.odds.service.PipelineService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -28,6 +29,7 @@ class TimeControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PipelineService pipelineService;
+    @MockitoBean EscalacaoService escalacaoService;
 
     @Nested
     @DisplayName("GET /api/time")

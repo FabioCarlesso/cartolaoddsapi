@@ -158,6 +158,7 @@ Os parâmetros de negócio (odd limite, pesos do score, formação e regras) sã
 - `V4__add_limite_atletas_por_clube.sql` — adiciona o limite configurável de atletas titulares por clube
 - `V5__add_budget_maximo.sql` — adiciona a constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
 - `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
+- `V7__create_escalacao_rodada.sql` — cria a tabela `escalacao_rodada` (histórico de escalações por rodada, ver seção 5.12)
 
 ```sql
 -- V1: estrutura inicial
@@ -514,6 +515,47 @@ NormalizadorUtil.normalizar("Fluminense FC")       // → "fluminense"
 Aliases atuais cobrem divergências recorrentes entre The Odds API e Cartola FC, como `atletico mineiro`, `atletico mineiro mg`, `red bull bragantino`, `bragantino sp`, `atletico goianiense`, `america mineiro`, `atletico paranaense`, `athletico paranaense`, `sao paulo fc`, `inter`, `fluminense fc`, `vasco da gama` e variantes como `botafogo fr`/`botafogo rj`, `ec bahia`, `cruzeiro ec`, `palmeiras sp`, `sport recife` e `santos fc`. Entradas como `sportrecife` (sem espaço) existem no mapa para cobrir casos em que uma barra é removida pelo pipeline antes da consulta ao dicionário (ex.: `Sport/Recife` → `sportrecife` após limpeza de caracteres especiais).
 
 Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`. A chave deve estar no formato já normalizado pelo utilitário (sem acentos, lowercase, hífens como espaços e espaços duplicados colapsados) e o valor deve ser o nome canônico usado no cruzamento entre favoritos e clubes do Cartola.
+
+### 5.12 Histórico de Escalações por Rodada
+
+Cada chamada a `GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
+
+- **Idempotência:** `salvarEscalacao(Time, rodadaId)` verifica `existsByRodadaId` antes de gravar; uma rodada já registrada não é sobrescrita.
+- **Não bloqueante:** a chamada parte do `TimeController` dentro de um `try/catch`; falhas ao persistir são logadas e não impedem o retorno do time.
+- **Flags por atleta:** `capitao`, `reserva_luxo` e `em_duvida` são derivadas do `Time` montado. A `pontuacao_real` nasce `null`.
+
+Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atletas/pontuados` e preenche a `pontuacao_real` dos atletas encontrados (os ausentes permanecem `null`). No cálculo do total da rodada (`pontuacaoRealTotal`), a pontuação do capitão é contada em dobro.
+
+**Tabela `escalacao_rodada` (migration `V7`):**
+
+```sql
+CREATE TABLE escalacao_rodada (
+    id             BIGSERIAL PRIMARY KEY,
+    rodada_id      INTEGER NOT NULL,
+    atleta_id      INTEGER NOT NULL,
+    apelido        VARCHAR(100) NOT NULL,
+    posicao        VARCHAR(10)  NOT NULL,
+    clube          VARCHAR(100) NOT NULL,
+    score_sugerido DOUBLE PRECISION NOT NULL,
+    preco          DOUBLE PRECISION NOT NULL,
+    capitao        BOOLEAN NOT NULL DEFAULT FALSE,
+    reserva_luxo   BOOLEAN NOT NULL DEFAULT FALSE,
+    em_duvida      BOOLEAN NOT NULL DEFAULT FALSE,
+    pontuacao_real DOUBLE PRECISION,
+    criado_em      TIMESTAMP NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_escalacao_rodada_atleta UNIQUE (rodada_id, atleta_id)
+);
+```
+
+**Endpoints de histórico:**
+
+| Método | Endpoint | Descrição |
+|---|---|---|
+| `GET` | `/api/historico` | Lista as rodadas registradas com resumo (score sugerido vs. pontuação real) |
+| `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada — `404` se não registrada |
+| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Preenche a `pontuacao_real` da rodada — `404` se não registrada |
+
+Rodadas sem escalação registrada resultam em `RecursoNaoEncontradoException`, mapeada para `404 Not Found` pelo `GlobalExceptionHandler`.
 
 ---
 
