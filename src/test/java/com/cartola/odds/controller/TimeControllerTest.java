@@ -4,6 +4,7 @@ import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
+import com.cartola.odds.service.EscalacaoService;
 import com.cartola.odds.service.PipelineService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,6 +19,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -28,6 +33,7 @@ class TimeControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PipelineService pipelineService;
+    @MockitoBean EscalacaoService escalacaoService;
 
     @Nested
     @DisplayName("GET /api/time")
@@ -133,6 +139,29 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.capitao.score").exists())
                     .andExpect(jsonPath("$.capitao.desvioPadrao").value(1.25))
                     .andExpect(jsonPath("$.capitao.rodadasConsideradas").value(5));
+        }
+
+        @Test
+        @DisplayName("deve persistir a escalacao apos montar o time")
+        void devePersistirEscalacao() throws Exception {
+            when(pipelineService.executar()).thenReturn(criarTimeMock());
+
+            mockMvc.perform(get("/api/time"))
+                    .andExpect(status().isOk());
+
+            verify(escalacaoService).salvarEscalacao(any(), eq(15));
+        }
+
+        @Test
+        @DisplayName("deve retornar 200 mesmo se a persistencia da escalacao falhar (nao bloqueante)")
+        void deveRetornar200QuandoPersistenciaFalha() throws Exception {
+            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            doThrow(new RuntimeException("falha ao salvar"))
+                    .when(escalacaoService).salvarEscalacao(any(), any());
+
+            mockMvc.perform(get("/api/time"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.rodada").value(15));
         }
 
         @Test

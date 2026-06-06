@@ -1,5 +1,6 @@
 package com.cartola.odds.controller;
 
+import com.cartola.odds.exception.RecursoNaoEncontradoException;
 import com.cartola.odds.model.response.ErrorResponse;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,14 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(400, "Parametro invalido", mensagem));
+    }
+
+    @ExceptionHandler(RecursoNaoEncontradoException.class)
+    public ResponseEntity<ErrorResponse> handleRecursoNaoEncontrado(RecursoNaoEncontradoException ex) {
+        log.warn("Recurso nao encontrado: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of(404, "Recurso nao encontrado", ex.getMessage()));
     }
 
     @ExceptionHandler(IllegalStateException.class)
