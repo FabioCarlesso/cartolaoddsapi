@@ -18,7 +18,6 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -185,8 +184,10 @@ class TimeControllerTest {
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.estrategia").value("SCORE_MAXIMO"))
+                    .andExpect(jsonPath("$.formacaoCompleta").value(true))
                     .andExpect(jsonPath("$.orcamentoInformado").doesNotExist())
-                    .andExpect(jsonPath("$.saldoRestante").doesNotExist());
+                    .andExpect(jsonPath("$.saldoRestante").doesNotExist())
+                    .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
 
             verify(pipelineService).executar(isNull());
         }
@@ -202,9 +203,24 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.estrategia").value("CUSTO_BENEFICIO"))
                     .andExpect(jsonPath("$.orcamentoInformado").value(120.0))
                     .andExpect(jsonPath("$.custoTotal").value(118.3))
-                    .andExpect(jsonPath("$.saldoRestante").value(closeTo(1.7, 0.0001)));
+                    .andExpect(jsonPath("$.saldoRestante").value(1.7))
+                    .andExpect(jsonPath("$.formacaoCompleta").value(true))
+                    .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
 
             verify(pipelineService).executar(eq(120.0));
+        }
+
+        @Test
+        @DisplayName("deve expor avisoOrcamento e formacaoCompleta=false quando orcamento insuficiente")
+        void deveExporAvisoQuandoOrcamentoInsuficiente() throws Exception {
+            when(pipelineService.executar(eq(30.0)))
+                    .thenReturn(criarTimeMockIncompleto(30.0, 24.0));
+
+            mockMvc.perform(get("/api/time").param("orcamento", "30.0"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.formacaoCompleta").value(false))
+                    .andExpect(jsonPath("$.saldoRestante").value(6.0))
+                    .andExpect(jsonPath("$.avisoOrcamento").value(containsString("insuficiente")));
         }
 
         @Test
@@ -235,6 +251,17 @@ class TimeControllerTest {
     }
 
     private Time criarTimeMockComOrcamento(double orcamento, double custoTotal) {
+        return timeComOrcamento(orcamento, custoTotal, true, null);
+    }
+
+    private Time criarTimeMockIncompleto(double orcamento, double custoTotal) {
+        return timeComOrcamento(orcamento, custoTotal, false,
+                "Orcamento de C$30,0 insuficiente para completar a formacao "
+                        + "(10/12 titulares escalados). Considere aumentar o orcamento.");
+    }
+
+    private Time timeComOrcamento(double orcamento, double custoTotal,
+                                  boolean formacaoCompleta, String avisoOrcamento) {
         var capitao = Atleta.builder()
                 .atletaId(1).apelido("Hulk").posicao(Posicao.ATA)
                 .clubeId(1).nomeClube("ATM").siglaClube("ATM").nomeClubeNorm("atm")
@@ -248,6 +275,8 @@ class TimeControllerTest {
                 .orcamentoInformado(orcamento)
                 .saldoRestante(orcamento - custoTotal)
                 .estrategia(com.cartola.odds.model.enums.Estrategia.CUSTO_BENEFICIO)
+                .formacaoCompleta(formacaoCompleta)
+                .avisoOrcamento(avisoOrcamento)
                 .build();
     }
 
@@ -281,6 +310,7 @@ class TimeControllerTest {
                 .alertasDuvida(List.of())
                 .custoTotal(142.5)
                 .estrategia(com.cartola.odds.model.enums.Estrategia.SCORE_MAXIMO)
+                .formacaoCompleta(true)
                 .build();
     }
 }

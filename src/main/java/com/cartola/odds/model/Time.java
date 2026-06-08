@@ -42,4 +42,14 @@ public class Time {
 
     /** Estrategia usada na montagem: SCORE_MAXIMO ou CUSTO_BENEFICIO. */
     private final Estrategia                 estrategia;
+
+    /** {@code true} quando todos os slots da formacao foram preenchidos. */
+    private final boolean                    formacaoCompleta;
+
+    /**
+     * Aviso preenchido quando um orcamento foi informado mas nao foi suficiente
+     * para completar a formacao. Null quando a formacao esta completa ou quando
+     * nenhum orcamento foi informado.
+     */
+    private final String                     avisoOrcamento;
 }

@@ -339,7 +339,7 @@ O parâmetro **opcional** `orcamento` em `GET /api/time` limita o total de carto
 - **Sem `orcamento`** → comportamento padrão: estratégia `SCORE_MAXIMO`, candidatos ordenados por score, sem restrição de custo (a não ser o `budgetMaximo` da configuração, se definido).
 - **Com `orcamento`** → estratégia `CUSTO_BENEFICIO`: os candidatos de cada posição passam a ser ordenados por `score / preço`, priorizando quem entrega mais pontos por cartoleta. O time é montado respeitando o limite informado, reservando orçamento para completar as posições restantes.
 
-A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante` e `estrategia`.
+A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o orçamento não basta para completar os 12 titulares — `avisoOrcamento`. Valores em cartoletas são arredondados para 2 casas decimais.
 
 #### Exemplo — `GET /api/time?orcamento=120.0`
 
@@ -350,7 +350,24 @@ A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante` e `
   "custoTotal": 118.3,
   "saldoRestante": 1.7,
   "estrategia": "CUSTO_BENEFICIO",
+  "formacaoCompleta": true,
   "avisoMercado": null,
+  "titulares": { },
+  "reservas": { }
+}
+```
+
+Quando o orçamento é baixo demais para os 12 titulares, a formação é retornada incompleta e `avisoOrcamento` é preenchido (`saldoRestante` nunca fica negativo):
+
+```json
+{
+  "rodada": 15,
+  "orcamentoInformado": 30.0,
+  "custoTotal": 24.0,
+  "saldoRestante": 6.0,
+  "estrategia": "CUSTO_BENEFICIO",
+  "formacaoCompleta": false,
+  "avisoOrcamento": "Orcamento de C$30,0 insuficiente para completar a formacao (10/12 titulares escalados). Considere aumentar o orcamento.",
   "titulares": { },
   "reservas": { }
 }
@@ -365,6 +382,7 @@ A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante` e `
   "custoTotal": 147.8,
   "saldoRestante": null,
   "estrategia": "SCORE_MAXIMO",
+  "formacaoCompleta": true,
   "avisoMercado": null,
   "titulares": { },
   "reservas": { }
@@ -535,7 +553,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 23 classes de teste — 369 cenários
+        ├── java/                            # 23 classes de teste — 371 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -607,7 +625,7 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
-| `MontadorTimeServiceTest` | 30 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício |
+| `MontadorTimeServiceTest` | 31 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício, formação incompleta |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 9 — inclui etapa DesempenhoService e propagação de orçamento |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
@@ -618,7 +636,7 @@ mvn test jacoco:report
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 14 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento e validação |
+| `TimeControllerTest` | 15 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso e validação |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |

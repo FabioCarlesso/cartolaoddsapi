@@ -510,16 +510,20 @@ class MontadorTimeServiceTest {
             assertThat(time.getEstrategia()).isEqualTo(Estrategia.SCORE_MAXIMO);
             assertThat(time.getOrcamentoInformado()).isNull();
             assertThat(time.getSaldoRestante()).isNull();
+            assertThat(time.isFormacaoCompleta()).isTrue();
+            assertThat(time.getAvisoOrcamento()).isNull();
         }
 
         @Test
-        @DisplayName("com orcamento usa estrategia CUSTO_BENEFICIO e expoe saldo restante")
+        @DisplayName("com orcamento usa estrategia CUSTO_BENEFICIO, expoe saldo e marca formacao completa")
         void comOrcamentoEstrategiaCustoBeneficio() {
             var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
 
             assertThat(time.getEstrategia()).isEqualTo(Estrategia.CUSTO_BENEFICIO);
             assertThat(time.getOrcamentoInformado()).isEqualTo(300.0);
             assertThat(time.getSaldoRestante()).isEqualTo(300.0 - time.getCustoTotal());
+            assertThat(time.isFormacaoCompleta()).isTrue();
+            assertThat(time.getAvisoOrcamento()).isNull();
         }
 
         @Test
@@ -529,6 +533,19 @@ class MontadorTimeServiceTest {
 
             assertThat(time.getCustoTotal()).isLessThanOrEqualTo(24.0);
             assertThat(time.getSaldoRestante()).isGreaterThanOrEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("orcamento insuficiente nao estoura o limite, nao lanca excecao e sinaliza formacao incompleta")
+        void orcamentoInsuficienteSinalizaFormacaoIncompleta() {
+            // Atleta mais barato custa C$2.0; com orcamento C$1.0 ninguem cabe.
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 1.0);
+
+            assertThat(time).isNotNull();
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(1.0);
+            assertThat(time.getSaldoRestante()).isGreaterThanOrEqualTo(0.0);
+            assertThat(time.isFormacaoCompleta()).isFalse();
+            assertThat(time.getAvisoOrcamento()).isNotNull().contains("insuficiente");
         }
 
         @Test

@@ -186,6 +186,22 @@ public class MontadorTimeService {
 
         Double saldoRestante = orcamento != null ? orcamento - custoTotal : null;
 
+        int totalEsperado = config.getFormacaoAsMap().values().stream()
+                .mapToInt(Integer::intValue)
+                .sum();
+        int totalEscalado = (int) titularesEnriquecidos.values().stream()
+                .flatMap(List::stream)
+                .count();
+        boolean formacaoCompleta = totalEscalado >= totalEsperado;
+
+        String avisoOrcamento = null;
+        if (orcamento != null && !formacaoCompleta) {
+            avisoOrcamento = ("Orcamento de C$%.1f insuficiente para completar a formacao "
+                    + "(%d/%d titulares escalados). Considere aumentar o orcamento.")
+                    .formatted(orcamento, totalEscalado, totalEsperado);
+            log.warn("ORCAMENTO: {}", avisoOrcamento);
+        }
+
         return Time.builder()
                 .rodada(rodada)
                 .avisoMercado(avisoMercado)
@@ -198,6 +214,8 @@ public class MontadorTimeService {
                 .orcamentoInformado(orcamento)
                 .saldoRestante(saldoRestante)
                 .estrategia(estrategia)
+                .formacaoCompleta(formacaoCompleta)
+                .avisoOrcamento(avisoOrcamento)
                 .build();
     }
 

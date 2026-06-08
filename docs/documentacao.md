@@ -894,6 +894,7 @@ mvn test jacoco:report
 | Endpoint | Descrição |
 |---|---|
 | `GET /api/time` | Monta o time completo da rodada |
+| `GET /api/time?orcamento=120.0` | Monta o time respeitando o orçamento em cartoletas (custo-benefício) |
 | `GET /api/ranking` | Top atletas por score com filtros opcionais |
 | `GET /api/ranking?posicao=ATA` | Top atacantes |
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
@@ -912,9 +913,16 @@ Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 c
 | Código | Cenário |
 |---|---|
 | `200` | Time montado com sucesso |
+| `400` | `orcamento` inválido (deve ser > 0) |
 | `422` | Pool vazio — ODD_LIMITE muito restritivo ou sem API Key |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
+
+**Parâmetro `orcamento` (opcional) em `GET /api/time`:** quando informado, o `MontadorTimeService`
+ordena os candidatos por custo-benefício (`score / preço`) e respeita o limite de cartoletas
+(estratégia `CUSTO_BENEFICIO`); sem o parâmetro, mantém a ordenação por score (`SCORE_MAXIMO`).
+A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`,
+`formacaoCompleta` e — quando o orçamento não basta para completar a formação — `avisoOrcamento`.
 
 ---
 

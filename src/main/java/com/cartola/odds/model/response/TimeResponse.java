@@ -61,6 +61,17 @@ public class TimeResponse {
             allowableValues = {"SCORE_MAXIMO", "CUSTO_BENEFICIO"})
     private final String estrategia;
 
+    @Schema(description = "Indica se todos os slots da formacao foram preenchidos.",
+            example = "true")
+    private final boolean formacaoCompleta;
+
+    @Schema(description = "Aviso quando o orcamento informado nao foi suficiente para completar "
+                        + "a formacao. Null quando completa ou sem orcamento informado.",
+            example = "Orcamento de C$50,0 insuficiente para completar a formacao "
+                    + "(8/12 titulares escalados). Considere aumentar o orcamento.",
+            nullable = true)
+    private final String avisoOrcamento;
+
     public static TimeResponse from(Time time) {
         return TimeResponse.builder()
                 .rodada(time.getRodada())
@@ -78,11 +89,18 @@ public class TimeResponse {
                 .capitao(time.getCapitao() != null ? AtletaDto.from(time.getCapitao()) : null)
                 .reservaLuxo(time.getReservaLuxo() != null ? AtletaDto.from(time.getReservaLuxo()) : null)
                 .alertasDuvida(time.getAlertasDuvida())
-                .custoTotal(time.getCustoTotal())
+                .custoTotal(arredondar(time.getCustoTotal()))
                 .orcamentoInformado(time.getOrcamentoInformado())
-                .saldoRestante(time.getSaldoRestante())
+                .saldoRestante(arredondar(time.getSaldoRestante()))
                 .estrategia(time.getEstrategia() != null ? time.getEstrategia().name() : null)
+                .formacaoCompleta(time.isFormacaoCompleta())
+                .avisoOrcamento(time.getAvisoOrcamento())
                 .build();
+    }
+
+    /** Arredonda cartoletas para 2 casas decimais, evitando artefatos de ponto flutuante na resposta. */
+    private static Double arredondar(Double valor) {
+        return valor == null ? null : Math.round(valor * 100.0) / 100.0;
     }
 
     @Getter
