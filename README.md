@@ -24,6 +24,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 | 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
 | 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
+| 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o melhor time dentro do limite de cartoletas, priorizando custo-benefício (score/preço) |
 
 
 ---
@@ -181,6 +182,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | Método | Endpoint | Descrição |
 |---|---|---|
 | `GET` | `/api/time` | Monta o time completo para a rodada atual |
+| `GET` | `/api/time?orcamento=120.0` | Monta o time respeitando o orçamento em cartoletas (custo-benefício) |
 | `GET` | `/api/favoritos` | Lista times favoritos com odds detalhadas |
 | `GET` | `/api/favoritos?oddLimite=2.5` | Favoritos com limite customizado |
 | `GET` | `/api/ranking` | Top 25 atletas por score |
@@ -330,6 +332,65 @@ Após o fechamento da rodada, `POST /api/historico/{rodadaId}/atualizar-pontuaca
 
 Uma rodada sem escalação registrada retorna `404 Not Found` em `GET /api/historico/{rodadaId}` e `POST /api/historico/{rodadaId}/atualizar-pontuacao`.
 
+### Orçamento máximo
+
+O parâmetro **opcional** `orcamento` em `GET /api/time` limita o total de cartoletas gastas na montagem:
+
+- **Sem `orcamento`** → comportamento padrão: estratégia `SCORE_MAXIMO`, candidatos ordenados por score, sem restrição de custo (a não ser o `budgetMaximo` da configuração, se definido).
+- **Com `orcamento`** → estratégia `CUSTO_BENEFICIO`: os candidatos de cada posição passam a ser ordenados por `score / preço`, priorizando quem entrega mais pontos por cartoleta. O time é montado respeitando o limite informado, reservando orçamento para completar as posições restantes.
+
+A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o orçamento não basta para completar os 12 titulares — `avisoOrcamento`. Valores em cartoletas são arredondados para 2 casas decimais.
+
+#### Exemplo — `GET /api/time?orcamento=120.0`
+
+```json
+{
+  "rodada": 15,
+  "orcamentoInformado": 120.0,
+  "custoTotal": 118.3,
+  "saldoRestante": 1.7,
+  "estrategia": "CUSTO_BENEFICIO",
+  "formacaoCompleta": true,
+  "avisoMercado": null,
+  "titulares": { },
+  "reservas": { }
+}
+```
+
+Quando o orçamento é baixo demais para os 12 titulares, a formação é retornada incompleta e `avisoOrcamento` é preenchido (`saldoRestante` nunca fica negativo):
+
+```json
+{
+  "rodada": 15,
+  "orcamentoInformado": 30.0,
+  "custoTotal": 24.0,
+  "saldoRestante": 6.0,
+  "estrategia": "CUSTO_BENEFICIO",
+  "formacaoCompleta": false,
+  "avisoOrcamento": "Orcamento de C$30,0 insuficiente para completar a formacao (10/12 titulares escalados). Considere aumentar o orcamento.",
+  "titulares": { },
+  "reservas": { }
+}
+```
+
+#### Exemplo — `GET /api/time` (sem orçamento)
+
+```json
+{
+  "rodada": 15,
+  "orcamentoInformado": null,
+  "custoTotal": 147.8,
+  "saldoRestante": null,
+  "estrategia": "SCORE_MAXIMO",
+  "formacaoCompleta": true,
+  "avisoMercado": null,
+  "titulares": { },
+  "reservas": { }
+}
+```
+
+> `orcamento` deve ser **maior que 0** — valores `<= 0` retornam `400 Bad Request`.
+
 ### Aviso de mercado
 
 Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMercado` preenchido:
@@ -347,7 +408,7 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | Código | Situação |
 |---|---|
 | `200` | Sucesso |
-| `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`) |
+| `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `orcamento <= 0`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
@@ -492,7 +553,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 23 classes de teste — 360 cenários
+        ├── java/                            # 23 classes de teste — 371 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -564,9 +625,9 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
-| `MontadorTimeServiceTest` | 25 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico |
+| `MontadorTimeServiceTest` | 31 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício, formação incompleta |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
-| `PipelineServiceTest` | 8 — inclui etapa DesempenhoService |
+| `PipelineServiceTest` | 9 — inclui etapa DesempenhoService e propagação de orçamento |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
@@ -575,7 +636,7 @@ mvn test jacoco:report
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 11 — HTTP completo, persistência da escalação e comportamento não bloqueante |
+| `TimeControllerTest` | 15 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso e validação |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |

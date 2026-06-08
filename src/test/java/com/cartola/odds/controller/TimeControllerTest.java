@@ -21,7 +21,9 @@ import java.util.Map;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -42,7 +44,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 200 com corpo preenchido quando pipeline executar com sucesso")
         void deveRetornar200ComTime() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -57,7 +59,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 422 quando pool de atletas estiver vazio")
         void deveRetornar422QuandoPoolVazio() throws Exception {
-            when(pipelineService.executar())
+            when(pipelineService.executar(any()))
                     .thenThrow(new IllegalStateException("Nenhum atleta disponivel"));
 
             mockMvc.perform(get("/api/time"))
@@ -70,7 +72,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 502 quando API externa falhar")
         void deveRetornar502QuandoApiExternaFalhar() throws Exception {
-            when(pipelineService.executar())
+            when(pipelineService.executar(any()))
                     .thenThrow(new org.springframework.web.client.RestClientException("Timeout"));
 
             mockMvc.perform(get("/api/time"))
@@ -81,7 +83,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 500 para erros inesperados")
         void deveRetornar500ParaErroGenerico() throws Exception {
-            when(pipelineService.executar())
+            when(pipelineService.executar(any()))
                     .thenThrow(new RuntimeException("Erro inesperado"));
 
             mockMvc.perform(get("/api/time"))
@@ -94,7 +96,7 @@ class TimeControllerTest {
         @DisplayName("deve retornar avisoMercado preenchido quando mercado fechado")
         void deveRetornarAvisoQuandoMercadoFechado() throws Exception {
             var timeComAviso = criarTimeMockComAviso("Mercado fechado. Rodada em andamento.");
-            when(pipelineService.executar()).thenReturn(timeComAviso);
+            when(pipelineService.executar(any())).thenReturn(timeComAviso);
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -104,7 +106,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar avisoMercado null quando mercado aberto")
         void deveRetornarAvisoNullQuandoMercadoAberto() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -114,7 +116,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar capitao preenchido quando existe")
         void deveRetornarCapitao() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(jsonPath("$.capitao").isNotEmpty())
@@ -126,7 +128,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar todos os campos obrigatorios do atleta")
         void deveRetornarEstruturaCompletaDoAtleta() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(jsonPath("$.capitao.apelido").exists())
@@ -144,7 +146,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve persistir a escalacao apos montar o time")
         void devePersistirEscalacao() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk());
@@ -155,7 +157,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 200 mesmo se a persistencia da escalacao falhar (nao bloqueante)")
         void deveRetornar200QuandoPersistenciaFalha() throws Exception {
-            when(pipelineService.executar()).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
             doThrow(new RuntimeException("falha ao salvar"))
                     .when(escalacaoService).salvarEscalacao(any(), any());
 
@@ -167,11 +169,69 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve incluir timestamp no corpo de resposta de erro")
         void deveRetornarTimestampNoErro() throws Exception {
-            when(pipelineService.executar())
+            when(pipelineService.executar(any()))
                     .thenThrow(new IllegalStateException("Pool vazio"));
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(jsonPath("$.timestamp").exists());
+        }
+
+        @Test
+        @DisplayName("deve usar estrategia SCORE_MAXIMO quando orcamento nao informado")
+        void deveEstrategiaScoreMaximoSemOrcamento() throws Exception {
+            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+
+            mockMvc.perform(get("/api/time"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.estrategia").value("SCORE_MAXIMO"))
+                    .andExpect(jsonPath("$.formacaoCompleta").value(true))
+                    .andExpect(jsonPath("$.orcamentoInformado").doesNotExist())
+                    .andExpect(jsonPath("$.saldoRestante").doesNotExist())
+                    .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
+
+            verify(pipelineService).executar(isNull());
+        }
+
+        @Test
+        @DisplayName("deve propagar orcamento e expor campos de custo-beneficio quando informado")
+        void devePropagarOrcamentoEExporCampos() throws Exception {
+            when(pipelineService.executar(eq(120.0)))
+                    .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
+
+            mockMvc.perform(get("/api/time").param("orcamento", "120.0"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.estrategia").value("CUSTO_BENEFICIO"))
+                    .andExpect(jsonPath("$.orcamentoInformado").value(120.0))
+                    .andExpect(jsonPath("$.custoTotal").value(118.3))
+                    .andExpect(jsonPath("$.saldoRestante").value(1.7))
+                    .andExpect(jsonPath("$.formacaoCompleta").value(true))
+                    .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
+
+            verify(pipelineService).executar(eq(120.0));
+        }
+
+        @Test
+        @DisplayName("deve expor avisoOrcamento e formacaoCompleta=false quando orcamento insuficiente")
+        void deveExporAvisoQuandoOrcamentoInsuficiente() throws Exception {
+            when(pipelineService.executar(eq(30.0)))
+                    .thenReturn(criarTimeMockIncompleto(30.0, 24.0));
+
+            mockMvc.perform(get("/api/time").param("orcamento", "30.0"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.formacaoCompleta").value(false))
+                    .andExpect(jsonPath("$.saldoRestante").value(6.0))
+                    .andExpect(jsonPath("$.avisoOrcamento").value(containsString("insuficiente")));
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando orcamento for menor ou igual a zero")
+        void deveRetornar400QuandoOrcamentoInvalido() throws Exception {
+            mockMvc.perform(get("/api/time").param("orcamento", "0"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("orcamento")));
+
+            verify(pipelineService, never()).executar(any());
         }
     }
 
@@ -188,6 +248,36 @@ class TimeControllerTest {
         return Time.builder().rodada(15).avisoMercado(aviso)
                 .titulares(titulares).reservas(Map.of()).capitao(capitao)
                 .reservaLuxo(null).alertasDuvida(List.of()).custoTotal(142.5).build();
+    }
+
+    private Time criarTimeMockComOrcamento(double orcamento, double custoTotal) {
+        return timeComOrcamento(orcamento, custoTotal, true, null);
+    }
+
+    private Time criarTimeMockIncompleto(double orcamento, double custoTotal) {
+        return timeComOrcamento(orcamento, custoTotal, false,
+                "Orcamento de C$30,0 insuficiente para completar a formacao "
+                        + "(10/12 titulares escalados). Considere aumentar o orcamento.");
+    }
+
+    private Time timeComOrcamento(double orcamento, double custoTotal,
+                                  boolean formacaoCompleta, String avisoOrcamento) {
+        var capitao = Atleta.builder()
+                .atletaId(1).apelido("Hulk").posicao(Posicao.ATA)
+                .clubeId(1).nomeClube("ATM").siglaClube("ATM").nomeClubeNorm("atm")
+                .status(StatusAtleta.PROVAVEL).mediaPontos(9.5).valorizacao(3.2)
+                .preco(22.0).desempenhoRecente(0.0).score(8.54).build();
+        Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
+        titulares.put(Posicao.ATA, List.of(capitao));
+        return Time.builder().rodada(15).avisoMercado(null)
+                .titulares(titulares).reservas(Map.of()).capitao(capitao)
+                .reservaLuxo(null).alertasDuvida(List.of()).custoTotal(custoTotal)
+                .orcamentoInformado(orcamento)
+                .saldoRestante(orcamento - custoTotal)
+                .estrategia(com.cartola.odds.model.enums.Estrategia.CUSTO_BENEFICIO)
+                .formacaoCompleta(formacaoCompleta)
+                .avisoOrcamento(avisoOrcamento)
+                .build();
     }
 
     private Time criarTimeMock() {
@@ -219,6 +309,8 @@ class TimeControllerTest {
                 .reservaLuxo(null)
                 .alertasDuvida(List.of())
                 .custoTotal(142.5)
+                .estrategia(com.cartola.odds.model.enums.Estrategia.SCORE_MAXIMO)
+                .formacaoCompleta(true)
                 .build();
     }
 }

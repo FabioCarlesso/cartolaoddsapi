@@ -2,6 +2,7 @@ package com.cartola.odds.service;
 
 import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Configuracao;
+import com.cartola.odds.model.enums.Estrategia;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
 import org.junit.jupiter.api.BeforeEach;
@@ -494,6 +495,80 @@ class MontadorTimeServiceTest {
 
             assertThat(time).isNotNull();
             assertThat(time.getCustoTotal()).isLessThanOrEqualTo(1.0);
+        }
+    }
+
+    @Nested
+    @DisplayName("orcamento e custo-beneficio")
+    class Orcamento {
+
+        @Test
+        @DisplayName("sem orcamento usa estrategia SCORE_MAXIMO e nao expoe orcamento/saldo")
+        void semOrcamentoEstrategiaScoreMaximo() {
+            var time = service.montar(criarPool(), 1, null, null);
+
+            assertThat(time.getEstrategia()).isEqualTo(Estrategia.SCORE_MAXIMO);
+            assertThat(time.getOrcamentoInformado()).isNull();
+            assertThat(time.getSaldoRestante()).isNull();
+            assertThat(time.isFormacaoCompleta()).isTrue();
+            assertThat(time.getAvisoOrcamento()).isNull();
+        }
+
+        @Test
+        @DisplayName("com orcamento usa estrategia CUSTO_BENEFICIO, expoe saldo e marca formacao completa")
+        void comOrcamentoEstrategiaCustoBeneficio() {
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
+
+            assertThat(time.getEstrategia()).isEqualTo(Estrategia.CUSTO_BENEFICIO);
+            assertThat(time.getOrcamentoInformado()).isEqualTo(300.0);
+            assertThat(time.getSaldoRestante()).isEqualTo(300.0 - time.getCustoTotal());
+            assertThat(time.isFormacaoCompleta()).isTrue();
+            assertThat(time.getAvisoOrcamento()).isNull();
+        }
+
+        @Test
+        @DisplayName("custo total nao deve ultrapassar o orcamento informado")
+        void custoTotalNaoUltrapassaOrcamento() {
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 24.0);
+
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(24.0);
+            assertThat(time.getSaldoRestante()).isGreaterThanOrEqualTo(0.0);
+        }
+
+        @Test
+        @DisplayName("orcamento insuficiente nao estoura o limite, nao lanca excecao e sinaliza formacao incompleta")
+        void orcamentoInsuficienteSinalizaFormacaoIncompleta() {
+            // Atleta mais barato custa C$2.0; com orcamento C$1.0 ninguem cabe.
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 1.0);
+
+            assertThat(time).isNotNull();
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(1.0);
+            assertThat(time.getSaldoRestante()).isGreaterThanOrEqualTo(0.0);
+            assertThat(time.isFormacaoCompleta()).isFalse();
+            assertThat(time.getAvisoOrcamento()).isNotNull().contains("insuficiente");
+        }
+
+        @Test
+        @DisplayName("prioriza custo-beneficio (score/preco) ao ordenar candidatos")
+        void priorizaCustoBeneficio() {
+            // Baratos tem melhor score/preco (ex: 4/2=2.0) que os caros (ex: 9/50=0.18).
+            // Mesmo com orcamento folgado, a estrategia custo-beneficio prefere os baratos.
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
+
+            time.getTitulares().values().stream().flatMap(List::stream)
+                    .forEach(a -> assertThat(a.getPreco()).isEqualTo(2.0));
+        }
+
+        @Test
+        @DisplayName("orcamento informado tem prioridade sobre budgetMaximo da config")
+        void orcamentoTemPrioridadeSobreConfig() {
+            config.setBudgetMaximo(1.0); // config restritiva seria insuficiente
+
+            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
+
+            // orcamento=300 deve permitir a formacao completa apesar do budgetMaximo=1.0
+            assertThat(time.getTitulares().values().stream().mapToLong(List::size).sum())
+                    .isEqualTo(12L);
         }
     }
 
