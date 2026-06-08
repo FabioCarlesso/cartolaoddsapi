@@ -75,7 +75,7 @@ class PipelineServiceTest {
             verify(cartolaDataService, times(1)).buscarAtletasFiltrados(any());
             verify(desempenhoService,  times(1)).calcularDesempenhoUltimasRodadas(15);
             verify(scoreService,       times(1)).calcularScores(any(), any(), any(), any());
-            verify(montadorTimeService,times(1)).montar(any(), eq(15), any());
+            verify(montadorTimeService,times(1)).montar(any(), eq(15), any(), isNull());
         }
 
         @Test
@@ -130,7 +130,7 @@ class PipelineServiceTest {
 
             verify(desempenhoService, never()).calcularDesempenhoUltimasRodadas(anyInt());
             verify(scoreService,      never()).calcularScores(any(), any(), any(), any());
-            verify(montadorTimeService, never()).montar(any(), anyInt(), any());
+            verify(montadorTimeService, never()).montar(any(), anyInt(), any(), any());
         }
 
         @Test
@@ -148,11 +148,29 @@ class PipelineServiceTest {
             when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
             when(desempenhoService.calcularDesempenhoUltimasRodadas(14)).thenReturn(Map.of());
             when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
-            when(montadorTimeService.montar(any(), eq(14), any())).thenReturn(timeMock(14));
+            when(montadorTimeService.montar(any(), eq(14), any(), any())).thenReturn(timeMock(14));
 
             var resultado = pipelineService.executar();
 
             assertThat(resultado.getRodada()).isEqualTo(14);
+        }
+
+        @Test
+        @DisplayName("deve propagar o orcamento informado ao MontadorTimeService")
+        void devePropagarOrcamentoAoMontador() {
+            var atletas = atletasMinimos();
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(Map.of());
+            when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
+            when(montadorTimeService.montar(any(), eq(15), any(), eq(120.0))).thenReturn(timeMock(15));
+
+            pipelineService.executar(120.0);
+
+            verify(montadorTimeService).montar(any(), eq(15), any(), eq(120.0));
         }
 
         @Test
@@ -184,7 +202,7 @@ class PipelineServiceTest {
         when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
         when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(desempenhoMap);
         when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
-        when(montadorTimeService.montar(any(), eq(15), any())).thenReturn(timeMock(15));
+        when(montadorTimeService.montar(any(), eq(15), any(), isNull())).thenReturn(timeMock(15));
     }
 
     private List<Atleta> atletasMinimos() {

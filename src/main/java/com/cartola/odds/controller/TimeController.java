@@ -19,11 +19,19 @@ public class TimeController implements TimeApi {
     private final EscalacaoService escalacaoService;
 
     @Override
-    public ResponseEntity<TimeResponse> montarTime() {
-        log.info("GET /api/time - Iniciando pipeline...");
-        var time = pipelineService.executar();
+    public ResponseEntity<TimeResponse> montarTime(Double orcamento) {
+        validarOrcamento(orcamento);
+        log.info("GET /api/time - Iniciando pipeline... | orcamento={}", orcamento);
+        var time = pipelineService.executar(orcamento);
         registrarEscalacao(time);
         return ResponseEntity.ok(TimeResponse.from(time));
+    }
+
+    private void validarOrcamento(Double orcamento) {
+        if (orcamento != null && orcamento <= 0) {
+            throw new IllegalArgumentException(
+                    "orcamento deve ser maior que 0. Valor informado: " + orcamento);
+        }
     }
 
     /**

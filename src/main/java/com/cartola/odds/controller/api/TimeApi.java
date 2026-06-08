@@ -3,6 +3,7 @@ package com.cartola.odds.controller.api;
 import com.cartola.odds.model.response.ErrorResponse;
 import com.cartola.odds.model.response.TimeResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 
 /**
  * Contrato REST do endpoint de montagem de time.
@@ -42,12 +44,20 @@ public interface TimeApi {
             - Titulares em Duvida recebem substituto provavel da mesma posicao
             - Capitao: maior score — prioridade ATA > MEI > ZAG > LAT > GOL > TEC
 
+            **Parametro `orcamento`** *(opcional)*:
+            - Nao informado: comportamento padrao (estrategia SCORE_MAXIMO, sem restricao de custo)
+            - Informado: o time respeita o limite de cartoletas e os candidatos passam a ser
+              ordenados por custo-beneficio (score/preco) — estrategia CUSTO_BENEFICIO
+            - Validacao: deve ser > 0
+
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
             """
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Time montado com sucesso",
             content = @Content(schema = @Schema(implementation = TimeResponse.class))),
+        @ApiResponse(responseCode = "400", description = "orcamento invalido (deve ser > 0)",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "Nenhum atleta disponivel apos filtragem",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "502", description = "Erro de comunicacao com API externa",
@@ -55,5 +65,11 @@ public interface TimeApi {
         @ApiResponse(responseCode = "500", description = "Erro interno inesperado",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
-    ResponseEntity<TimeResponse> montarTime();
+    ResponseEntity<TimeResponse> montarTime(
+
+        @Parameter(description = "Orcamento maximo em cartoletas (C$). Quando informado, o time "
+                              + "respeita esse limite priorizando custo-beneficio. Deve ser > 0.",
+                   example = "120.0")
+        @RequestParam(required = false) Double orcamento
+    );
 }

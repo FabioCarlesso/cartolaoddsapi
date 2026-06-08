@@ -3,6 +3,7 @@ package com.cartola.odds.service;
 import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.Time;
+import com.cartola.odds.model.enums.Estrategia;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +36,18 @@ public class MontadorTimeService {
     private final ConfiguracaoService configuracaoService;
 
     public Time montar(List<Atleta> pool, int rodada, String avisoMercado) {
+        return montar(pool, rodada, avisoMercado, null);
+    }
+
+    public Time montar(List<Atleta> pool, int rodada, String avisoMercado, Double orcamento) {
         Configuracao config = configuracaoService.buscarConfig();
+
+        // Quando um orcamento e informado, prioriza custo-beneficio (score/preco);
+        // caso contrario mantem a ordenacao por score puro.
+        Estrategia estrategia = orcamento != null ? Estrategia.CUSTO_BENEFICIO : Estrategia.SCORE_MAXIMO;
+        Comparator<Atleta> ordenacao = estrategia == Estrategia.CUSTO_BENEFICIO
+                ? Comparator.comparingDouble(MontadorTimeService::custoBeneficio).reversed()
+                : Comparator.comparingDouble(Atleta::getScore).reversed();
 
         Map<Posicao, List<Atleta>> porPosicao = pool.stream()
                 .collect(Collectors.groupingBy(Atleta::getPosicao));
@@ -43,7 +55,7 @@ public class MontadorTimeService {
         porPosicao.forEach((posicao, atletas) -> candidatosPorPosicao.put(
                 posicao,
                 atletas.stream()
-                        .sorted(Comparator.comparingDouble(Atleta::getScore).reversed())
+                        .sorted(ordenacao)
                         .toList()
         ));
 
@@ -52,8 +64,12 @@ public class MontadorTimeService {
         Set<Integer> clubesDefesaEscalados = new HashSet<>();
         Map<Integer, Integer> contagemClubesTitulares = new HashMap<>();
 
-        // Budget tracking: Double.MAX_VALUE when no constraint (budgetMaximo == 0)
-        double[] budgetRestante = { config.getBudgetMaximo() > 0 ? config.getBudgetMaximo() : Double.MAX_VALUE };
+        // Budget efetivo: orcamento da requisicao tem prioridade; senao usa budgetMaximo
+        // da configuracao. Double.MAX_VALUE quando nao ha restricao (budgetMaximo == 0).
+        double budgetEfetivo = orcamento != null
+                ? orcamento
+                : (config.getBudgetMaximo() > 0 ? config.getBudgetMaximo() : Double.MAX_VALUE);
+        double[] budgetRestante = { budgetEfetivo };
 
         for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
@@ -165,7 +181,10 @@ public class MontadorTimeService {
                 .mapToDouble(Atleta::getPreco)
                 .sum();
 
-        log.info("Custo total dos titulares: C${}", String.format("%.1f", custoTotal));
+        log.info("Custo total dos titulares: C${} | Estrategia: {}",
+                String.format("%.1f", custoTotal), estrategia);
+
+        Double saldoRestante = orcamento != null ? orcamento - custoTotal : null;
 
         return Time.builder()
                 .rodada(rodada)
@@ -176,7 +195,15 @@ public class MontadorTimeService {
                 .reservaLuxo(reservaLuxo)
                 .alertasDuvida(alertas)
                 .custoTotal(custoTotal)
+                .orcamentoInformado(orcamento)
+                .saldoRestante(saldoRestante)
+                .estrategia(estrategia)
                 .build();
+    }
+
+    /** Pontos esperados por cartoleta gasta; usa o score quando o preco for invalido (<= 0). */
+    private static double custoBeneficio(Atleta atleta) {
+        return atleta.getPreco() > 0 ? atleta.getScore() / atleta.getPreco() : atleta.getScore();
     }
 
     private List<Atleta> escolherTitulares(List<Atleta> candidatos,

@@ -45,6 +45,22 @@ public class TimeResponse {
     @Schema(description = "Custo total dos titulares em cartoletas (C$)", example = "142.5")
     private final double custoTotal;
 
+    @Schema(description = "Orcamento maximo informado na requisicao (C$). "
+                        + "Null quando nenhum orcamento foi informado.",
+            example = "120.0", nullable = true)
+    private final Double orcamentoInformado;
+
+    @Schema(description = "Saldo restante de cartoletas (orcamentoInformado - custoTotal). "
+                        + "Null quando nenhum orcamento foi informado.",
+            example = "1.7", nullable = true)
+    private final Double saldoRestante;
+
+    @Schema(description = "Estrategia usada na montagem: SCORE_MAXIMO (sem orcamento) "
+                        + "ou CUSTO_BENEFICIO (com orcamento).",
+            example = "CUSTO_BENEFICIO",
+            allowableValues = {"SCORE_MAXIMO", "CUSTO_BENEFICIO"})
+    private final String estrategia;
+
     public static TimeResponse from(Time time) {
         return TimeResponse.builder()
                 .rodada(time.getRodada())
@@ -63,6 +79,9 @@ public class TimeResponse {
                 .reservaLuxo(time.getReservaLuxo() != null ? AtletaDto.from(time.getReservaLuxo()) : null)
                 .alertasDuvida(time.getAlertasDuvida())
                 .custoTotal(time.getCustoTotal())
+                .orcamentoInformado(time.getOrcamentoInformado())
+                .saldoRestante(time.getSaldoRestante())
+                .estrategia(time.getEstrategia() != null ? time.getEstrategia().name() : null)
                 .build();
     }
 

@@ -29,6 +29,16 @@ public class PipelineService {
      *  7. Monta time (titulares, reservas sem TEC, capitao, substitutos)
      */
     public Time executar() {
+        return executar(null);
+    }
+
+    /**
+     * Executa o pipeline respeitando um orcamento maximo em cartoletas.
+     *
+     * @param orcamento orcamento maximo (C$); quando {@code null}, nenhuma restricao de custo
+     *                  da requisicao e aplicada e vale a estrategia SCORE_MAXIMO.
+     */
+    public Time executar(Double orcamento) {
 
         log.info("1 - Verificando status do mercado...");
         var statusResponse = cartolaDataService.buscarStatusMercado();
@@ -68,7 +78,8 @@ public class PipelineService {
         Time time = montadorTimeService.montar(
                 atletasComScore,
                 statusResponse.getRodadaAtual(),
-                statusResponse.getAvisoMercado()
+                statusResponse.getAvisoMercado(),
+                orcamento
         );
 
         log.info("Pipeline concluido | Rodada {} | Status mercado: {}",
