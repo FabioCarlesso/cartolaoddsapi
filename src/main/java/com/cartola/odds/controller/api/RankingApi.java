@@ -36,11 +36,14 @@ public interface RankingApi {
             **Parametros:**
             - `posicao` *(opcional)*: GOL, LAT, ZAG, MEI, ATA ou TEC. Omitir = todas.
             - `limite` *(opcional)*: 1-100 (padrao 25). Valores fora do range sao clampados.
+            - `excluirDuvida` *(opcional)*: `true` remove jogadores em duvida (statusId 6),
+              retornando apenas provaveis. Padrao `false` (mantem ambos os status).
 
             **Exemplos:**
             - `GET /api/ranking` → top 25 geral
             - `GET /api/ranking?posicao=ATA` → top 25 atacantes
             - `GET /api/ranking?posicao=MEI&limite=10` → top 10 meias
+            - `GET /api/ranking?posicao=MEI&limite=5&excluirDuvida=true` → top 5 meias provaveis
             """
     )
     @ApiResponses({
@@ -60,6 +63,10 @@ public interface RankingApi {
         @RequestParam(required = false) String posicao,
 
         @Parameter(description = "Numero de atletas a retornar (1-100)", example = "25")
-        @RequestParam(defaultValue = "25") int limite
+        @RequestParam(defaultValue = "25") int limite,
+
+        @Parameter(description = "Quando true, remove jogadores em duvida (statusId 6) do ranking.",
+                   example = "false")
+        @RequestParam(defaultValue = "false") boolean excluirDuvida
     );
 }

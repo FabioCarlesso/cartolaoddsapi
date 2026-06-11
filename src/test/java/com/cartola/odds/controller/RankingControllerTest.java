@@ -17,6 +17,7 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -38,7 +39,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar 200 com estrutura completa")
         void deveRetornar200ComEstrutura() throws Exception {
-            when(rankingService.buscarRanking(null, 25)).thenReturn(rankingMock("TODAS", 25, 3));
+            when(rankingService.buscarRanking(null, 25, false)).thenReturn(rankingMock("TODAS", 25, 3));
 
             mockMvc.perform(get("/api/ranking"))
                     .andExpect(status().isOk())
@@ -54,55 +55,81 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve chamar service sem posicao quando parametro omitido")
         void deveChamarSemPosicaoQuandoOmitido() throws Exception {
-            when(rankingService.buscarRanking(null, 25)).thenReturn(rankingMock("TODAS", 25, 0));
+            when(rankingService.buscarRanking(null, 25, false)).thenReturn(rankingMock("TODAS", 25, 0));
 
             mockMvc.perform(get("/api/ranking"))
                     .andExpect(status().isOk());
 
-            verify(rankingService).buscarRanking(null, 25);
+            verify(rankingService).buscarRanking(null, 25, false);
         }
 
         @Test
         @DisplayName("deve passar posicao ATA quando informada via query param")
         void devePassarPosicaoAta() throws Exception {
-            when(rankingService.buscarRanking(eq(Posicao.ATA), eq(25)))
+            when(rankingService.buscarRanking(eq(Posicao.ATA), eq(25), eq(false)))
                     .thenReturn(rankingMock("ATA", 25, 2));
 
             mockMvc.perform(get("/api/ranking").param("posicao", "ATA"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.posicao").value("ATA"));
 
-            verify(rankingService).buscarRanking(Posicao.ATA, 25);
+            verify(rankingService).buscarRanking(Posicao.ATA, 25, false);
         }
 
         @Test
         @DisplayName("deve passar limite customizado ao service")
         void devePassarLimiteCustomizado() throws Exception {
-            when(rankingService.buscarRanking(null, 10)).thenReturn(rankingMock("TODAS", 10, 10));
+            when(rankingService.buscarRanking(null, 10, false)).thenReturn(rankingMock("TODAS", 10, 10));
 
             mockMvc.perform(get("/api/ranking").param("limite", "10"))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$.limite").value(10));
 
-            verify(rankingService).buscarRanking(null, 10);
+            verify(rankingService).buscarRanking(null, 10, false);
+        }
+
+        @Test
+        @DisplayName("deve usar excluirDuvida=false como padrao quando omitido")
+        void deveUsarExcluirDuvidaFalsePorPadrao() throws Exception {
+            when(rankingService.buscarRanking(null, 25, false)).thenReturn(rankingMock("TODAS", 25, 3));
+
+            mockMvc.perform(get("/api/ranking"))
+                    .andExpect(status().isOk());
+
+            verify(rankingService).buscarRanking(null, 25, false);
+        }
+
+        @Test
+        @DisplayName("deve propagar excluirDuvida=true ao service")
+        void devePropagarExcluirDuvidaTrue() throws Exception {
+            when(rankingService.buscarRanking(eq(Posicao.MEI), eq(5), eq(true)))
+                    .thenReturn(rankingMock("MEI", 5, 2));
+
+            mockMvc.perform(get("/api/ranking")
+                            .param("posicao", "MEI")
+                            .param("limite", "5")
+                            .param("excluirDuvida", "true"))
+                    .andExpect(status().isOk());
+
+            verify(rankingService).buscarRanking(Posicao.MEI, 5, true);
         }
 
         @Test
         @DisplayName("deve aceitar posicao em minusculas (case insensitive)")
         void deveAceitarPosicaoMinuscula() throws Exception {
-            when(rankingService.buscarRanking(eq(Posicao.MEI), eq(25)))
+            when(rankingService.buscarRanking(eq(Posicao.MEI), eq(25), eq(false)))
                     .thenReturn(rankingMock("MEI", 25, 5));
 
             mockMvc.perform(get("/api/ranking").param("posicao", "mei"))
                     .andExpect(status().isOk());
 
-            verify(rankingService).buscarRanking(Posicao.MEI, 25);
+            verify(rankingService).buscarRanking(Posicao.MEI, 25, false);
         }
 
         @Test
         @DisplayName("deve retornar campos obrigatorios de cada atleta no ranking")
         void deveRetornarCamposObrigatoriosDoAtleta() throws Exception {
-            when(rankingService.buscarRanking(null, 25)).thenReturn(rankingMock("TODAS", 25, 1));
+            when(rankingService.buscarRanking(null, 25, false)).thenReturn(rankingMock("TODAS", 25, 1));
 
             mockMvc.perform(get("/api/ranking"))
                     .andExpect(jsonPath("$.atletas[0].rank").value(1))
@@ -122,7 +149,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar lista vazia quando nenhum atleta disponivel na posicao")
         void deveRetornarListaVaziaQuandoNenhumAtleta() throws Exception {
-            when(rankingService.buscarRanking(Posicao.TEC, 25))
+            when(rankingService.buscarRanking(Posicao.TEC, 25, false))
                     .thenReturn(rankingMock("TEC", 25, 0));
 
             mockMvc.perform(get("/api/ranking").param("posicao", "TEC"))
@@ -156,7 +183,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar 422 quando pipeline nao encontra atletas")
         void deveRetornar422QuandoPipelineVazio() throws Exception {
-            when(rankingService.buscarRanking(any(), anyInt()))
+            when(rankingService.buscarRanking(any(), anyInt(), anyBoolean()))
                     .thenThrow(new IllegalStateException("Nenhum atleta disponivel"));
 
             mockMvc.perform(get("/api/ranking"))
@@ -167,7 +194,7 @@ class RankingControllerTest {
         @Test
         @DisplayName("deve retornar 502 quando API externa falhar")
         void deveRetornar502QuandoApiExternaFalhar() throws Exception {
-            when(rankingService.buscarRanking(any(), anyInt()))
+            when(rankingService.buscarRanking(any(), anyInt(), anyBoolean()))
                     .thenThrow(new org.springframework.web.client.RestClientException("Timeout"));
 
             mockMvc.perform(get("/api/ranking"))
