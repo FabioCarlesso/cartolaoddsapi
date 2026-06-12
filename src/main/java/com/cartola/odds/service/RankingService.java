@@ -27,11 +27,11 @@ public class RankingService {
     private final DesempenhoService   desempenhoService;
     private final ScoreService        scoreService;
 
-    public RankingResponse buscarRanking(Posicao posicao, int limite) {
+    public RankingResponse buscarRanking(Posicao posicao, int limite, boolean excluirDuvida) {
         int limiteValido = Math.max(1, Math.min(limite, LIMITE_MAXIMO));
 
-        log.info("Buscando ranking | posicao={} | limite={}",
-                posicao != null ? posicao : "TODAS", limiteValido);
+        log.info("Buscando ranking | posicao={} | limite={} | excluirDuvida={}",
+                posicao != null ? posicao : "TODAS", limiteValido, excluirDuvida);
 
         var dadosRodada              = cartolaDataService.buscarDadosRodada();
         Set<String>  favoritos       = oddsService.buscarFavoritos(dadosRodada.confrontos());
@@ -45,8 +45,15 @@ public class RankingService {
         }
 
         var atletasFiltrados = cartolaDataService.buscarAtletasFiltrados(favoritos);
+
+        // Filtragem pos-cache: remove jogadores em duvida antes do score/ranking,
+        // sem invalidar entradas de cache compartilhadas com o comportamento padrao.
+        List<Atleta> atletasConsiderados = excluirDuvida
+                ? atletasFiltrados.stream().filter(a -> !a.isDuvida()).toList()
+                : atletasFiltrados;
+
         var desempenhoMap    = desempenhoService.calcularDesempenhoUltimasRodadas(statusResponse.getRodadaAtual());
-        var atletasComScore  = scoreService.calcularScores(atletasFiltrados, timesCasa, favoritos, desempenhoMap);
+        var atletasComScore  = scoreService.calcularScores(atletasConsiderados, timesCasa, favoritos, desempenhoMap);
 
         Stream<Atleta> stream = atletasComScore.stream()
                 .sorted(Comparator.comparingDouble(Atleta::getScore).reversed());

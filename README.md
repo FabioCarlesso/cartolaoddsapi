@@ -25,6 +25,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
 | 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
 | 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o melhor time dentro do limite de cartoletas, priorizando custo-benefício (score/preço) |
+| 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
 
 
 ---
@@ -188,6 +189,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | `GET` | `/api/ranking` | Top 25 atletas por score |
 | `GET` | `/api/ranking?posicao=ATA` | Top 25 atacantes |
 | `GET` | `/api/ranking?posicao=MEI&limite=10` | Top 10 meias |
+| `GET` | `/api/ranking?posicao=MEI&limite=5&excluirDuvida=true` | Top 5 meias, sem jogadores em dúvida |
 | `DELETE` | `/api/cache` | Invalida todos os caches imediatamente |
 | `DELETE` | `/api/cache/{nome}` | Invalida um cache específico pelo nome |
 | `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |

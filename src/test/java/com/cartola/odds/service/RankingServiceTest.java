@@ -4,6 +4,7 @@ import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
 import com.cartola.odds.model.response.MercadoStatusResponse;
+import com.cartola.odds.model.response.RankingResponse.AtletaRankingDto;
 import com.cartola.odds.service.DesempenhoService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -65,7 +66,7 @@ class RankingServiceTest {
             );
             configurarPool(pool);
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             var scores = resultado.getAtletas().stream()
                     .mapToDouble(a -> a.getScore()).toArray();
@@ -77,7 +78,7 @@ class RankingServiceTest {
         void deveNumerarRankingAPartirDeUm() {
             configurarPool(List.of(atleta(Posicao.ATA, 8.0), atleta(Posicao.ATA, 6.0)));
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             assertThat(resultado.getAtletas().get(0).getRank()).isEqualTo(1);
             assertThat(resultado.getAtletas().get(1).getRank()).isEqualTo(2);
@@ -88,7 +89,7 @@ class RankingServiceTest {
         void deveRespeitarOLimite() {
             configurarPool(criarAtletas(30, Posicao.ATA));
 
-            var resultado = rankingService.buscarRanking(null, 10);
+            var resultado = rankingService.buscarRanking(null, 10, false);
 
             assertThat(resultado.getAtletas()).hasSize(10);
             assertThat(resultado.getLimite()).isEqualTo(10);
@@ -99,7 +100,7 @@ class RankingServiceTest {
         void deveRetornar25ComLimitePadrao() {
             configurarPool(criarAtletas(40, Posicao.ATA));
 
-            var resultado = rankingService.buscarRanking(null, RankingService.LIMITE_PADRAO);
+            var resultado = rankingService.buscarRanking(null, RankingService.LIMITE_PADRAO, false);
 
             assertThat(resultado.getAtletas()).hasSize(25);
         }
@@ -109,7 +110,7 @@ class RankingServiceTest {
         void naoDeveUltrapassarLimiteMaximo() {
             configurarPool(criarAtletas(150, Posicao.ATA));
 
-            var resultado = rankingService.buscarRanking(null, 999);
+            var resultado = rankingService.buscarRanking(null, 999, false);
 
             assertThat(resultado.getAtletas()).hasSize(RankingService.LIMITE_MAXIMO);
             assertThat(resultado.getLimite()).isEqualTo(RankingService.LIMITE_MAXIMO);
@@ -121,7 +122,7 @@ class RankingServiceTest {
         void deveTratarLimiteNegativoComoUm(int limiteInvalido) {
             configurarPool(criarAtletas(10, Posicao.ATA));
 
-            var resultado = rankingService.buscarRanking(null, limiteInvalido);
+            var resultado = rankingService.buscarRanking(null, limiteInvalido, false);
 
             assertThat(resultado.getAtletas()).hasSize(1);
             assertThat(resultado.getLimite()).isEqualTo(1);
@@ -132,7 +133,7 @@ class RankingServiceTest {
         void deveInformarTotalDisponivel() {
             configurarPool(criarAtletas(40, Posicao.ATA));
 
-            var resultado = rankingService.buscarRanking(null, 10);
+            var resultado = rankingService.buscarRanking(null, 10, false);
 
             assertThat(resultado.getTotalDisponivel()).isEqualTo(40);
             assertThat(resultado.getAtletas()).hasSize(10);
@@ -154,7 +155,7 @@ class RankingServiceTest {
             );
             configurarPool(pool);
 
-            var resultado = rankingService.buscarRanking(Posicao.ATA, 25);
+            var resultado = rankingService.buscarRanking(Posicao.ATA, 25, false);
 
             assertThat(resultado.getAtletas()).hasSize(2);
             assertThat(resultado.getAtletas())
@@ -171,7 +172,7 @@ class RankingServiceTest {
             );
             configurarPool(pool);
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             assertThat(resultado.getAtletas()).hasSize(3);
             assertThat(resultado.getPosicao()).isEqualTo("TODAS");
@@ -182,7 +183,7 @@ class RankingServiceTest {
         void deveRetornarVazioQuandoNenhumNaPosicao() {
             configurarPool(List.of(atleta(Posicao.GOL, 8.0)));
 
-            var resultado = rankingService.buscarRanking(Posicao.ATA, 25);
+            var resultado = rankingService.buscarRanking(Posicao.ATA, 25, false);
 
             assertThat(resultado.getAtletas()).isEmpty();
             assertThat(resultado.getTotalDisponivel()).isEqualTo(0);
@@ -193,9 +194,74 @@ class RankingServiceTest {
         void deveInformarSiglaDaPosicao() {
             configurarPool(List.of(atleta(Posicao.MEI, 8.0)));
 
-            var resultado = rankingService.buscarRanking(Posicao.MEI, 25);
+            var resultado = rankingService.buscarRanking(Posicao.MEI, 25, false);
 
             assertThat(resultado.getPosicao()).isEqualTo("MEI");
+        }
+    }
+
+    @Nested
+    @DisplayName("buscarRanking — filtro excluirDuvida")
+    class FiltroExcluirDuvida {
+
+        @Test
+        @DisplayName("deve remover atletas em duvida quando excluirDuvida=true")
+        void deveRemoverDuvidaQuandoTrue() {
+            configurarPool(List.of(
+                atleta(Posicao.ATA, 9.0),
+                atletaDuvida(Posicao.ATA, 8.0),
+                atleta(Posicao.MEI, 7.0)
+            ));
+
+            var resultado = rankingService.buscarRanking(null, 25, true);
+
+            assertThat(resultado.getAtletas()).hasSize(2);
+            assertThat(resultado.getAtletas()).noneMatch(AtletaRankingDto::isEmDuvida);
+            assertThat(resultado.getTotalDisponivel()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("deve manter atletas em duvida quando excluirDuvida=false")
+        void deveManterDuvidaQuandoFalse() {
+            configurarPool(List.of(
+                atleta(Posicao.ATA, 9.0),
+                atletaDuvida(Posicao.ATA, 8.0)
+            ));
+
+            var resultado = rankingService.buscarRanking(null, 25, false);
+
+            assertThat(resultado.getAtletas()).hasSize(2);
+            assertThat(resultado.getAtletas()).anyMatch(AtletaRankingDto::isEmDuvida);
+        }
+
+        @Test
+        @DisplayName("deve combinar excluirDuvida com filtro de posicao")
+        void deveCombinarComFiltroDePosicao() {
+            configurarPool(List.of(
+                atleta(Posicao.ATA, 9.0),
+                atletaDuvida(Posicao.ATA, 8.0),
+                atleta(Posicao.MEI, 7.0)
+            ));
+
+            var resultado = rankingService.buscarRanking(Posicao.ATA, 25, true);
+
+            assertThat(resultado.getAtletas()).hasSize(1);
+            assertThat(resultado.getAtletas().get(0).isEmDuvida()).isFalse();
+            assertThat(resultado.getAtletas().get(0).getPosicao()).isEqualTo("ATA");
+        }
+
+        @Test
+        @DisplayName("deve retornar lista vazia sem erro quando todos estao em duvida")
+        void deveRetornarVazioQuandoTodosEmDuvida() {
+            configurarPool(List.of(
+                atletaDuvida(Posicao.ATA, 9.0),
+                atletaDuvida(Posicao.ATA, 8.0)
+            ));
+
+            var resultado = rankingService.buscarRanking(Posicao.ATA, 25, true);
+
+            assertThat(resultado.getAtletas()).isEmpty();
+            assertThat(resultado.getTotalDisponivel()).isEqualTo(0);
         }
     }
 
@@ -209,7 +275,7 @@ class RankingServiceTest {
             statusPadrao.setRodadaAtual(22);
             configurarPool(List.of(atleta(Posicao.ATA, 8.0)));
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             assertThat(resultado.getRodada()).isEqualTo(22);
         }
@@ -226,7 +292,7 @@ class RankingServiceTest {
                     .build();
             configurarPool(List.of(atletaDuvida));
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             assertThat(resultado.getAtletas().get(0).isEmDuvida()).isTrue();
         }
@@ -236,7 +302,7 @@ class RankingServiceTest {
         void deveMarcareEmDuvidaFalso() {
             configurarPool(List.of(atleta(Posicao.ATA, 8.0)));
 
-            var resultado = rankingService.buscarRanking(null, 25);
+            var resultado = rankingService.buscarRanking(null, 25, false);
 
             assertThat(resultado.getAtletas().get(0).isEmDuvida()).isFalse();
         }
@@ -252,7 +318,7 @@ class RankingServiceTest {
                     .build();
             configurarPool(List.of(a));
 
-            var dto = rankingService.buscarRanking(null, 25).getAtletas().get(0);
+            var dto = rankingService.buscarRanking(null, 25, false).getAtletas().get(0);
 
             assertThat(dto.getApelido()).isEqualTo("Hulk");
             assertThat(dto.getSiglaClube()).isEqualTo("ATM");
@@ -270,7 +336,9 @@ class RankingServiceTest {
     private void configurarPool(List<Atleta> pool) {
         when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(pool);
         when(desempenhoService.calcularDesempenhoUltimasRodadas(anyInt())).thenReturn(java.util.Map.of());
-        when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(pool);
+        // Echo dos atletas recebidos para que filtros aplicados antes do score sejam observaveis.
+        when(scoreService.calcularScores(any(), any(), any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private Atleta atleta(Posicao posicao, double score) {
@@ -283,6 +351,24 @@ class RankingServiceTest {
                 .siglaClube("FLA")
                 .nomeClubeNorm("flamengo")
                 .status(StatusAtleta.PROVAVEL)
+                .mediaPontos(score)
+                .valorizacao(1.0)
+                .preco(15.0)
+                .desempenhoRecente(0.0)
+                .score(score)
+                .build();
+    }
+
+    private Atleta atletaDuvida(Posicao posicao, double score) {
+        return Atleta.builder()
+                .atletaId((int) score * 10 + 1)
+                .apelido(posicao.name() + "_DUVIDA_" + (int) score)
+                .posicao(posicao)
+                .clubeId(1)
+                .nomeClube("Flamengo")
+                .siglaClube("FLA")
+                .nomeClubeNorm("flamengo")
+                .status(StatusAtleta.DUVIDA)
                 .mediaPontos(score)
                 .valorizacao(1.0)
                 .preco(15.0)

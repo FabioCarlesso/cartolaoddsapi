@@ -17,10 +17,10 @@ public class RankingController implements RankingApi {
     private final RankingService rankingService;
 
     @Override
-    public ResponseEntity<RankingResponse> ranking(String posicao, int limite) {
-        log.info("GET /api/ranking | posicao={} | limite={}", posicao, limite);
+    public ResponseEntity<RankingResponse> ranking(String posicao, int limite, boolean excluirDuvida) {
+        log.info("GET /api/ranking | posicao={} | limite={} | excluirDuvida={}", posicao, limite, excluirDuvida);
         Posicao posicaoEnum = resolverPosicao(posicao);
-        return ResponseEntity.ok(rankingService.buscarRanking(posicaoEnum, limite));
+        return ResponseEntity.ok(rankingService.buscarRanking(posicaoEnum, limite, excluirDuvida));
     }
 
     private Posicao resolverPosicao(String posicao) {
