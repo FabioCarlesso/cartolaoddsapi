@@ -1,10 +1,15 @@
 package com.cartola.odds.controller;
 
 import com.cartola.odds.controller.api.TimeApi;
+import com.cartola.odds.model.FormacaoConfig;
 import com.cartola.odds.model.Time;
+import com.cartola.odds.model.response.CompararFormacoesResponse;
 import com.cartola.odds.model.response.TimeResponse;
 import com.cartola.odds.service.EscalacaoService;
 import com.cartola.odds.service.PipelineService;
+import com.cartola.odds.util.FormacaoParser;
+
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +30,16 @@ public class TimeController implements TimeApi {
         var time = pipelineService.executar(orcamento);
         registrarEscalacao(time);
         return ResponseEntity.ok(TimeResponse.from(time));
+    }
+
+    @Override
+    public ResponseEntity<CompararFormacoesResponse> compararFormacoes(String formacoes, Double orcamento) {
+        validarOrcamento(orcamento);
+        List<FormacaoConfig> formacoesValidadas = FormacaoParser.parseLista(formacoes);
+        log.info("GET /api/time/comparar - Comparando {} formacoes | orcamento={}",
+                formacoesValidadas.size(), orcamento);
+        var resultados = pipelineService.compararFormacoes(formacoesValidadas, orcamento);
+        return ResponseEntity.ok(CompararFormacoesResponse.from(resultados));
     }
 
     private void validarOrcamento(Double orcamento) {

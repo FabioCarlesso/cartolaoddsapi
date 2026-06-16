@@ -26,6 +26,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
 | 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o melhor time dentro do limite de cartoletas, priorizando custo-benefício (score/preço) |
 | 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
+| 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
 
 
 ---
@@ -184,6 +185,8 @@ odds.api.key=SUA_API_KEY_AQUI
 |---|---|---|
 | `GET` | `/api/time` | Monta o time completo para a rodada atual |
 | `GET` | `/api/time?orcamento=120.0` | Monta o time respeitando o orçamento em cartoletas (custo-benefício) |
+| `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3` | Compara o melhor time entre múltiplas formações (2 a 5) e ordena por `scoreTotal` |
+| `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3&orcamento=120.0` | Compara formações montando cada uma dentro do orçamento informado |
 | `GET` | `/api/favoritos` | Lista times favoritos com odds detalhadas |
 | `GET` | `/api/favoritos?oddLimite=2.5` | Favoritos com limite customizado |
 | `GET` | `/api/ranking` | Top 25 atletas por score |
@@ -393,6 +396,45 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
 
 > `orcamento` deve ser **maior que 0** — valores `<= 0` retornam `400 Bad Request`.
 
+### Comparação de formações
+
+`GET /api/time/comparar` monta o melhor time para **cada formação informada** usando o mesmo pool de atletas da rodada e retorna um comparativo ordenado por `scoreTotal`. É uma **consulta pontual**: a formação configurada no banco **não é alterada**.
+
+- Parâmetro **obrigatório** `formacoes`: lista separada por vírgula no formato `zag-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`).
+- A soma das posições de linha de cada formação (`zag + mei + ata`) deve ser **10**. As posições fixas (`GOL=1`, `LAT=2`, `TEC=1`) vêm da configuração e não variam.
+- Mínimo de **2** e máximo de **5** formações **distintas**; duplicatas são ignoradas silenciosamente.
+- Parâmetro **opcional** `orcamento`: aplica o limite de cartoletas a cada formação (custo-benefício), igual ao `GET /api/time`.
+- `scoreTotal` soma **apenas os titulares**, para uma comparação justa entre formações com número diferente de atletas por posição.
+- As mesmas regras de montagem valem para cada formação: limite por clube, defesa sem clube repetido e dúvidas com substituto.
+
+| Situação | Resposta |
+|---|---|
+| Menos de 2 formações distintas | `400 Bad Request` |
+| Mais de 5 formações distintas | `400 Bad Request` |
+| Formação com soma de linhas `!= 10` (ex: `4-3-2`) | `400 Bad Request` com mensagem explicativa |
+| Parâmetro `formacoes` ausente | `400 Bad Request` |
+| `orcamento <= 0` | `400 Bad Request` |
+| Nenhum atleta disponível na rodada | `422 Unprocessable Entity` |
+
+#### Exemplo — `GET /api/time/comparar?formacoes=4-3-3,3-4-3,4-4-2`
+
+```json
+{
+  "rodada": 15,
+  "formacoesComparadas": 3,
+  "melhorFormacao": "4-3-3",
+  "resultados": [
+    { "formacao": "4-3-3", "scoreTotal": 94.3, "custoTotal": 138.5, "capitao": "Hulk (ATM)", "posicao": 1, "time": { } },
+    { "formacao": "3-4-3", "scoreTotal": 91.7, "custoTotal": 132.1, "capitao": "Arrascaeta (FLA)", "posicao": 2, "time": { } },
+    { "formacao": "4-4-2", "scoreTotal": 89.2, "custoTotal": 129.8, "capitao": "Hulk (ATM)", "posicao": 3, "time": { } }
+  ]
+}
+```
+
+- `resultados` ordenados por `scoreTotal` decrescente; `posicao` indica o ranking entre as formações comparadas.
+- `melhorFormacao` aponta para o primeiro da lista (maior `scoreTotal`).
+- Cada `time` traz a estrutura completa do `GET /api/time` (titulares, reservas, capitão, etc.).
+
 ### Aviso de mercado
 
 Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMercado` preenchido:
@@ -555,7 +597,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 23 classes de teste — 371 cenários
+        ├── java/                            # 24 classes de teste — 407 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -627,9 +669,9 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
-| `MontadorTimeServiceTest` | 31 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício, formação incompleta |
+| `MontadorTimeServiceTest` | 36 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício, formação incompleta, override de formação |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
-| `PipelineServiceTest` | 9 — inclui etapa DesempenhoService e propagação de orçamento |
+| `PipelineServiceTest` | 12 — inclui etapa DesempenhoService, propagação de orçamento e comparação de formações |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
@@ -638,7 +680,8 @@ mvn test jacoco:report
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 15 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso e validação |
+| `TimeControllerTest` | 23 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso, validação e comparação de formações |
+| `FormacaoParserTest` | 14 — parsing e validação de formação única e lista (soma, mínimo/máximo, duplicatas) |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
