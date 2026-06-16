@@ -29,16 +29,18 @@ public class CompararFormacoesResponse {
     private final List<ResultadoDto> resultados;
 
     public static CompararFormacoesResponse from(List<ResultadoFormacao> resultados) {
-        List<ResultadoFormacao> ordenados = resultados.stream()
-                .sorted(Comparator.comparingDouble(
-                        (ResultadoFormacao r) -> scoreTotalTitulares(r.time())).reversed())
+        // Calcula o scoreTotal uma unica vez por resultado antes de ordenar,
+        // evitando recomputacao a cada comparacao do sort.
+        List<ResultadoComScore> comScore = resultados.stream()
+                .map(r -> new ResultadoComScore(r, scoreTotalTitulares(r.time())))
+                .sorted(Comparator.comparingDouble(ResultadoComScore::scoreTotal).reversed())
                 .toList();
 
-        List<ResultadoDto> dtos = IntStream.range(0, ordenados.size())
-                .mapToObj(i -> ResultadoDto.from(ordenados.get(i), i + 1))
+        List<ResultadoDto> dtos = IntStream.range(0, comScore.size())
+                .mapToObj(i -> ResultadoDto.from(comScore.get(i), i + 1))
                 .toList();
 
-        int rodada = ordenados.isEmpty() ? 0 : ordenados.get(0).time().getRodada();
+        int rodada = comScore.isEmpty() ? 0 : comScore.get(0).resultado().time().getRodada();
         String melhor = dtos.isEmpty() ? null : dtos.get(0).getFormacao();
 
         return CompararFormacoesResponse.builder()
@@ -47,6 +49,10 @@ public class CompararFormacoesResponse {
                 .melhorFormacao(melhor)
                 .resultados(dtos)
                 .build();
+    }
+
+    /** Resultado emparelhado com seu scoreTotal ja calculado, para ordenacao sem recomputacao. */
+    private record ResultadoComScore(ResultadoFormacao resultado, double scoreTotal) {
     }
 
     /** Soma o score apenas dos titulares, para comparacao justa entre formacoes. */
@@ -83,17 +89,29 @@ public class CompararFormacoesResponse {
                 example = "1")
         private final int posicao;
 
+        @Schema(description = "Indica se todos os slots desta formacao foram preenchidos. "
+                            + "false quando o pool (ou o orcamento) nao permitiu completar a formacao.",
+                example = "true")
+        private final boolean formacaoCompleta;
+
+        @Schema(description = "Aviso quando o orcamento informado nao foi suficiente para completar "
+                            + "esta formacao. Null quando completa ou sem orcamento informado.",
+                nullable = true)
+        private final String avisoOrcamento;
+
         @Schema(description = "Time completo montado para esta formacao")
         private final TimeResponse time;
 
-        static ResultadoDto from(ResultadoFormacao resultado, int posicao) {
-            Time time = resultado.time();
+        static ResultadoDto from(ResultadoComScore comScore, int posicao) {
+            Time time = comScore.resultado().time();
             return ResultadoDto.builder()
-                    .formacao(resultado.formacao().label())
-                    .scoreTotal(arredondar(scoreTotalTitulares(time)))
+                    .formacao(comScore.resultado().formacao().label())
+                    .scoreTotal(arredondar(comScore.scoreTotal()))
                     .custoTotal(arredondar(time.getCustoTotal()))
                     .capitao(time.getCapitao() != null ? time.getCapitao().formatado() : null)
                     .posicao(posicao)
+                    .formacaoCompleta(time.isFormacaoCompleta())
+                    .avisoOrcamento(time.getAvisoOrcamento())
                     .time(TimeResponse.from(time))
                     .build();
         }

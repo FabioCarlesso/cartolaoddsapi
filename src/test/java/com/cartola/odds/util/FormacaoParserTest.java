@@ -53,6 +53,22 @@ class FormacaoParserTest {
         }
 
         @Test
+        @DisplayName("deve rejeitar formacao com traco final (token vazio)")
+        void deveRejeitarTracoFinal() {
+            assertThatThrownBy(() -> FormacaoParser.parse("4-3-3-"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("zag-mei-ata");
+        }
+
+        @Test
+        @DisplayName("deve rejeitar formacao com posicao zerada")
+        void deveRejeitarPosicaoZerada() {
+            assertThatThrownBy(() -> FormacaoParser.parse("10-0-0"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("ao menos 1");
+        }
+
+        @Test
         @DisplayName("deve rejeitar formacao com valor nao numerico")
         void deveRejeitarValorNaoNumerico() {
             assertThatThrownBy(() -> FormacaoParser.parse("4-x-3"))

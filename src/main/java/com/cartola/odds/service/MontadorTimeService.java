@@ -297,7 +297,7 @@ public class MontadorTimeService {
             for (Atleta candidato : candidatos) {
                 if (escolhidos.size() == quantidade) break;
                 if (!apelidosEscolhidos.add(candidato.getApelido())) continue;
-                if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao, formacao)) {
+                if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
                     continue;
                 }
                 escolhidos.add(candidato);
@@ -339,7 +339,7 @@ public class MontadorTimeService {
             if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
                 continue;
             }
-            if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao, formacao)) {
+            if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
                 continue;
             }
             escolhidos.add(candidato);
@@ -361,7 +361,7 @@ public class MontadorTimeService {
             return false;
         }
 
-        if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao, formacao)) {
+        if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
             return false;
         }
 
@@ -380,7 +380,6 @@ public class MontadorTimeService {
                                            Posicao posicao,
                                            List<Atleta> escolhidos,
                                            int quantidade,
-                                           Configuracao config,
                                            double[] budgetRestante,
                                            Map<Posicao, List<Atleta>> candidatosPorPosicao,
                                            Map<String, Integer> formacao) {

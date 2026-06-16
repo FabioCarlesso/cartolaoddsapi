@@ -35,7 +35,9 @@ public final class FormacaoParser {
             throw new IllegalArgumentException("Formacao nao pode ser vazia.");
         }
 
-        String[] partes = formacao.trim().split("-");
+        // Limite -1 preserva tokens vazios (inclusive finais), rejeitando entradas
+        // como "4-3-3-" ou "4--3" que o split padrao mascararia.
+        String[] partes = formacao.trim().split("-", -1);
         if (partes.length != 3) {
             throw new IllegalArgumentException(
                     "Formacao invalida: '" + formacao.trim()
@@ -47,6 +49,11 @@ public final class FormacaoParser {
         int ata = parseNumero(partes[2], formacao);
 
         FormacaoConfig config = new FormacaoConfig(zag, mei, ata);
+        if (zag < 1 || mei < 1 || ata < 1) {
+            throw new IllegalArgumentException(
+                    "Formacao invalida: '" + formacao.trim() + "'. Cada posicao de linha "
+                            + "(zag, mei, ata) deve ter ao menos 1 jogador.");
+        }
         if (config.totalLinhas() != TOTAL_LINHAS) {
             throw new IllegalArgumentException(
                     "Formacao invalida: '" + formacao.trim() + "'. A soma das posicoes de linha "

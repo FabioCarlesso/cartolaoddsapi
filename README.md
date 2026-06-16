@@ -412,6 +412,7 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
 | Menos de 2 formações distintas | `400 Bad Request` |
 | Mais de 5 formações distintas | `400 Bad Request` |
 | Formação com soma de linhas `!= 10` (ex: `4-3-2`) | `400 Bad Request` com mensagem explicativa |
+| Formação com posição zerada ou formato inválido (ex: `10-0-0`, `4-3-3-`) | `400 Bad Request` |
 | Parâmetro `formacoes` ausente | `400 Bad Request` |
 | `orcamento <= 0` | `400 Bad Request` |
 | Nenhum atleta disponível na rodada | `422 Unprocessable Entity` |
@@ -424,15 +425,16 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
   "formacoesComparadas": 3,
   "melhorFormacao": "4-3-3",
   "resultados": [
-    { "formacao": "4-3-3", "scoreTotal": 94.3, "custoTotal": 138.5, "capitao": "Hulk (ATM)", "posicao": 1, "time": { } },
-    { "formacao": "3-4-3", "scoreTotal": 91.7, "custoTotal": 132.1, "capitao": "Arrascaeta (FLA)", "posicao": 2, "time": { } },
-    { "formacao": "4-4-2", "scoreTotal": 89.2, "custoTotal": 129.8, "capitao": "Hulk (ATM)", "posicao": 3, "time": { } }
+    { "formacao": "4-3-3", "scoreTotal": 94.3, "custoTotal": 138.5, "capitao": "Hulk (ATM)", "posicao": 1, "formacaoCompleta": true, "time": { } },
+    { "formacao": "3-4-3", "scoreTotal": 91.7, "custoTotal": 132.1, "capitao": "Arrascaeta (FLA)", "posicao": 2, "formacaoCompleta": true, "time": { } },
+    { "formacao": "4-4-2", "scoreTotal": 89.2, "custoTotal": 129.8, "capitao": "Hulk (ATM)", "posicao": 3, "formacaoCompleta": true, "time": { } }
   ]
 }
 ```
 
 - `resultados` ordenados por `scoreTotal` decrescente; `posicao` indica o ranking entre as formações comparadas.
 - `melhorFormacao` aponta para o primeiro da lista (maior `scoreTotal`).
+- `formacaoCompleta` sinaliza, por resultado, se a formação pôde ser totalmente preenchida; quando há `orcamento` insuficiente, `avisoOrcamento` também é preenchido naquele resultado.
 - Cada `time` traz a estrutura completa do `GET /api/time` (titulares, reservas, capitão, etc.).
 
 ### Aviso de mercado
@@ -597,7 +599,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 24 classes de teste — 407 cenários
+        ├── java/                            # 24 classes de teste — 410 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -680,8 +682,8 @@ mvn test jacoco:report
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 23 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso, validação e comparação de formações |
-| `FormacaoParserTest` | 14 — parsing e validação de formação única e lista (soma, mínimo/máximo, duplicatas) |
+| `TimeControllerTest` | 24 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso, validação e comparação de formações |
+| `FormacaoParserTest` | 16 — parsing e validação de formação única e lista (soma, mínimo/máximo, duplicatas) |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |

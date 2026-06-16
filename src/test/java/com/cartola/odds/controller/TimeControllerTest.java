@@ -347,6 +347,20 @@ class TimeControllerTest {
         }
 
         @Test
+        @DisplayName("deve expor formacaoCompleta em cada resultado")
+        void deveExporFormacaoCompleta() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), isNull()))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3,3-4-3"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.resultados[0].formacaoCompleta").value(true))
+                    .andExpect(jsonPath("$.resultados[1].formacaoCompleta").value(true));
+        }
+
+        @Test
         @DisplayName("nao deve persistir escalacao ao comparar formacoes")
         void naoDevePersistirEscalacao() throws Exception {
             when(pipelineService.compararFormacoes(anyList(), isNull()))
