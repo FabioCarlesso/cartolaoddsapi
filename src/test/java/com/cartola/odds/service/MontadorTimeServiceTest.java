@@ -2,6 +2,7 @@ package com.cartola.odds.service;
 
 import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Configuracao;
+import com.cartola.odds.model.FormacaoConfig;
 import com.cartola.odds.model.enums.Estrategia;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
@@ -569,6 +570,70 @@ class MontadorTimeServiceTest {
             // orcamento=300 deve permitir a formacao completa apesar do budgetMaximo=1.0
             assertThat(time.getTitulares().values().stream().mapToLong(List::size).sum())
                     .isEqualTo(12L);
+        }
+    }
+
+    @Nested
+    @DisplayName("override de formacao")
+    class OverrideFormacao {
+
+        @Test
+        @DisplayName("deve montar 3 ZAG, 4 MEI e 3 ATA quando override e 3-4-3")
+        void deveMontarFormacao343() {
+            var time = service.montar(criarPool(), 1, null, null, new FormacaoConfig(3, 4, 3));
+
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(4);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("deve montar 4 ZAG, 4 MEI e 2 ATA quando override e 4-4-2")
+        void deveMontarFormacao442() {
+            var time = service.montar(criarPool(), 1, null, null, new FormacaoConfig(4, 4, 2));
+
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(4);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(4);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(2);
+        }
+
+        @Test
+        @DisplayName("nao deve alterar a formacao da configuracao apos a montagem com override")
+        void naoDeveAlterarConfiguracao() {
+            service.montar(criarPool(), 1, null, null, new FormacaoConfig(3, 4, 3));
+
+            assertThat(config.getFormacaoZag()).isEqualTo(2);
+            assertThat(config.getFormacaoMei()).isEqualTo(3);
+            assertThat(config.getFormacaoAta()).isEqualTo(3);
+        }
+
+        @Test
+        @DisplayName("deve respeitar o limite por clube mesmo com override de formacao")
+        void deveRespeitarLimitePorClubeComOverride() {
+            var time = service.montar(poolComMuitosAtletasMesmoClube(), 1, null, null,
+                    new FormacaoConfig(4, 4, 2));
+
+            var maiorQtdPorClube = time.getTitulares().values().stream()
+                    .flatMap(List::stream)
+                    .collect(Collectors.groupingBy(Atleta::getClubeId, Collectors.counting()))
+                    .values().stream()
+                    .max(Long::compareTo)
+                    .orElse(0L);
+
+            assertThat(maiorQtdPorClube).isLessThanOrEqualTo(4L);
+        }
+
+        @Test
+        @DisplayName("override null mantem a formacao padrao da configuracao")
+        void overrideNullMantemPadrao() {
+            var time = service.montar(criarPool(), 1, null, null, null);
+
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(3);
         }
     }
 

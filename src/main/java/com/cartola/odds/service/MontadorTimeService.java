@@ -2,6 +2,7 @@ package com.cartola.odds.service;
 
 import com.cartola.odds.model.Atleta;
 import com.cartola.odds.model.Configuracao;
+import com.cartola.odds.model.FormacaoConfig;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Estrategia;
 import com.cartola.odds.model.enums.Posicao;
@@ -15,6 +16,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -36,11 +38,25 @@ public class MontadorTimeService {
     private final ConfiguracaoService configuracaoService;
 
     public Time montar(List<Atleta> pool, int rodada, String avisoMercado) {
-        return montar(pool, rodada, avisoMercado, null);
+        return montar(pool, rodada, avisoMercado, null, null);
     }
 
     public Time montar(List<Atleta> pool, int rodada, String avisoMercado, Double orcamento) {
+        return montar(pool, rodada, avisoMercado, orcamento, null);
+    }
+
+    /**
+     * Monta o time podendo sobrescrever a formacao da configuracao apenas para
+     * esta execucao. Quando {@code formacaoOverride} e {@code null}, usa a
+     * formacao persistida na configuracao; caso contrario, mantem as posicoes
+     * fixas (GOL/LAT/TEC) da config e aplica ZAG/MEI/ATA do override.
+     *
+     * @param formacaoOverride formacao a aplicar nesta execucao (nao altera a config persistida)
+     */
+    public Time montar(List<Atleta> pool, int rodada, String avisoMercado, Double orcamento,
+                       FormacaoConfig formacaoOverride) {
         Configuracao config = configuracaoService.buscarConfig();
+        Map<String, Integer> formacao = resolverFormacao(config, formacaoOverride);
 
         // Quando um orcamento e informado, prioriza custo-beneficio (score/preco);
         // caso contrario mantem a ordenacao por score puro.
@@ -71,7 +87,7 @@ public class MontadorTimeService {
                 : (config.getBudgetMaximo() > 0 ? config.getBudgetMaximo() : Double.MAX_VALUE);
         double[] budgetRestante = { budgetEfetivo };
 
-        for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
+        for (Map.Entry<String, Integer> slot : formacao.entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
             if (posicao == null) {
                 log.warn("Posicao desconhecida na formacao: {}", slot.getKey());
@@ -88,7 +104,7 @@ public class MontadorTimeService {
 
             List<Atleta> escolhidos = escolherTitulares(
                     candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
-                    budgetRestante, candidatosPorPosicao
+                    budgetRestante, candidatosPorPosicao, formacao
             );
             titulares.put(posicao, escolhidos);
             log.debug("Titulares {}: {}", posicao,
@@ -186,7 +202,7 @@ public class MontadorTimeService {
 
         Double saldoRestante = orcamento != null ? orcamento - custoTotal : null;
 
-        int totalEsperado = config.getFormacaoAsMap().values().stream()
+        int totalEsperado = formacao.values().stream()
                 .mapToInt(Integer::intValue)
                 .sum();
         int totalEscalado = (int) titularesEnriquecidos.values().stream()
@@ -224,6 +240,26 @@ public class MontadorTimeService {
         return atleta.getPreco() > 0 ? atleta.getScore() / atleta.getPreco() : atleta.getScore();
     }
 
+    /**
+     * Resolve a formacao usada na montagem. Sem override, usa a formacao da
+     * configuracao. Com override, mantem as posicoes fixas da config
+     * (GOL/LAT/TEC) e aplica ZAG/MEI/ATA do override, preservando a ordem
+     * (GOL, LAT, ZAG, MEI, ATA, TEC) exigida pelo calculo de custo minimo.
+     */
+    private Map<String, Integer> resolverFormacao(Configuracao config, FormacaoConfig override) {
+        if (override == null) {
+            return config.getFormacaoAsMap();
+        }
+        Map<String, Integer> formacao = new LinkedHashMap<>();
+        formacao.put("GOL", config.getFormacaoGol());
+        formacao.put("LAT", config.getFormacaoLat());
+        formacao.put("ZAG", override.zagueiros());
+        formacao.put("MEI", override.meias());
+        formacao.put("ATA", override.atacantes());
+        formacao.put("TEC", config.getFormacaoTec());
+        return formacao;
+    }
+
     private List<Atleta> escolherTitulares(List<Atleta> candidatos,
                                            int quantidade,
                                            Posicao posicao,
@@ -231,14 +267,15 @@ public class MontadorTimeService {
                                            Set<Integer> clubesDefesaEscalados,
                                            Map<Integer, Integer> contagemClubesTitulares,
                                            double[] budgetRestante,
-                                           Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+                                           Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                           Map<String, Integer> formacao) {
         List<Atleta> escolhidos = new ArrayList<>();
         for (Atleta candidato : candidatos) {
             if (escolhidos.size() == quantidade) {
                 break;
             }
             if (podeEscalar(candidato, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
-                    budgetRestante, escolhidos, quantidade, candidatosPorPosicao)) {
+                    budgetRestante, escolhidos, quantidade, candidatosPorPosicao, formacao)) {
                 escolhidos.add(candidato);
                 registrarEscalacao(candidato, posicao, config.isEvitarMesmoClubeDefesa(), clubesDefesaEscalados, contagemClubesTitulares, budgetRestante);
             }
@@ -247,7 +284,7 @@ public class MontadorTimeService {
         if (escolhidos.size() < quantidade) {
             completarMantendoLimitePorClube(
                     candidatos, quantidade, posicao, escolhidos, config, contagemClubesTitulares,
-                    clubesDefesaEscalados, budgetRestante, candidatosPorPosicao
+                    clubesDefesaEscalados, budgetRestante, candidatosPorPosicao, formacao
             );
         }
 
@@ -260,7 +297,7 @@ public class MontadorTimeService {
             for (Atleta candidato : candidatos) {
                 if (escolhidos.size() == quantidade) break;
                 if (!apelidosEscolhidos.add(candidato.getApelido())) continue;
-                if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
+                if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
                     continue;
                 }
                 escolhidos.add(candidato);
@@ -279,7 +316,8 @@ public class MontadorTimeService {
                                                   Map<Integer, Integer> contagemClubesTitulares,
                                                   Set<Integer> clubesDefesaEscalados,
                                                   double[] budgetRestante,
-                                                  Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+                                                  Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                                  Map<String, Integer> formacao) {
         if (escolhidos.size() >= quantidade) {
             return;
         }
@@ -301,7 +339,7 @@ public class MontadorTimeService {
             if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
                 continue;
             }
-            if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
+            if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
                 continue;
             }
             escolhidos.add(candidato);
@@ -317,12 +355,13 @@ public class MontadorTimeService {
                                 double[] budgetRestante,
                                 List<Atleta> escolhidos,
                                 int quantidade,
-                                Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+                                Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                Map<String, Integer> formacao) {
         if (atingiuLimitePorClube(candidato.getClubeId(), config.getLimiteAtletasPorClube(), contagemClubesTitulares)) {
             return false;
         }
 
-        if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, config, budgetRestante, candidatosPorPosicao)) {
+        if (!cabeNoBudgetComReserva(candidato, posicao, escolhidos, quantidade, budgetRestante, candidatosPorPosicao, formacao)) {
             return false;
         }
 
@@ -341,15 +380,15 @@ public class MontadorTimeService {
                                            Posicao posicao,
                                            List<Atleta> escolhidos,
                                            int quantidade,
-                                           Configuracao config,
                                            double[] budgetRestante,
-                                           Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+                                           Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                           Map<String, Integer> formacao) {
         if (candidato.getPreco() > budgetRestante[0]) {
             return false;
         }
 
         double custoMinimoRestante = calcularCustoMinimoRestante(
-                candidato, posicao, escolhidos, quantidade, config, candidatosPorPosicao);
+                candidato, posicao, escolhidos, quantidade, candidatosPorPosicao, formacao);
         return candidato.getPreco() + custoMinimoRestante <= budgetRestante[0] + 0.000001;
     }
 
@@ -357,12 +396,12 @@ public class MontadorTimeService {
                                                Posicao posicaoAtual,
                                                List<Atleta> escolhidos,
                                                int quantidadeAtual,
-                                               Configuracao config,
-                                               Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+                                               Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                               Map<String, Integer> formacao) {
         double custoMinimo = 0.0;
         boolean posicaoAtualEncontrada = false;
 
-        for (Map.Entry<String, Integer> slot : config.getFormacaoAsMap().entrySet()) {
+        for (Map.Entry<String, Integer> slot : formacao.entrySet()) {
             Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
             if (posicao == null) {
                 continue;

@@ -186,6 +186,82 @@ class PipelineServiceTest {
         }
     }
 
+    @Nested
+    @DisplayName("compararFormacoes")
+    class CompararFormacoes {
+
+        @Test
+        @DisplayName("deve montar um time por formacao reaproveitando o mesmo pool")
+        void deveMontarUmTimePorFormacao() {
+            var atletas = atletasMinimos();
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(Map.of());
+            when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
+            when(montadorTimeService.montar(any(), eq(15), any(), isNull(), any()))
+                    .thenReturn(timeMock(15));
+
+            var formacoes = List.of(
+                    new com.cartola.odds.model.FormacaoConfig(4, 3, 3),
+                    new com.cartola.odds.model.FormacaoConfig(3, 4, 3));
+
+            var resultados = pipelineService.compararFormacoes(formacoes, null);
+
+            assertThat(resultados).hasSize(2);
+            assertThat(resultados).extracting(r -> r.formacao()).containsExactlyElementsOf(formacoes);
+
+            // O pool e preparado uma unica vez, independente da quantidade de formacoes
+            verify(cartolaDataService, times(1)).buscarStatusMercado();
+            verify(scoreService, times(1)).calcularScores(any(), any(), any(), any());
+            verify(montadorTimeService, times(1))
+                    .montar(any(), eq(15), any(), isNull(), eq(new com.cartola.odds.model.FormacaoConfig(4, 3, 3)));
+            verify(montadorTimeService, times(1))
+                    .montar(any(), eq(15), any(), isNull(), eq(new com.cartola.odds.model.FormacaoConfig(3, 4, 3)));
+        }
+
+        @Test
+        @DisplayName("deve propagar o orcamento a cada montagem de formacao")
+        void devePropagarOrcamento() {
+            var atletas = atletasMinimos();
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(Map.of());
+            when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
+            when(montadorTimeService.montar(any(), eq(15), any(), eq(120.0), any()))
+                    .thenReturn(timeMock(15));
+
+            pipelineService.compararFormacoes(List.of(
+                    new com.cartola.odds.model.FormacaoConfig(4, 3, 3),
+                    new com.cartola.odds.model.FormacaoConfig(3, 4, 3)), 120.0);
+
+            verify(montadorTimeService, times(2)).montar(any(), eq(15), any(), eq(120.0), any());
+        }
+
+        @Test
+        @DisplayName("deve lancar IllegalStateException quando o pool estiver vazio")
+        void deveLancarExcecaoQuandoPoolVazio() {
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(List.of());
+
+            assertThatThrownBy(() -> pipelineService.compararFormacoes(
+                    List.of(new com.cartola.odds.model.FormacaoConfig(4, 3, 3),
+                            new com.cartola.odds.model.FormacaoConfig(3, 4, 3)), null))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("Nenhum atleta disponivel");
+
+            verify(montadorTimeService, never()).montar(any(), anyInt(), any(), any(), any());
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private DesempenhoService.DesempenhoAtleta desemp(double media) {

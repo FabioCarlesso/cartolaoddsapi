@@ -1,5 +1,6 @@
 package com.cartola.odds.controller.api;
 
+import com.cartola.odds.model.response.CompararFormacoesResponse;
 import com.cartola.odds.model.response.ErrorResponse;
 import com.cartola.odds.model.response.TimeResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -69,6 +70,62 @@ public interface TimeApi {
 
         @Parameter(description = "Orcamento maximo em cartoletas (C$). Quando informado, o time "
                               + "respeita esse limite priorizando custo-beneficio. Deve ser > 0.",
+                   example = "120.0")
+        @RequestParam(required = false) Double orcamento
+    );
+
+    @GetMapping("/comparar")
+    @Operation(
+        summary     = "Comparar o melhor time entre multiplas formacoes",
+        description = """
+            Monta o melhor time para cada formacao informada usando o mesmo pool de
+            atletas da rodada atual e retorna um comparativo ordenado por scoreTotal.
+
+            Util para descobrir qual formacao extrai mais pontos dos atletas
+            disponiveis antes de escalar. **Nao altera** a configuracao persistida.
+
+            **Parametro `formacoes`** *(obrigatorio)*:
+            - Lista separada por virgula, no formato `zag-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`)
+            - A soma das posicoes de linha de cada formacao deve ser 10
+            - Minimo de 2 e maximo de 5 formacoes distintas
+            - Formacoes duplicadas sao ignoradas silenciosamente
+            - Formacoes validas: `4-3-3`, `3-4-3`, `4-4-2`, `5-3-2`, `4-5-1`
+            - Formacoes invalidas (soma != 10): `4-3-2`, `4-4-1`
+
+            **Parametro `orcamento`** *(opcional)*:
+            - Quando informado, cada formacao e montada respeitando o limite de
+              cartoletas (estrategia custo-beneficio). Deve ser > 0.
+
+            **Resposta:**
+            - `resultados` ordenados por `scoreTotal` decrescente, com campo `posicao` (ranking)
+            - `melhorFormacao` aponta para a formacao de maior `scoreTotal`
+            - `scoreTotal` soma apenas os titulares, para comparacao justa
+            - As mesmas regras de montagem se aplicam a cada formacao (limite por
+              clube, defesa sem clube repetido, dúvidas com reserva)
+            """
+    )
+    @ApiResponses({
+        @ApiResponse(responseCode = "200", description = "Comparativo montado com sucesso",
+            content = @Content(schema = @Schema(implementation = CompararFormacoesResponse.class))),
+        @ApiResponse(responseCode = "400",
+            description = "Parametro invalido (menos de 2 formacoes, mais de 5, formacao com soma != 10 ou orcamento <= 0)",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "422", description = "Nenhum atleta disponivel apos filtragem",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "502", description = "Erro de comunicacao com API externa",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "500", description = "Erro interno inesperado",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
+    })
+    ResponseEntity<CompararFormacoesResponse> compararFormacoes(
+
+        @Parameter(description = "Formacoes a comparar (zag-mei-ata), separadas por virgula. "
+                              + "Soma de cada formacao deve ser 10. Minimo 2, maximo 5 distintas.",
+                   example = "4-3-3,3-4-3,4-4-2", required = true)
+        @RequestParam(required = false) String formacoes,
+
+        @Parameter(description = "Orcamento maximo em cartoletas (C$) aplicado a cada formacao. "
+                              + "Quando informado, deve ser > 0.",
                    example = "120.0")
         @RequestParam(required = false) Double orcamento
     );

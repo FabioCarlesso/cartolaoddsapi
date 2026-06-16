@@ -1,6 +1,8 @@
 package com.cartola.odds.controller;
 
 import com.cartola.odds.model.Atleta;
+import com.cartola.odds.model.FormacaoConfig;
+import com.cartola.odds.model.ResultadoFormacao;
 import com.cartola.odds.model.Time;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
@@ -9,6 +11,7 @@ import com.cartola.odds.service.PipelineService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -18,8 +21,10 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
@@ -233,6 +238,157 @@ class TimeControllerTest {
 
             verify(pipelineService, never()).executar(any());
         }
+    }
+
+    @Nested
+    @DisplayName("GET /api/time/comparar")
+    class CompararFormacoes {
+
+        @Test
+        @DisplayName("deve retornar 200 com resultados ordenados por scoreTotal e melhorFormacao")
+        void deveRetornar200ComResultadosOrdenados() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), isNull()))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3,3-4-3"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.rodada").value(15))
+                    .andExpect(jsonPath("$.formacoesComparadas").value(2))
+                    .andExpect(jsonPath("$.melhorFormacao").value("3-4-3"))
+                    .andExpect(jsonPath("$.resultados[0].formacao").value("3-4-3"))
+                    .andExpect(jsonPath("$.resultados[0].posicao").value(1))
+                    .andExpect(jsonPath("$.resultados[0].scoreTotal").value(95.0))
+                    .andExpect(jsonPath("$.resultados[0].time").exists())
+                    .andExpect(jsonPath("$.resultados[1].formacao").value("4-3-3"))
+                    .andExpect(jsonPath("$.resultados[1].posicao").value(2));
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando apenas 1 formacao e informada")
+        void deveRetornar400ComUmaFormacao() throws Exception {
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("ao menos 2")));
+
+            verify(pipelineService, never()).compararFormacoes(any(), any());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando uma formacao tem soma de linhas invalida")
+        void deveRetornar400ComFormacaoInvalida() throws Exception {
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-2,3-4-3"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("4-3-2")));
+
+            verify(pipelineService, never()).compararFormacoes(any(), any());
+        }
+
+        @Test
+        @DisplayName("deve ignorar formacoes duplicadas e comparar apenas as distintas")
+        @SuppressWarnings("unchecked")
+        void deveIgnorarDuplicadas() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), isNull()))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3,4-3-3,3-4-3"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.formacoesComparadas").value(2));
+
+            ArgumentCaptor<List<FormacaoConfig>> captor = ArgumentCaptor.forClass(List.class);
+            verify(pipelineService).compararFormacoes(captor.capture(), isNull());
+            assertThat(captor.getValue()).containsExactly(
+                    new FormacaoConfig(4, 3, 3),
+                    new FormacaoConfig(3, 4, 3));
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando o parametro formacoes nao e informado")
+        void deveRetornar400SemParametro() throws Exception {
+            mockMvc.perform(get("/api/time/comparar"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("obrigatorio")));
+
+            verify(pipelineService, never()).compararFormacoes(any(), any());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando orcamento for menor ou igual a zero")
+        void deveRetornar400ComOrcamentoInvalido() throws Exception {
+            mockMvc.perform(get("/api/time/comparar")
+                            .param("formacoes", "4-3-3,3-4-3")
+                            .param("orcamento", "0"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.mensagem").value(containsString("orcamento")));
+
+            verify(pipelineService, never()).compararFormacoes(any(), any());
+        }
+
+        @Test
+        @DisplayName("deve propagar orcamento para o pipeline quando informado")
+        void devePropagarOrcamento() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), eq(120.0)))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar")
+                            .param("formacoes", "4-3-3,3-4-3")
+                            .param("orcamento", "120.0"))
+                    .andExpect(status().isOk());
+
+            verify(pipelineService).compararFormacoes(anyList(), eq(120.0));
+        }
+
+        @Test
+        @DisplayName("deve expor formacaoCompleta em cada resultado")
+        void deveExporFormacaoCompleta() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), isNull()))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3,3-4-3"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.resultados[0].formacaoCompleta").value(true))
+                    .andExpect(jsonPath("$.resultados[1].formacaoCompleta").value(true));
+        }
+
+        @Test
+        @DisplayName("nao deve persistir escalacao ao comparar formacoes")
+        void naoDevePersistirEscalacao() throws Exception {
+            when(pipelineService.compararFormacoes(anyList(), isNull()))
+                    .thenReturn(List.of(
+                            resultadoMock(new FormacaoConfig(4, 3, 3), 90.0),
+                            resultadoMock(new FormacaoConfig(3, 4, 3), 95.0)));
+
+            mockMvc.perform(get("/api/time/comparar").param("formacoes", "4-3-3,3-4-3"))
+                    .andExpect(status().isOk());
+
+            verify(escalacaoService, never()).salvarEscalacao(any(), any());
+        }
+    }
+
+    private ResultadoFormacao resultadoMock(FormacaoConfig formacao, double scoreCapitao) {
+        var capitao = Atleta.builder()
+                .atletaId(1).apelido("Hulk").posicao(Posicao.ATA)
+                .clubeId(1).nomeClube("Atletico Mineiro").siglaClube("ATM").nomeClubeNorm("atm")
+                .status(StatusAtleta.PROVAVEL).mediaPontos(9.5).valorizacao(3.2)
+                .preco(22.0).desempenhoRecente(0.0).score(scoreCapitao).build();
+        Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
+        titulares.put(Posicao.ATA, List.of(capitao));
+        var time = Time.builder().rodada(15).avisoMercado(null)
+                .titulares(titulares).reservas(Map.of()).capitao(capitao)
+                .reservaLuxo(null).alertasDuvida(List.of()).custoTotal(120.0)
+                .estrategia(com.cartola.odds.model.enums.Estrategia.SCORE_MAXIMO)
+                .formacaoCompleta(true).build();
+        return new ResultadoFormacao(formacao, time);
     }
 
     // ── Helper ──────────────────────────────────────────────────────
