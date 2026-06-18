@@ -400,8 +400,8 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
 
 `GET /api/time/comparar` monta o melhor time para **cada formação informada** usando o mesmo pool de atletas da rodada e retorna um comparativo ordenado por `scoreTotal`. É uma **consulta pontual**: a formação configurada no banco **não é alterada**.
 
-- Parâmetro **obrigatório** `formacoes`: lista separada por vírgula no formato `zag-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`).
-- A soma das posições de linha de cada formação (`zag + mei + ata`) deve ser **10**. As posições fixas (`GOL=1`, `LAT=2`, `TEC=1`) vêm da configuração e não variam.
+- Parâmetro **obrigatório** `formacoes`: lista separada por vírgula no formato `def-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`), onde o primeiro número é o total de **defensores** (laterais + zagueiros), como na notação do Cartola FC.
+- A soma das posições de linha de cada formação (`def + mei + ata`) deve ser **10**. As posições fixas `GOL=1` e `TEC=1` vêm da configuração; a defesa é derivada com **`LAT` fixo em 2** e **`ZAG = def − LAT`** (ex: `4-3-3` → `ZAG=2`, `LAT=2`), alinhada à composição do `GET /api/time`. Cada time tem exatamente **11 em campo + 1 técnico** (12 titulares).
 - Mínimo de **2** e máximo de **5** formações **distintas**; duplicatas são ignoradas silenciosamente.
 - Parâmetro **opcional** `orcamento`: aplica o limite de cartoletas a cada formação (custo-benefício), igual ao `GET /api/time`.
 - `scoreTotal` soma **apenas os titulares**, para uma comparação justa entre formações com número diferente de atletas por posição.

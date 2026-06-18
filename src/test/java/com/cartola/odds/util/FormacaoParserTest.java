@@ -18,11 +18,13 @@ class FormacaoParserTest {
     class Parse {
 
         @Test
-        @DisplayName("deve converter '4-3-3' em FormacaoConfig(4,3,3) com totalLinhas = 10")
+        @DisplayName("deve converter '4-3-3' em FormacaoConfig(4,3,3): DEF=4 (LAT 2 + ZAG 2), totalLinhas = 10")
         void deveConverterFormacaoValida() {
             FormacaoConfig config = FormacaoParser.parse("4-3-3");
 
-            assertThat(config.zagueiros()).isEqualTo(4);
+            assertThat(config.defensores()).isEqualTo(4);
+            assertThat(config.laterais()).isEqualTo(2);
+            assertThat(config.zagueiros()).isEqualTo(2);
             assertThat(config.meias()).isEqualTo(3);
             assertThat(config.atacantes()).isEqualTo(3);
             assertThat(config.totalLinhas()).isEqualTo(10);
@@ -49,7 +51,7 @@ class FormacaoParserTest {
         void deveRejeitarPartesInvalidas() {
             assertThatThrownBy(() -> FormacaoParser.parse("4-3"))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("zag-mei-ata");
+                    .hasMessageContaining("def-mei-ata");
         }
 
         @Test
@@ -57,7 +59,7 @@ class FormacaoParserTest {
         void deveRejeitarTracoFinal() {
             assertThatThrownBy(() -> FormacaoParser.parse("4-3-3-"))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("zag-mei-ata");
+                    .hasMessageContaining("def-mei-ata");
         }
 
         @Test

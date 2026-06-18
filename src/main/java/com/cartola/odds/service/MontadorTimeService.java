@@ -243,8 +243,11 @@ public class MontadorTimeService {
     /**
      * Resolve a formacao usada na montagem. Sem override, usa a formacao da
      * configuracao. Com override, mantem as posicoes fixas da config
-     * (GOL/LAT/TEC) e aplica ZAG/MEI/ATA do override, preservando a ordem
-     * (GOL, LAT, ZAG, MEI, ATA, TEC) exigida pelo calculo de custo minimo.
+     * (GOL/TEC) e deriva a defesa a partir do total de defensores do override:
+     * LAT fixo ({@link FormacaoConfig#LATERAIS}) e ZAG = defensores - LAT. Isso
+     * alinha a composicao do {@code comparar} com a do {@code GET /api/time}
+     * para a mesma string de formacao, preservando a ordem (GOL, LAT, ZAG, MEI,
+     * ATA, TEC) exigida pelo calculo de custo minimo.
      */
     private Map<String, Integer> resolverFormacao(Configuracao config, FormacaoConfig override) {
         if (override == null) {
@@ -252,7 +255,7 @@ public class MontadorTimeService {
         }
         Map<String, Integer> formacao = new LinkedHashMap<>();
         formacao.put("GOL", config.getFormacaoGol());
-        formacao.put("LAT", config.getFormacaoLat());
+        formacao.put("LAT", override.laterais());
         formacao.put("ZAG", override.zagueiros());
         formacao.put("MEI", override.meias());
         formacao.put("ATA", override.atacantes());
