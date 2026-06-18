@@ -48,8 +48,9 @@ public class MontadorTimeService {
     /**
      * Monta o time podendo sobrescrever a formacao da configuracao apenas para
      * esta execucao. Quando {@code formacaoOverride} e {@code null}, usa a
-     * formacao persistida na configuracao; caso contrario, mantem as posicoes
-     * fixas (GOL/LAT/TEC) da config e aplica ZAG/MEI/ATA do override.
+     * formacao persistida na configuracao; caso contrario, mantem GOL/TEC da
+     * config e deriva a defesa do override (LAT fixo em
+     * {@link FormacaoConfig#LATERAIS} e ZAG = defensores - LAT), alem de MEI/ATA.
      *
      * @param formacaoOverride formacao a aplicar nesta execucao (nao altera a config persistida)
      */
@@ -248,6 +249,11 @@ public class MontadorTimeService {
      * alinha a composicao do {@code comparar} com a do {@code GET /api/time}
      * para a mesma string de formacao, preservando a ordem (GOL, LAT, ZAG, MEI,
      * ATA, TEC) exigida pelo calculo de custo minimo.
+     *
+     * <p>O LAT do override usa a constante {@link FormacaoConfig#LATERAIS} (2),
+     * e nao {@code config.getFormacaoLat()}, por ser a quantidade de laterais do
+     * Cartola FC. Caso a config seja personalizada com outro valor de LAT, o
+     * {@code GET /api/time} (que usa a config) divergiria do {@code comparar}.
      */
     private Map<String, Integer> resolverFormacao(Configuracao config, FormacaoConfig override) {
         if (override == null) {

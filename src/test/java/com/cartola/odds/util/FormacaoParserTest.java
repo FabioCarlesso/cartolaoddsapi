@@ -71,6 +71,14 @@ class FormacaoParserTest {
         }
 
         @Test
+        @DisplayName("deve rejeitar defensores insuficientes para LAT + ao menos 1 ZAG (ex: 2-4-4)")
+        void deveRejeitarDefensoresInsuficientes() {
+            assertThatThrownBy(() -> FormacaoParser.parse("2-4-4"))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("ao menos 3");
+        }
+
+        @Test
         @DisplayName("deve rejeitar formacao com valor nao numerico")
         void deveRejeitarValorNaoNumerico() {
             assertThatThrownBy(() -> FormacaoParser.parse("4-x-3"))
