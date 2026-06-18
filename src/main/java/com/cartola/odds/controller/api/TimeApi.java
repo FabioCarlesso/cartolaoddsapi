@@ -85,8 +85,10 @@ public interface TimeApi {
             disponiveis antes de escalar. **Nao altera** a configuracao persistida.
 
             **Parametro `formacoes`** *(obrigatorio)*:
-            - Lista separada por virgula, no formato `zag-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`)
-            - A soma das posicoes de linha de cada formacao deve ser 10
+            - Lista separada por virgula, no formato `def-mei-ata` (ex: `4-3-3,3-4-3,4-4-2`),
+              onde o primeiro numero e o total de defensores (laterais + zagueiros), como na
+              notacao do Cartola FC. A defesa e derivada com LAT fixo em 2 e ZAG = def - 2.
+            - A soma das posicoes de linha de cada formacao (def + mei + ata) deve ser 10
             - Minimo de 2 e maximo de 5 formacoes distintas
             - Formacoes duplicadas sao ignoradas silenciosamente
             - Formacoes validas: `4-3-3`, `3-4-3`, `4-4-2`, `5-3-2`, `4-5-1`
@@ -119,8 +121,9 @@ public interface TimeApi {
     })
     ResponseEntity<CompararFormacoesResponse> compararFormacoes(
 
-        @Parameter(description = "Formacoes a comparar (zag-mei-ata), separadas por virgula. "
-                              + "Soma de cada formacao deve ser 10. Minimo 2, maximo 5 distintas.",
+        @Parameter(description = "Formacoes a comparar (def-mei-ata, def = laterais + zagueiros), "
+                              + "separadas por virgula. Soma de cada formacao deve ser 10. "
+                              + "Minimo 2, maximo 5 distintas.",
                    example = "4-3-3,3-4-3,4-4-2", required = true)
         @RequestParam(required = false) String formacoes,
 

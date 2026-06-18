@@ -48,8 +48,9 @@ public class MontadorTimeService {
     /**
      * Monta o time podendo sobrescrever a formacao da configuracao apenas para
      * esta execucao. Quando {@code formacaoOverride} e {@code null}, usa a
-     * formacao persistida na configuracao; caso contrario, mantem as posicoes
-     * fixas (GOL/LAT/TEC) da config e aplica ZAG/MEI/ATA do override.
+     * formacao persistida na configuracao; caso contrario, mantem GOL/TEC da
+     * config e deriva a defesa do override (LAT fixo em
+     * {@link FormacaoConfig#LATERAIS} e ZAG = defensores - LAT), alem de MEI/ATA.
      *
      * @param formacaoOverride formacao a aplicar nesta execucao (nao altera a config persistida)
      */
@@ -243,8 +244,16 @@ public class MontadorTimeService {
     /**
      * Resolve a formacao usada na montagem. Sem override, usa a formacao da
      * configuracao. Com override, mantem as posicoes fixas da config
-     * (GOL/LAT/TEC) e aplica ZAG/MEI/ATA do override, preservando a ordem
-     * (GOL, LAT, ZAG, MEI, ATA, TEC) exigida pelo calculo de custo minimo.
+     * (GOL/TEC) e deriva a defesa a partir do total de defensores do override:
+     * LAT fixo ({@link FormacaoConfig#LATERAIS}) e ZAG = defensores - LAT. Isso
+     * alinha a composicao do {@code comparar} com a do {@code GET /api/time}
+     * para a mesma string de formacao, preservando a ordem (GOL, LAT, ZAG, MEI,
+     * ATA, TEC) exigida pelo calculo de custo minimo.
+     *
+     * <p>O LAT do override usa a constante {@link FormacaoConfig#LATERAIS} (2),
+     * e nao {@code config.getFormacaoLat()}, por ser a quantidade de laterais do
+     * Cartola FC. Caso a config seja personalizada com outro valor de LAT, o
+     * {@code GET /api/time} (que usa a config) divergiria do {@code comparar}.
      */
     private Map<String, Integer> resolverFormacao(Configuracao config, FormacaoConfig override) {
         if (override == null) {
@@ -252,7 +261,7 @@ public class MontadorTimeService {
         }
         Map<String, Integer> formacao = new LinkedHashMap<>();
         formacao.put("GOL", config.getFormacaoGol());
-        formacao.put("LAT", config.getFormacaoLat());
+        formacao.put("LAT", override.laterais());
         formacao.put("ZAG", override.zagueiros());
         formacao.put("MEI", override.meias());
         formacao.put("ATA", override.atacantes());

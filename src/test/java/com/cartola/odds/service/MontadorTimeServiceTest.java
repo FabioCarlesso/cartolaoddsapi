@@ -6,11 +6,14 @@ import com.cartola.odds.model.FormacaoConfig;
 import com.cartola.odds.model.enums.Estrategia;
 import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
+import com.cartola.odds.util.FormacaoParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -578,24 +581,25 @@ class MontadorTimeServiceTest {
     class OverrideFormacao {
 
         @Test
-        @DisplayName("deve montar 3 ZAG, 4 MEI e 3 ATA quando override e 3-4-3")
+        @DisplayName("deve montar DEF=3 (LAT 2 + ZAG 1), 4 MEI e 3 ATA quando override e 3-4-3")
         void deveMontarFormacao343() {
             var time = service.montar(criarPool(), 1, null, null, new FormacaoConfig(3, 4, 3));
 
             assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
             assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
-            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(3);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(1);
             assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(4);
             assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(3);
             assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
         }
 
         @Test
-        @DisplayName("deve montar 4 ZAG, 4 MEI e 2 ATA quando override e 4-4-2")
+        @DisplayName("deve montar DEF=4 (LAT 2 + ZAG 2), 4 MEI e 2 ATA quando override e 4-4-2")
         void deveMontarFormacao442() {
             var time = service.montar(criarPool(), 1, null, null, new FormacaoConfig(4, 4, 2));
 
-            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(4);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
             assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(4);
             assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(2);
         }
@@ -624,6 +628,34 @@ class MontadorTimeServiceTest {
                     .orElse(0L);
 
             assertThat(maiorQtdPorClube).isLessThanOrEqualTo(4L);
+        }
+
+        @ParameterizedTest(name = "{0} -> GOL 1, LAT 2, ZAG {1}, MEI {2}, ATA {3}, TEC 1 (12 titulares)")
+        @DisplayName("toda formacao suportada deve gerar 11 em campo + 1 TEC com a distribuicao correta")
+        @CsvSource({
+                "4-3-3, 2, 3, 3",
+                "3-4-3, 1, 4, 3",
+                "4-4-2, 2, 4, 2",
+                "5-3-2, 3, 3, 2",
+                "4-5-1, 2, 5, 1",
+                "3-5-2, 1, 5, 2"
+        })
+        void deveMontarTodasFormacoesSuportadas(String formacao, int zag, int mei, int ata) {
+            var override = FormacaoParser.parse(formacao);
+
+            var time = service.montar(criarPool(), 1, null, null, override);
+
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(zag);
+            assertThat(time.getTitulares().get(Posicao.MEI)).hasSize(mei);
+            assertThat(time.getTitulares().get(Posicao.ATA)).hasSize(ata);
+            assertThat(time.getTitulares().get(Posicao.TEC)).hasSize(1);
+
+            long totalTitulares = time.getTitulares().values().stream()
+                    .mapToLong(List::size)
+                    .sum();
+            assertThat(totalTitulares).isEqualTo(12L);
         }
 
         @Test

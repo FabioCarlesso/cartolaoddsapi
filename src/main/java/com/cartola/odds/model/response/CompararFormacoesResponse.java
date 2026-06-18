@@ -72,7 +72,7 @@ public class CompararFormacoesResponse {
     @Schema(description = "Time montado para uma formacao especifica, com score e ranking")
     public static class ResultadoDto {
 
-        @Schema(description = "Formacao avaliada (zag-mei-ata)", example = "4-3-3")
+        @Schema(description = "Formacao avaliada (def-mei-ata, def = laterais + zagueiros)", example = "4-3-3")
         private final String formacao;
 
         @Schema(description = "Soma do score dos titulares", example = "94.3")
