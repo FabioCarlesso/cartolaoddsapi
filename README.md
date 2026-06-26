@@ -693,3 +693,9 @@ mvn test jacoco:report
 ---
 
 *Para documentação técnica detalhada, ver [docs/documentacao.md](docs/documentacao.md).*
+
+---
+
+## Licença
+
+Distribuído sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
