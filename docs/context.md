@@ -163,9 +163,17 @@ O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, inc
 2. **Intermediário** — relaxa a regra de defesa, mas mantém o limite máximo por clube e budget.
 3. **Último recurso** — relaxa também o limite por clube, mas mantém o budget.
 
-### Budget Máximo (C$)
+### Budget Máximo (C$) e Otimização por Orçamento
 
-O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O budget é configurável em runtime via `PATCH /api/config` no campo `budgetMaximo`. Quando `budgetMaximo = 0` (padrão), a constraint é desativada e o custo não é limitado. Quando definido, o montador rastreia o saldo restante globalmente durante a seleção: ao avaliar cada candidato, verifica se `preço ≤ saldo restante` e se ainda sobra budget para preencher as vagas restantes da formação com o menor custo disponível; caso contrário, o atleta é descartado e o próximo melhor é tentado. Isso se aplica nos três níveis de fallback, priorizando sempre o maior score dentro do orçamento disponível sem gastar o saldo necessário para completar o time quando há alternativas suficientes.
+O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O teto efetivo é o `orcamento` informado em `GET /api/time` (tem prioridade) ou, na ausência dele, o `budgetMaximo` configurável em runtime via `PATCH /api/config`. Quando não há teto (`budgetMaximo = 0` e sem `orcamento`), a constraint é desativada: o montador usa a **seleção gulosa por score**, que já é ótima nesse caso.
+
+Quando há um teto finito, a seleção dos titulares passa pelo `OtimizadorTitulares`, que resolve um **multiple-choice knapsack por posição** via **branch-and-bound**. O objetivo é **maximizar a soma de score** com `Σ preço ≤ orçamento` (estratégia sempre `SCORE_MAXIMO`), e não pegar os mais baratos. Características:
+
+- **Desempate:** entre soluções de score igual (dentro de um epsilon), vence a de **menor custo** (equivalente a maior `score/preço`).
+- **Restrições preservadas:** formação, `limiteAtletasPorClube` e a regra de defesa sem clube repetido (GOL/LAT/ZAG) são respeitadas dentro da busca.
+- **Podas:** viabilidade de orçamento (custo mínimo para completar as vagas restantes), limite superior admissível de score e filtro de fronteira de Pareto **por clube** (descarta atletas dominados do mesmo clube sem perder diversidade necessária às regras de clube).
+- **Orçamento insuficiente:** quando não é possível completar a formação dentro do teto, retorna o melhor time *best-effort* (mais vagas preenchidas, depois maior score), com `formacaoCompleta = false` e `avisoOrcamento` preenchido.
+- **Guarda de iterações:** ao estourar o teto de iterações do branch-and-bound, o montador recai na seleção gulosa por orçamento como fallback, garantindo resposta sempre válida.
 
 ### Reserva de Luxo
 
@@ -231,7 +239,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-336 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+422 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

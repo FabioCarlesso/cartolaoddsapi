@@ -198,14 +198,14 @@ class TimeControllerTest {
         }
 
         @Test
-        @DisplayName("deve propagar orcamento e expor campos de custo-beneficio quando informado")
+        @DisplayName("deve propagar orcamento e expor campos de orcamento quando informado")
         void devePropagarOrcamentoEExporCampos() throws Exception {
             when(pipelineService.executar(eq(120.0)))
                     .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
 
             mockMvc.perform(get("/api/time").param("orcamento", "120.0"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.estrategia").value("CUSTO_BENEFICIO"))
+                    .andExpect(jsonPath("$.estrategia").value("SCORE_MAXIMO"))
                     .andExpect(jsonPath("$.orcamentoInformado").value(120.0))
                     .andExpect(jsonPath("$.custoTotal").value(118.3))
                     .andExpect(jsonPath("$.saldoRestante").value(1.7))
@@ -430,7 +430,7 @@ class TimeControllerTest {
                 .reservaLuxo(null).alertasDuvida(List.of()).custoTotal(custoTotal)
                 .orcamentoInformado(orcamento)
                 .saldoRestante(orcamento - custoTotal)
-                .estrategia(com.cartola.odds.model.enums.Estrategia.CUSTO_BENEFICIO)
+                .estrategia(com.cartola.odds.model.enums.Estrategia.SCORE_MAXIMO)
                 .formacaoCompleta(formacaoCompleta)
                 .avisoOrcamento(avisoOrcamento)
                 .build();

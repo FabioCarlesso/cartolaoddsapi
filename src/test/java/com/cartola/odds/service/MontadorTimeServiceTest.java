@@ -519,11 +519,11 @@ class MontadorTimeServiceTest {
         }
 
         @Test
-        @DisplayName("com orcamento usa estrategia CUSTO_BENEFICIO, expoe saldo e marca formacao completa")
-        void comOrcamentoEstrategiaCustoBeneficio() {
+        @DisplayName("com orcamento usa estrategia SCORE_MAXIMO, expoe saldo e marca formacao completa")
+        void comOrcamentoEstrategiaScoreMaximo() {
             var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
 
-            assertThat(time.getEstrategia()).isEqualTo(Estrategia.CUSTO_BENEFICIO);
+            assertThat(time.getEstrategia()).isEqualTo(Estrategia.SCORE_MAXIMO);
             assertThat(time.getOrcamentoInformado()).isEqualTo(300.0);
             assertThat(time.getSaldoRestante()).isEqualTo(300.0 - time.getCustoTotal());
             assertThat(time.isFormacaoCompleta()).isTrue();
@@ -553,14 +553,91 @@ class MontadorTimeServiceTest {
         }
 
         @Test
-        @DisplayName("prioriza custo-beneficio (score/preco) ao ordenar candidatos")
-        void priorizaCustoBeneficio() {
-            // Baratos tem melhor score/preco (ex: 4/2=2.0) que os caros (ex: 9/50=0.18).
-            // Mesmo com orcamento folgado, a estrategia custo-beneficio prefere os baratos.
-            var time = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 300.0);
+        @DisplayName("orcamento alto reproduz o time de maior score por posicao (otimo absoluto)")
+        void orcamentoAltoReproduzTimeOtimoAbsoluto() {
+            // Os caros (preco 50) tem os maiores scores em cada posicao. Com orcamento
+            // folgado o otimizador deve escolher exatamente esses, igual ao sem orcamento.
+            var comOrcamento = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, 10_000.0);
+            var semOrcamento = service.montar(criarPoolPrecosMistos(50.0, 2.0), 1, null, null);
 
-            time.getTitulares().values().stream().flatMap(List::stream)
-                    .forEach(a -> assertThat(a.getPreco()).isEqualTo(2.0));
+            comOrcamento.getTitulares().values().stream().flatMap(List::stream)
+                    .forEach(a -> assertThat(a.getPreco()).isEqualTo(50.0));
+
+            assertThat(apelidosTitulares(comOrcamento))
+                    .isEqualTo(apelidosTitulares(semOrcamento));
+        }
+
+        @Test
+        @DisplayName("orcamento medio escolhe a combinacao de maior soma de score que cabe no teto")
+        void orcamentoMedioMaximizaSomaDeScore() {
+            // Posicoes fixas custam 9.0 (9 atletas a C$1.0). Sobram C$22.0 para 3 MEI:
+            // 3 premium (score 10 / preco 10) custariam 30 (nao cabe); 2 premium + 1 cheap
+            // custam 21 (cabe, score 21) e e a melhor combinacao dentro do teto.
+            var time = service.montar(poolKnapsackMeio(), 1, null, 31.0);
+
+            var precoMei = time.getTitulares().get(Posicao.MEI).stream()
+                    .map(Atleta::getPreco)
+                    .sorted()
+                    .toList();
+            assertThat(precoMei).containsExactly(1.0, 10.0, 10.0);
+            assertThat(time.getCustoTotal()).isEqualTo(30.0);
+            assertThat(time.isFormacaoCompleta()).isTrue();
+        }
+
+        @Test
+        @DisplayName("em empate de score escolhe a solucao de menor custo (desempate por score/preco)")
+        void empateDeScoreEscolheMenorCusto() {
+            var time = service.montar(poolGolEmpatado(), 1, null, 200.0);
+
+            assertThat(time.getTitulares().get(Posicao.GOL))
+                    .singleElement()
+                    .extracting(Atleta::getPreco)
+                    .isEqualTo(3.0);
+        }
+
+        @Test
+        @DisplayName("orcamento muito baixo preenche o maximo possivel e sinaliza aviso e incompleto")
+        void orcamentoMuitoBaixoBestEffort() {
+            // Cada atleta custa C$10.0; com C$25.0 cabem no maximo 2 titulares.
+            var time = service.montar(criarPoolPreco(10.0), 1, null, 25.0);
+
+            long escalados = time.getTitulares().values().stream().mapToLong(List::size).sum();
+            assertThat(escalados).isGreaterThan(0).isLessThan(12);
+            assertThat(time.getCustoTotal()).isLessThanOrEqualTo(25.0);
+            assertThat(time.getSaldoRestante()).isGreaterThanOrEqualTo(0.0);
+            assertThat(time.isFormacaoCompleta()).isFalse();
+            assertThat(time.getAvisoOrcamento()).isNotNull().contains("insuficiente");
+        }
+
+        @Test
+        @DisplayName("regra de defesa sem clube repetido continua respeitada sob orcamento")
+        void regraDefesaRespeitadaSobOrcamento() {
+            var time = service.montar(poolComDefensoresRepetidos(), 1, null, 200.0);
+
+            var clubesDefesa = titularesDefesa(time);
+            assertThat(new HashSet<>(clubesDefesa)).hasSameSizeAs(clubesDefesa);
+        }
+
+        @Test
+        @DisplayName("limite por clube continua respeitado sob orcamento")
+        void limitePorClubeRespeitadoSobOrcamento() {
+            var time = service.montar(poolComMuitosAtletasMesmoClube(), 1, null, 500.0);
+
+            var maiorQtdPorClube = time.getTitulares().values().stream()
+                    .flatMap(List::stream)
+                    .collect(Collectors.groupingBy(Atleta::getClubeId, Collectors.counting()))
+                    .values().stream()
+                    .max(Long::compareTo)
+                    .orElse(0L);
+
+            assertThat(maiorQtdPorClube).isLessThanOrEqualTo(4L);
+        }
+
+        private Set<String> apelidosTitulares(com.cartola.odds.model.Time time) {
+            return time.getTitulares().values().stream()
+                    .flatMap(List::stream)
+                    .map(Atleta::getApelido)
+                    .collect(Collectors.toSet());
         }
 
         @Test
@@ -799,6 +876,79 @@ class MontadorTimeServiceTest {
                 .preco(preco)
                 .desempenhoRecente(0.0)
                 .score(score);
+    }
+
+    /**
+     * Pool para validar o knapsack por orcamento: todas as posicoes (exceto MEI)
+     * tem exatamente as vagas necessarias com atletas baratos (score 1 / preco 1),
+     * somando C$9.0 fixos. MEI tem 3 premium (score 10 / preco 10) e 3 baratos,
+     * forcando a escolha da melhor combinacao dentro do orcamento restante.
+     */
+    private List<Atleta> poolKnapsackMeio() {
+        List<Atleta> pool = new ArrayList<>();
+        int id = 1;
+        int clube = 1;
+
+        pool.add(atletaBuilder(Posicao.GOL, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.LAT, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.ZAG, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.ATA, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.TEC, id++, 1.0, 1.0, clube++).build());
+
+        // MEI: 3 premium (score 10 / preco 10) + 3 baratos (score 1 / preco 1)
+        pool.add(atletaBuilder(Posicao.MEI, id++, 10.0, 10.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++, 10.0, 10.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++, 10.0, 10.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.MEI, id++, 1.0, 1.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.MEI, id, 1.0, 1.0, clube).build());
+        return pool;
+    }
+
+    /**
+     * Pool com dois goleiros de mesmo score (5.0) e precos distintos (C$10.0 e
+     * C$3.0). As demais posicoes tem candidatos abundantes e baratos. Com orcamento
+     * folgado, o desempate por menor custo deve eleger o goleiro de C$3.0.
+     */
+    private List<Atleta> poolGolEmpatado() {
+        List<Atleta> pool = new ArrayList<>();
+        pool.add(atletaBuilder(Posicao.GOL, 1, 5.0, 10.0, 1).build());
+        pool.add(atletaBuilder(Posicao.GOL, 2, 5.0,  3.0, 2).build());
+
+        int id = 3;
+        int clube = 3;
+        for (int i = 0; i < 2; i++) pool.add(atletaBuilder(Posicao.LAT, id++, 4.0, 2.0, clube++).build());
+        for (int i = 0; i < 2; i++) pool.add(atletaBuilder(Posicao.ZAG, id++, 4.0, 2.0, clube++).build());
+        for (int i = 0; i < 3; i++) pool.add(atletaBuilder(Posicao.MEI, id++, 4.0, 2.0, clube++).build());
+        for (int i = 0; i < 3; i++) pool.add(atletaBuilder(Posicao.ATA, id++, 4.0, 2.0, clube++).build());
+        pool.add(atletaBuilder(Posicao.TEC, id, 4.0, 2.0, clube).build());
+        return pool;
+    }
+
+    /** Pool com todos os atletas ao mesmo preco e clubes distintos, scores decrescentes. */
+    private List<Atleta> criarPoolPreco(double preco) {
+        List<Atleta> pool = new ArrayList<>();
+        int id = 1;
+        int clube = 1;
+        pool.addAll(criarAtletasPreco(Posicao.GOL, 2, preco, id, clube)); id += 2; clube += 2;
+        pool.addAll(criarAtletasPreco(Posicao.LAT, 3, preco, id, clube)); id += 3; clube += 3;
+        pool.addAll(criarAtletasPreco(Posicao.ZAG, 3, preco, id, clube)); id += 3; clube += 3;
+        pool.addAll(criarAtletasPreco(Posicao.MEI, 4, preco, id, clube)); id += 4; clube += 4;
+        pool.addAll(criarAtletasPreco(Posicao.ATA, 4, preco, id, clube)); id += 4; clube += 4;
+        pool.addAll(criarAtletasPreco(Posicao.TEC, 2, preco, id, clube));
+        return pool;
+    }
+
+    private List<Atleta> criarAtletasPreco(Posicao pos, int qtd, double preco, int startId, int startClube) {
+        List<Atleta> list = new ArrayList<>();
+        for (int i = 0; i < qtd; i++) {
+            list.add(atletaBuilder(pos, startId + i, 10.0 - i, preco, startClube + i).build());
+        }
+        return list;
     }
 
     /**

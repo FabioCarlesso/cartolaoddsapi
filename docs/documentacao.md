@@ -894,7 +894,7 @@ mvn test jacoco:report
 | Endpoint | Descrição |
 |---|---|
 | `GET /api/time` | Monta o time completo da rodada |
-| `GET /api/time?orcamento=120.0` | Monta o time respeitando o orçamento em cartoletas (custo-benefício) |
+| `GET /api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
 | `GET /api/ranking` | Top atletas por score com filtros opcionais |
 | `GET /api/ranking?posicao=ATA` | Top atacantes |
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
@@ -919,10 +919,12 @@ Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 c
 | `500` | Erro interno inesperado |
 
 **Parâmetro `orcamento` (opcional) em `GET /api/time`:** quando informado, o `MontadorTimeService`
-ordena os candidatos por custo-benefício (`score / preço`) e respeita o limite de cartoletas
-(estratégia `CUSTO_BENEFICIO`); sem o parâmetro, mantém a ordenação por score (`SCORE_MAXIMO`).
-A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`,
-`formacaoCompleta` e — quando o orçamento não basta para completar a formação — `avisoOrcamento`.
+resolve um *multiple-choice knapsack* por posição via branch-and-bound (`OtimizadorTitulares`),
+escolhendo a combinação de **maior soma de score** que cabe no orçamento — empates de score são
+desfeitos pela de **menor custo** (`score / preço` apenas como desempate). Sem o parâmetro, mantém a
+ordenação gulosa por score. A estratégia retornada é sempre `SCORE_MAXIMO`. A resposta expõe
+`orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o
+orçamento não basta para completar a formação — `avisoOrcamento` (com o melhor time best-effort dentro do teto).
 
 ---
 
