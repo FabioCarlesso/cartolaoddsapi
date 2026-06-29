@@ -100,7 +100,14 @@ final class OtimizadorTitulares {
             List<Atleta> elegiveis = candidatosPorPosicao.getOrDefault(posicao, List.of()).stream()
                     .filter(a -> a.getPreco() <= orcamento + EPS)
                     .collect(Collectors.toList());
-            elegiveis = filtrarParetoPorClube(elegiveis);
+            // Quantos atletas do mesmo clube cabem nesta posicao: limitado pelas vagas
+            // e pelo teto por clube; na defesa com regra ativa, no maximo 1.
+            int maxDoMesmoClube = Math.min(slot.getValue(), limitePorClube);
+            if (evitarMesmoClubeDefesa && POSICOES_DEFESA.contains(posicao)) {
+                maxDoMesmoClube = 1;
+            }
+            maxDoMesmoClube = Math.max(1, maxDoMesmoClube);
+            elegiveis = filtrarParetoPorClube(elegiveis, maxDoMesmoClube);
             elegiveis.sort(Comparator.comparingDouble(Atleta::getScore).reversed()
                     .thenComparingDouble(Atleta::getPreco));
 
@@ -338,28 +345,42 @@ final class OtimizadorTitulares {
     }
 
     /**
-     * Remove atletas dominados (score menor e preco maior ou igual) <em>dentro do
-     * mesmo clube</em>. A filtragem por clube preserva a diversidade necessaria
-     * para as restricoes de clube: um atleta so e descartado se outro do mesmo
-     * clube o domina, mantendo intacta a fronteira de Pareto entre clubes distintos.
+     * Remove, <em>dentro do mesmo clube</em>, apenas os atletas comprovadamente
+     * desnecessarios para esta posicao. Como uma posicao pode escalar ate
+     * {@code maxDoMesmoClube} atletas do mesmo clube (limitado pelas vagas, pelo
+     * teto por clube e, na defesa, pela regra de clube unico), a simples dominancia
+     * de Pareto <strong>nao basta</strong>: um atleta de score maior nao substitui
+     * outro do mesmo clube quando ambos podem ser escalados juntos.
+     *
+     * <p>Por isso um atleta {@code p} so e descartado quando existem ao menos
+     * {@code maxDoMesmoClube} outros atletas do mesmo clube que o dominam
+     * (score &ge; e preco &le;, com vantagem estrita em ao menos um criterio). Nesse
+     * caso, qualquer solucao otima que use {@code p} pode troca-lo por um dominador
+     * livre sem perder score nem violar restricoes — preservando a otimalidade.
+     * Atletas identicos (mesmo score e preco) nunca se dominam, logo sao mantidos.
      */
-    private static List<Atleta> filtrarParetoPorClube(List<Atleta> atletas) {
+    private static List<Atleta> filtrarParetoPorClube(List<Atleta> atletas, int maxDoMesmoClube) {
         Map<Integer, List<Atleta>> porClube = atletas.stream()
                 .collect(Collectors.groupingBy(Atleta::getClubeId));
         List<Atleta> resultado = new ArrayList<>();
         for (List<Atleta> doClube : porClube.values()) {
-            List<Atleta> ordenados = doClube.stream()
-                    .sorted(Comparator.comparingDouble(Atleta::getScore).reversed()
-                            .thenComparingDouble(Atleta::getPreco))
-                    .toList();
-            double menorPreco = Double.POSITIVE_INFINITY;
-            for (Atleta atleta : ordenados) {
-                if (atleta.getPreco() < menorPreco - EPS) {
-                    resultado.add(atleta);
-                    menorPreco = atleta.getPreco();
+            for (Atleta p : doClube) {
+                long dominadores = doClube.stream().filter(d -> domina(d, p)).count();
+                if (dominadores < maxDoMesmoClube) {
+                    resultado.add(p);
                 }
             }
         }
         return resultado;
+    }
+
+    /** {@code true} quando {@code d} domina {@code p}: nao pior em ambos e estritamente melhor em ao menos um. */
+    private static boolean domina(Atleta d, Atleta p) {
+        if (d == p) {
+            return false;
+        }
+        boolean naoPior = d.getScore() >= p.getScore() - EPS && d.getPreco() <= p.getPreco() + EPS;
+        boolean melhorEmAlgo = d.getScore() > p.getScore() + EPS || d.getPreco() < p.getPreco() - EPS;
+        return naoPior && melhorEmAlgo;
     }
 }

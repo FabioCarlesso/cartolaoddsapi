@@ -171,8 +171,8 @@ Quando há um teto finito, a seleção dos titulares passa pelo `OtimizadorTitul
 
 - **Desempate:** entre soluções de score igual (dentro de um epsilon), vence a de **menor custo** (equivalente a maior `score/preço`).
 - **Restrições preservadas:** formação, `limiteAtletasPorClube` e a regra de defesa sem clube repetido (GOL/LAT/ZAG) são respeitadas dentro da busca.
-- **Podas:** viabilidade de orçamento (custo mínimo para completar as vagas restantes), limite superior admissível de score e filtro de fronteira de Pareto **por clube** (descarta atletas dominados do mesmo clube sem perder diversidade necessária às regras de clube).
-- **Orçamento insuficiente:** quando não é possível completar a formação dentro do teto, retorna o melhor time *best-effort* (mais vagas preenchidas, depois maior score), com `formacaoCompleta = false` e `avisoOrcamento` preenchido.
+- **Podas:** viabilidade de orçamento (custo mínimo para completar as vagas restantes), limite superior admissível de score e redução de candidatos **por clube**. A redução só descarta um atleta quando existem ao menos `min(vagas da posição, limiteAtletasPorClube)` outros do mesmo clube que o dominam (score ≥ e preço ≤), preservando a otimalidade mesmo em posições com várias vagas (onde dois atletas do mesmo clube podem ser escalados juntos). Na defesa com a regra ativa, o limite é 1 por clube.
+- **Orçamento insuficiente vs. restrições:** quando não é possível completar a formação dentro do teto por falta de orçamento, retorna o melhor time *best-effort* (mais vagas preenchidas, depois maior score), com `formacaoCompleta = false` e `avisoOrcamento` preenchido. Se a incompletude vier das **restrições de clube/defesa** (e não do orçamento), o montador recorre à seleção gulosa — que relaxa essas regras em último recurso, como no fluxo sem orçamento — e fica com a montagem que preenche mais vagas, evitando atribuir ao orçamento uma incompletude que é de clube.
 - **Guarda de iterações:** ao estourar o teto de iterações do branch-and-bound, o montador recai na seleção gulosa por orçamento como fallback, garantindo resposta sempre válida.
 
 ### Reserva de Luxo
@@ -239,7 +239,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-422 cenários distribuídos em 21 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+424 cenários distribuídos em 23 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

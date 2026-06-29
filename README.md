@@ -599,7 +599,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 24 classes de teste — 422 cenários
+        ├── java/                            # 23 classes de teste — 424 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -671,7 +671,7 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
-| `MontadorTimeServiceTest` | 52 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, otimização por orçamento (score máximo, empate por menor custo, best-effort), formação incompleta, override de formação |
+| `MontadorTimeServiceTest` | 54 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, otimização por orçamento (score máximo, redução por clube em posição multi-vaga, empate por menor custo, best-effort, incompletude por clube sem aviso de orçamento), formação incompleta, override de formação |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 12 — inclui etapa DesempenhoService, propagação de orçamento e comparação de formações |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |

@@ -218,6 +218,12 @@ public class MontadorTimeService {
      * e otima nesse caso e evita regressao de performance. Com teto finito, delega
      * ao {@link OtimizadorTitulares} (branch-and-bound); se a guarda de iteracoes
      * do otimizador estourar, recorre a selecao gulosa como fallback.
+     *
+     * <p>O otimizador respeita as restricoes de clube/defesa de forma estrita e pode
+     * nao completar a formacao quando sao elas (e nao o orcamento) que impedem.
+     * Nesse caso recorre-se a selecao gulosa, que relaxa essas regras em ultimo
+     * recurso (como no fluxo sem orcamento), e fica-se com a montagem que preenche
+     * mais vagas — evitando atribuir ao orcamento uma incompletude que e de clube.
      */
     private Map<Posicao, List<Atleta>> montarTitulares(Map<String, Integer> formacao,
                                                        Map<Posicao, List<Atleta>> candidatosPorPosicao,
@@ -228,11 +234,25 @@ public class MontadorTimeService {
                     formacao, candidatosPorPosicao, budgetEfetivo,
                     config.getLimiteAtletasPorClube(), config.isEvitarMesmoClubeDefesa());
             if (!resultado.fallback()) {
-                return resultado.titulares();
+                if (resultado.completo()) {
+                    return resultado.titulares();
+                }
+                // Incompleto sob restricoes estritas: o guloso pode completar relaxando
+                // clube/defesa. Preferimos a montagem com mais vagas preenchidas.
+                Map<Posicao, List<Atleta>> guloso =
+                        montarGuloso(formacao, candidatosPorPosicao, config, budgetEfetivo);
+                return contarAtletas(guloso) > contarAtletas(resultado.titulares())
+                        ? guloso
+                        : resultado.titulares();
             }
             log.warn("Otimizador atingiu a guarda de iteracoes; usando selecao gulosa por orcamento");
         }
         return montarGuloso(formacao, candidatosPorPosicao, config, budgetEfetivo);
+    }
+
+    /** Total de atletas escalados em uma montagem por posicao. */
+    private static long contarAtletas(Map<Posicao, List<Atleta>> titulares) {
+        return titulares.values().stream().mapToLong(List::size).sum();
     }
 
     /** Selecao gulosa por posicao, respeitando regras de clube e o budget efetivo. */

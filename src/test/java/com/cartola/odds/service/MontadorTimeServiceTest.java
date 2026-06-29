@@ -633,6 +633,35 @@ class MontadorTimeServiceTest {
             assertThat(maiorQtdPorClube).isLessThanOrEqualTo(4L);
         }
 
+        @Test
+        @DisplayName("escala dois atletas do mesmo clube numa posicao multi-vaga mesmo quando um domina o outro")
+        void naoDescartaDominadoDoMesmoClubeEmPosicaoMultiVaga() {
+            // MEI (3 vagas) do clube 20: A(score10,C$5) domina B(score9,C$6), mas ambos
+            // cabem juntos. O otimo dos 3 MEI por score e A+B+C(score7) = 26; um filtro
+            // de Pareto ingenuo descartaria B e cairia para A+C+D(score6) = 23.
+            var time = service.montar(poolParetoMultiVagaMesmoClube(), 1, null, 500.0);
+
+            var mei = time.getTitulares().get(Posicao.MEI);
+            assertThat(mei).hasSize(3);
+            assertThat(mei).extracting(Atleta::getScore).containsExactlyInAnyOrder(10.0, 9.0, 7.0);
+            assertThat(mei.stream().filter(a -> a.getClubeId() == 20).count()).isEqualTo(2L);
+        }
+
+        @Test
+        @DisplayName("incompletude por restricao de clube (nao por orcamento) completa via relaxamento e nao gera aviso de orcamento")
+        void incompletudePorClubeCompletaSemAvisoDeOrcamento() {
+            // Toda a defesa e do clube 10: com a regra ativa o otimizador estrito so
+            // escalaria 1 defensor. Com orcamento folgado, a causa nao e o dinheiro;
+            // o montador deve recorrer ao guloso (que relaxa a regra) e completar.
+            var time = service.montar(poolComDefesaUmSoClube(), 1, null, 500.0);
+
+            assertThat(time.getTitulares().get(Posicao.GOL)).hasSize(1);
+            assertThat(time.getTitulares().get(Posicao.LAT)).hasSize(2);
+            assertThat(time.getTitulares().get(Posicao.ZAG)).hasSize(2);
+            assertThat(time.isFormacaoCompleta()).isTrue();
+            assertThat(time.getAvisoOrcamento()).isNull();
+        }
+
         private Set<String> apelidosTitulares(com.cartola.odds.model.Time time) {
             return time.getTitulares().values().stream()
                     .flatMap(List::stream)
@@ -830,6 +859,32 @@ class MontadorTimeServiceTest {
         pool.addAll(criarAtletasMesmoClube(Posicao.MEI, 3, 30, 200));
         pool.addAll(criarAtletasMesmoClube(Posicao.ATA, 3, 40, 300));
         pool.addAll(criarAtletasMesmoClube(Posicao.TEC, 1, 50, 400));
+        return pool;
+    }
+
+    /**
+     * Pool para validar que a reducao por clube nao descarta atletas necessarios em
+     * posicoes com varias vagas. Todas as posicoes (exceto MEI) tem exatamente as
+     * vagas com atletas baratos de clubes distintos. MEI (3 vagas) tem dois atletas
+     * do clube 20 onde um domina o outro (A score10/C$5 domina B score9/C$6) e dois
+     * de outros clubes (C score7, D score6): o otimo por score e A+B+C.
+     */
+    private List<Atleta> poolParetoMultiVagaMesmoClube() {
+        List<Atleta> pool = new ArrayList<>();
+        pool.add(atletaBuilder(Posicao.GOL, 1, 1.0, 1.0, 1).build());
+        pool.add(atletaBuilder(Posicao.LAT, 2, 1.0, 1.0, 2).build());
+        pool.add(atletaBuilder(Posicao.LAT, 3, 1.0, 1.0, 3).build());
+        pool.add(atletaBuilder(Posicao.ZAG, 4, 1.0, 1.0, 4).build());
+        pool.add(atletaBuilder(Posicao.ZAG, 5, 1.0, 1.0, 5).build());
+        pool.add(atletaBuilder(Posicao.ATA, 6, 1.0, 1.0, 6).build());
+        pool.add(atletaBuilder(Posicao.ATA, 7, 1.0, 1.0, 7).build());
+        pool.add(atletaBuilder(Posicao.ATA, 8, 1.0, 1.0, 8).build());
+        pool.add(atletaBuilder(Posicao.TEC, 9, 1.0, 1.0, 9).build());
+
+        pool.add(atletaBuilder(Posicao.MEI, 10, 10.0, 5.0, 20).build()); // A
+        pool.add(atletaBuilder(Posicao.MEI, 11,  9.0, 6.0, 20).build()); // B (dominado por A)
+        pool.add(atletaBuilder(Posicao.MEI, 12,  7.0, 5.0, 21).build()); // C
+        pool.add(atletaBuilder(Posicao.MEI, 13,  6.0, 5.0, 22).build()); // D
         return pool;
     }
 
