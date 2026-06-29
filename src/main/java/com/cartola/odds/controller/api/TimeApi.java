@@ -47,8 +47,8 @@ public interface TimeApi {
 
             **Parametro `orcamento`** *(opcional)*:
             - Nao informado: comportamento padrao (estrategia SCORE_MAXIMO, sem restricao de custo)
-            - Informado: o time respeita o limite de cartoletas e os candidatos passam a ser
-              ordenados por custo-beneficio (score/preco) — estrategia CUSTO_BENEFICIO
+            - Informado: o time maximiza a soma de score sujeito ao teto de cartoletas
+              (custo-beneficio score/preco apenas como desempate) — estrategia SCORE_MAXIMO
             - Validacao: deve ser > 0
 
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
@@ -69,7 +69,8 @@ public interface TimeApi {
     ResponseEntity<TimeResponse> montarTime(
 
         @Parameter(description = "Orcamento maximo em cartoletas (C$). Quando informado, o time "
-                              + "respeita esse limite priorizando custo-beneficio. Deve ser > 0.",
+                              + "maximiza o score dentro do limite (custo-beneficio so como "
+                              + "desempate). Deve ser > 0.",
                    example = "120.0")
         @RequestParam(required = false) Double orcamento
     );
@@ -95,8 +96,8 @@ public interface TimeApi {
             - Formacoes invalidas (soma != 10): `4-3-2`, `4-4-1`
 
             **Parametro `orcamento`** *(opcional)*:
-            - Quando informado, cada formacao e montada respeitando o limite de
-              cartoletas (estrategia custo-beneficio). Deve ser > 0.
+            - Quando informado, cada formacao e montada maximizando o score dentro
+              do limite de cartoletas (custo-beneficio so como desempate). Deve ser > 0.
 
             **Resposta:**
             - `resultados` ordenados por `scoreTotal` decrescente, com campo `posicao` (ranking)

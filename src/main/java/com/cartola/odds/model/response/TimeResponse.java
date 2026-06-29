@@ -55,10 +55,11 @@ public class TimeResponse {
             example = "1.7", nullable = true)
     private final Double saldoRestante;
 
-    @Schema(description = "Estrategia usada na montagem: SCORE_MAXIMO (sem orcamento) "
-                        + "ou CUSTO_BENEFICIO (com orcamento).",
-            example = "CUSTO_BENEFICIO",
-            allowableValues = {"SCORE_MAXIMO", "CUSTO_BENEFICIO"})
+    @Schema(description = "Estrategia usada na montagem. Sempre SCORE_MAXIMO: maximiza a soma "
+                        + "de score; com orcamento, maximiza o score sujeito ao teto de "
+                        + "cartoletas (custo-beneficio apenas como desempate).",
+            example = "SCORE_MAXIMO",
+            allowableValues = {"SCORE_MAXIMO"})
     private final String estrategia;
 
     @Schema(description = "Indica se todos os slots da formacao foram preenchidos.",

@@ -40,7 +40,10 @@ public class Time {
      */
     private final Double                     saldoRestante;
 
-    /** Estrategia usada na montagem: SCORE_MAXIMO ou CUSTO_BENEFICIO. */
+    /**
+     * Estrategia usada na montagem: sempre SCORE_MAXIMO. Com orcamento, maximiza o
+     * score sujeito ao teto, com custo-beneficio (score/preco) apenas como desempate.
+     */
     private final Estrategia                 estrategia;
 
     /** {@code true} quando todos os slots da formacao foram preenchidos. */

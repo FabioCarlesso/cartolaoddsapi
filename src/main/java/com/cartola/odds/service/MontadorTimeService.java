@@ -59,12 +59,10 @@ public class MontadorTimeService {
         Configuracao config = configuracaoService.buscarConfig();
         Map<String, Integer> formacao = resolverFormacao(config, formacaoOverride);
 
-        // Quando um orcamento e informado, prioriza custo-beneficio (score/preco);
-        // caso contrario mantem a ordenacao por score puro.
-        Estrategia estrategia = orcamento != null ? Estrategia.CUSTO_BENEFICIO : Estrategia.SCORE_MAXIMO;
-        Comparator<Atleta> ordenacao = estrategia == Estrategia.CUSTO_BENEFICIO
-                ? Comparator.comparingDouble(MontadorTimeService::custoBeneficio).reversed()
-                : Comparator.comparingDouble(Atleta::getScore).reversed();
+        // A montagem usa sempre SCORE_MAXIMO: maximiza a soma de score. Com orcamento,
+        // o objetivo passa a ser "score maximo sujeito ao teto", com custo-beneficio
+        // (score/preco) apenas como criterio de desempate.
+        Estrategia estrategia = Estrategia.SCORE_MAXIMO;
 
         Map<Posicao, List<Atleta>> porPosicao = pool.stream()
                 .collect(Collectors.groupingBy(Atleta::getPosicao));
@@ -72,69 +70,19 @@ public class MontadorTimeService {
         porPosicao.forEach((posicao, atletas) -> candidatosPorPosicao.put(
                 posicao,
                 atletas.stream()
-                        .sorted(ordenacao)
+                        .sorted(Comparator.comparingDouble(Atleta::getScore).reversed())
                         .toList()
         ));
-
-        Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
-        Map<Posicao, Atleta>       reservas  = new EnumMap<>(Posicao.class);
-        Set<Integer> clubesDefesaEscalados = new HashSet<>();
-        Map<Integer, Integer> contagemClubesTitulares = new HashMap<>();
 
         // Budget efetivo: orcamento da requisicao tem prioridade; senao usa budgetMaximo
         // da configuracao. Double.MAX_VALUE quando nao ha restricao (budgetMaximo == 0).
         double budgetEfetivo = orcamento != null
                 ? orcamento
                 : (config.getBudgetMaximo() > 0 ? config.getBudgetMaximo() : Double.MAX_VALUE);
-        double[] budgetRestante = { budgetEfetivo };
 
-        for (Map.Entry<String, Integer> slot : formacao.entrySet()) {
-            Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
-            if (posicao == null) {
-                log.warn("Posicao desconhecida na formacao: {}", slot.getKey());
-                continue;
-            }
-
-            int qtd = slot.getValue();
-            List<Atleta> candidatos = candidatosPorPosicao.getOrDefault(posicao, List.of());
-
-            if (candidatos.isEmpty()) {
-                log.warn("Sem jogadores para posicao {}", posicao);
-                continue;
-            }
-
-            List<Atleta> escolhidos = escolherTitulares(
-                    candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
-                    budgetRestante, candidatosPorPosicao, formacao
-            );
-            titulares.put(posicao, escolhidos);
-            log.debug("Titulares {}: {}", posicao,
-                    escolhidos.stream().map(Atleta::getApelido).toList());
-
-            if (!POSICOES_COM_RESERVA.contains(posicao)) {
-                continue;
-            }
-
-            double maxPrecoTitular = escolhidos.stream()
-                    .mapToDouble(Atleta::getPreco)
-                    .max()
-                    .orElse(0.0);
-
-            Set<String> apelidosTitulares = escolhidos.stream()
-                    .map(Atleta::getApelido)
-                    .collect(Collectors.toSet());
-
-            List<Atleta> restantes = candidatos.stream()
-                    .filter(a -> !apelidosTitulares.contains(a.getApelido()))
-                    .filter(a -> a.getStatus() == StatusAtleta.PROVAVEL)
-                    .toList();
-
-            restantes.stream()
-                    .filter(a -> a.getPreco() < maxPrecoTitular)
-                    .findFirst()
-                    .or(() -> restantes.stream().findFirst())
-                    .ifPresent(r -> reservas.put(posicao, r));
-        }
+        Map<Posicao, List<Atleta>> titulares = montarTitulares(
+                formacao, candidatosPorPosicao, config, budgetEfetivo);
+        Map<Posicao, Atleta> reservas = selecionarReservas(titulares, candidatosPorPosicao);
 
         Set<String> apelidosTitulares = titulares.values().stream()
                 .flatMap(List::stream)
@@ -236,11 +184,6 @@ public class MontadorTimeService {
                 .build();
     }
 
-    /** Pontos esperados por cartoleta gasta; usa o score quando o preco for invalido (<= 0). */
-    private static double custoBeneficio(Atleta atleta) {
-        return atleta.getPreco() > 0 ? atleta.getScore() / atleta.getPreco() : atleta.getScore();
-    }
-
     /**
      * Resolve a formacao usada na montagem. Sem override, usa a formacao da
      * configuracao. Com override, mantem as posicoes fixas da config
@@ -267,6 +210,123 @@ public class MontadorTimeService {
         formacao.put("ATA", override.atacantes());
         formacao.put("TEC", config.getFormacaoTec());
         return formacao;
+    }
+
+    /**
+     * Seleciona os titulares maximizando a soma de score. Sem teto efetivo de
+     * orcamento ({@code Double.MAX_VALUE}) usa a selecao gulosa por score, que ja
+     * e otima nesse caso e evita regressao de performance. Com teto finito, delega
+     * ao {@link OtimizadorTitulares} (branch-and-bound); se a guarda de iteracoes
+     * do otimizador estourar, recorre a selecao gulosa como fallback.
+     *
+     * <p>O otimizador respeita as restricoes de clube/defesa de forma estrita e pode
+     * nao completar a formacao quando sao elas (e nao o orcamento) que impedem.
+     * Nesse caso recorre-se a selecao gulosa, que relaxa essas regras em ultimo
+     * recurso (como no fluxo sem orcamento), e fica-se com a montagem que preenche
+     * mais vagas — evitando atribuir ao orcamento uma incompletude que e de clube.
+     */
+    private Map<Posicao, List<Atleta>> montarTitulares(Map<String, Integer> formacao,
+                                                       Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                                       Configuracao config,
+                                                       double budgetEfetivo) {
+        if (budgetEfetivo != Double.MAX_VALUE) {
+            OtimizadorTitulares.Resultado resultado = OtimizadorTitulares.otimizar(
+                    formacao, candidatosPorPosicao, budgetEfetivo,
+                    config.getLimiteAtletasPorClube(), config.isEvitarMesmoClubeDefesa());
+            if (!resultado.fallback()) {
+                if (resultado.completo()) {
+                    return resultado.titulares();
+                }
+                // Incompleto sob restricoes estritas: o guloso pode completar relaxando
+                // clube/defesa. Preferimos a montagem com mais vagas preenchidas.
+                Map<Posicao, List<Atleta>> guloso =
+                        montarGuloso(formacao, candidatosPorPosicao, config, budgetEfetivo);
+                return contarAtletas(guloso) > contarAtletas(resultado.titulares())
+                        ? guloso
+                        : resultado.titulares();
+            }
+            log.warn("Otimizador atingiu a guarda de iteracoes; usando selecao gulosa por orcamento");
+        }
+        return montarGuloso(formacao, candidatosPorPosicao, config, budgetEfetivo);
+    }
+
+    /** Total de atletas escalados em uma montagem por posicao. */
+    private static long contarAtletas(Map<Posicao, List<Atleta>> titulares) {
+        return titulares.values().stream().mapToLong(List::size).sum();
+    }
+
+    /** Selecao gulosa por posicao, respeitando regras de clube e o budget efetivo. */
+    private Map<Posicao, List<Atleta>> montarGuloso(Map<String, Integer> formacao,
+                                                    Map<Posicao, List<Atleta>> candidatosPorPosicao,
+                                                    Configuracao config,
+                                                    double budgetEfetivo) {
+        Map<Posicao, List<Atleta>> titulares = new EnumMap<>(Posicao.class);
+        Set<Integer> clubesDefesaEscalados = new HashSet<>();
+        Map<Integer, Integer> contagemClubesTitulares = new HashMap<>();
+        double[] budgetRestante = { budgetEfetivo };
+
+        for (Map.Entry<String, Integer> slot : formacao.entrySet()) {
+            Posicao posicao = Posicao.fromSigla(slot.getKey()).orElse(null);
+            if (posicao == null) {
+                log.warn("Posicao desconhecida na formacao: {}", slot.getKey());
+                continue;
+            }
+
+            int qtd = slot.getValue();
+            List<Atleta> candidatos = candidatosPorPosicao.getOrDefault(posicao, List.of());
+            if (candidatos.isEmpty()) {
+                log.warn("Sem jogadores para posicao {}", posicao);
+                continue;
+            }
+
+            List<Atleta> escolhidos = escolherTitulares(
+                    candidatos, qtd, posicao, config, clubesDefesaEscalados, contagemClubesTitulares,
+                    budgetRestante, candidatosPorPosicao, formacao
+            );
+            titulares.put(posicao, escolhidos);
+            log.debug("Titulares {}: {}", posicao,
+                    escolhidos.stream().map(Atleta::getApelido).toList());
+        }
+        return titulares;
+    }
+
+    /**
+     * Seleciona a reserva de cada posicao com reserva: somente Provaveis da mesma
+     * posicao que nao sejam titulares, preferindo a mais barata que o titular mais
+     * caro quando houver.
+     */
+    private Map<Posicao, Atleta> selecionarReservas(Map<Posicao, List<Atleta>> titulares,
+                                                    Map<Posicao, List<Atleta>> candidatosPorPosicao) {
+        Map<Posicao, Atleta> reservas = new EnumMap<>(Posicao.class);
+
+        for (Map.Entry<Posicao, List<Atleta>> entry : titulares.entrySet()) {
+            Posicao posicao = entry.getKey();
+            if (!POSICOES_COM_RESERVA.contains(posicao)) {
+                continue;
+            }
+            List<Atleta> escolhidos = entry.getValue();
+
+            double maxPrecoTitular = escolhidos.stream()
+                    .mapToDouble(Atleta::getPreco)
+                    .max()
+                    .orElse(0.0);
+
+            Set<String> apelidosTitulares = escolhidos.stream()
+                    .map(Atleta::getApelido)
+                    .collect(Collectors.toSet());
+
+            List<Atleta> restantes = candidatosPorPosicao.getOrDefault(posicao, List.of()).stream()
+                    .filter(a -> !apelidosTitulares.contains(a.getApelido()))
+                    .filter(a -> a.getStatus() == StatusAtleta.PROVAVEL)
+                    .toList();
+
+            restantes.stream()
+                    .filter(a -> a.getPreco() < maxPrecoTitular)
+                    .findFirst()
+                    .or(() -> restantes.stream().findFirst())
+                    .ifPresent(r -> reservas.put(posicao, r));
+        }
+        return reservas;
     }
 
     private List<Atleta> escolherTitulares(List<Atleta> candidatos,

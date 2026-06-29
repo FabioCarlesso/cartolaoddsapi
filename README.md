@@ -24,7 +24,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 | 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
 | 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
-| 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o melhor time dentro do limite de cartoletas, priorizando custo-benefício (score/preço) |
+| 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o time de **maior score** que cabe no limite de cartoletas (otimização branch-and-bound; custo-benefício só como desempate) |
 | 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
 | 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
 
@@ -184,7 +184,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | Método | Endpoint | Descrição |
 |---|---|---|
 | `GET` | `/api/time` | Monta o time completo para a rodada atual |
-| `GET` | `/api/time?orcamento=120.0` | Monta o time respeitando o orçamento em cartoletas (custo-benefício) |
+| `GET` | `/api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
 | `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3` | Compara o melhor time entre múltiplas formações (2 a 5) e ordena por `scoreTotal` |
 | `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3&orcamento=120.0` | Compara formações montando cada uma dentro do orçamento informado |
 | `GET` | `/api/favoritos` | Lista times favoritos com odds detalhadas |
@@ -342,9 +342,9 @@ Uma rodada sem escalação registrada retorna `404 Not Found` em `GET /api/histo
 O parâmetro **opcional** `orcamento` em `GET /api/time` limita o total de cartoletas gastas na montagem:
 
 - **Sem `orcamento`** → comportamento padrão: estratégia `SCORE_MAXIMO`, candidatos ordenados por score, sem restrição de custo (a não ser o `budgetMaximo` da configuração, se definido).
-- **Com `orcamento`** → estratégia `CUSTO_BENEFICIO`: os candidatos de cada posição passam a ser ordenados por `score / preço`, priorizando quem entrega mais pontos por cartoleta. O time é montado respeitando o limite informado, reservando orçamento para completar as posições restantes.
+- **Com `orcamento`** → estratégia `SCORE_MAXIMO` **sujeita ao teto**: o montador resolve um *multiple-choice knapsack* por posição via **branch-and-bound**, escolhendo a combinação de **maior soma de score** que cabe no orçamento (e não os mais baratos). Em empate de score, vence a de **menor custo** (custo-benefício `score / preço` apenas como desempate). As regras de formação, limite por clube e defesa sem clube repetido continuam respeitadas. Com orçamento folgado, o resultado coincide com o time de maior score absoluto.
 
-A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o orçamento não basta para completar os 12 titulares — `avisoOrcamento`. Valores em cartoletas são arredondados para 2 casas decimais.
+A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o orçamento não basta para completar os 12 titulares — `avisoOrcamento` (nesse caso o time é o melhor *best-effort* dentro do teto). Valores em cartoletas são arredondados para 2 casas decimais.
 
 #### Exemplo — `GET /api/time?orcamento=120.0`
 
@@ -354,7 +354,7 @@ A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `e
   "orcamentoInformado": 120.0,
   "custoTotal": 118.3,
   "saldoRestante": 1.7,
-  "estrategia": "CUSTO_BENEFICIO",
+  "estrategia": "SCORE_MAXIMO",
   "formacaoCompleta": true,
   "avisoMercado": null,
   "titulares": { },
@@ -370,7 +370,7 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
   "orcamentoInformado": 30.0,
   "custoTotal": 24.0,
   "saldoRestante": 6.0,
-  "estrategia": "CUSTO_BENEFICIO",
+  "estrategia": "SCORE_MAXIMO",
   "formacaoCompleta": false,
   "avisoOrcamento": "Orcamento de C$30,0 insuficiente para completar a formacao (10/12 titulares escalados). Considere aumentar o orcamento.",
   "titulares": { },
@@ -599,7 +599,7 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     └── test/
-        ├── java/                            # 24 classes de teste — 410 cenários
+        ├── java/                            # 23 classes de teste — 424 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -671,7 +671,7 @@ mvn test jacoco:report
 | `FavoritosControllerTest` | 13 — HTTP 200/400/502, campos, validação oddLimite |
 | `CartolaDataServiceTest` | 14 — filtros de status/preço/favorito, mandantes e confrontos da rodada |
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
-| `MontadorTimeServiceTest` | 36 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, orçamento/custo-benefício, formação incompleta, override de formação |
+| `MontadorTimeServiceTest` | 54 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, otimização por orçamento (score máximo, redução por clube em posição multi-vaga, empate por menor custo, best-effort, incompletude por clube sem aviso de orçamento), formação incompleta, override de formação |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
 | `PipelineServiceTest` | 12 — inclui etapa DesempenhoService, propagação de orçamento e comparação de formações |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
