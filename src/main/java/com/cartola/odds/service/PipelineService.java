@@ -43,7 +43,20 @@ public class PipelineService {
      *                  da requisicao e aplicada e vale a estrategia SCORE_MAXIMO.
      */
     public Time executar(Double orcamento) {
-        var contexto = prepararContexto();
+        return executar(orcamento, false);
+    }
+
+    /**
+     * Executa o pipeline podendo considerar apenas atletas provaveis.
+     *
+     * @param orcamento     orcamento maximo (C$); quando {@code null}, nenhuma restricao de custo
+     *                      da requisicao e aplicada e vale a estrategia SCORE_MAXIMO.
+     * @param excluirDuvida quando {@code true}, remove os atletas em duvida do pool antes do
+     *                      calculo de score, de modo que nenhum deles seja escalado como
+     *                      titular ou reserva.
+     */
+    public Time executar(Double orcamento, boolean excluirDuvida) {
+        var contexto = prepararContexto(excluirDuvida);
 
         log.info("7 - Montando time...");
         Time time = montadorTimeService.montar(
@@ -68,7 +81,7 @@ public class PipelineService {
      * @return um resultado por formacao, na mesma ordem da lista informada
      */
     public List<ResultadoFormacao> compararFormacoes(List<FormacaoConfig> formacoes, Double orcamento) {
-        var contexto = prepararContexto();
+        var contexto = prepararContexto(false);
 
         log.info("7 - Montando time para {} formacoes...", formacoes.size());
         return formacoes.stream()
@@ -85,8 +98,10 @@ public class PipelineService {
     /**
      * Executa as etapas 1-6 do pipeline (status do mercado, favoritos, atletas
      * filtrados, desempenho e scores) e devolve o pool pronto para a montagem.
+     *
+     * @param excluirDuvida quando {@code true}, mantem no pool apenas os atletas provaveis
      */
-    private ContextoMontagem prepararContexto() {
+    private ContextoMontagem prepararContexto(boolean excluirDuvida) {
         log.info("1 - Verificando status do mercado...");
         var statusResponse = cartolaDataService.buscarStatusMercado();
         var statusMercado  = statusResponse.getStatus();
@@ -112,6 +127,17 @@ public class PipelineService {
                 "Nenhum atleta disponivel. Verifique a Odds API Key e o valor de ODD_LIMITE.");
         }
 
+        // Filtragem pos-cache: remove jogadores em duvida antes do score/montagem,
+        // sem invalidar entradas de cache compartilhadas com o comportamento padrao.
+        List<Atleta> atletasConsiderados = excluirDuvida
+                ? atletasFiltrados.stream().filter(a -> !a.isDuvida()).toList()
+                : atletasFiltrados;
+
+        if (excluirDuvida) {
+            log.info("Filtro excluirDuvida aplicado: {} de {} atletas mantidos (apenas provaveis)",
+                    atletasConsiderados.size(), atletasFiltrados.size());
+        }
+
         log.info("4 - Identificando times mandantes...");
         Set<Integer> timesCasa = dadosRodada.timesCasa();
 
@@ -119,7 +145,7 @@ public class PipelineService {
         var desempenhoMap = desempenhoService.calcularDesempenhoUltimasRodadas(statusResponse.getRodadaAtual());
 
         log.info("6 - Calculando scores com desempenho real...");
-        var atletasComScore = scoreService.calcularScores(atletasFiltrados, timesCasa, favoritos, desempenhoMap);
+        var atletasComScore = scoreService.calcularScores(atletasConsiderados, timesCasa, favoritos, desempenhoMap);
 
         return new ContextoMontagem(
                 atletasComScore,

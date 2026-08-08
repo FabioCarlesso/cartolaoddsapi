@@ -459,6 +459,13 @@ Fluxo aplicado:
 - Substituto nunca é outro atleta já escalado como titular.
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
+**Opt-out via `excluirDuvida`:** o parâmetro opcional `excluirDuvida=true` em `GET /api/time`
+remove os atletas com `status_id == 6` do pool no `PipelineService`, **após o cache** e **antes**
+do `ScoreService` — de modo que nenhum jogador em dúvida seja escalado como titular ou reserva e
+`alertasDuvida` volte vazio. Como a filtragem é pós-cache, as entradas de cache compartilhadas com
+o fluxo padrão não são invalidadas. Padrão `false` (comportamento acima preservado). Quando faltam
+prováveis para alguma posição, a resposta continua válida com `formacaoCompleta = false`.
+
 
 ### 5.10 Endpoint de Ranking (`GET /api/ranking`)
 
@@ -518,10 +525,11 @@ Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`
 
 ### 5.12 Histórico de Escalações por Rodada
 
-Cada chamada a `GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
+`GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
 
 - **Idempotência:** `salvarEscalacao(Time, rodadaId)` verifica `existsByRodadaId` antes de gravar; uma rodada já registrada não é sobrescrita.
 - **Não bloqueante:** a chamada parte do `TimeController` dentro de um `try/catch`; falhas ao persistir são logadas e não impedem o retorno do time.
+- **Exceção para `excluirDuvida=true`:** o `TimeController` não persiste quando o parâmetro é usado. Como a gravação é idempotente por rodada, registrar a variante sem dúvidas faria o histórico gravar a **primeira** consulta feita na rodada em vez da sugestão da rodada — cenário provável, já que confrontar `/api/time` com `/api/time?excluirDuvida=true` é o uso natural do parâmetro. Mesmo critério do `/api/time/comparar`, que já não persiste. O `orcamento`, ao contrário, delimita um teto real de cartoletas e produz a escalação que de fato será usada, então **persiste normalmente**.
 - **Flags por atleta:** `capitao`, `reserva_luxo` e `em_duvida` são derivadas do `Time` montado. A `pontuacao_real` nasce `null`.
 
 Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atletas/pontuados` e preenche a `pontuacao_real` dos atletas encontrados (os ausentes permanecem `null`). No cálculo do total da rodada (`pontuacaoRealTotal`), a pontuação do capitão é contada em dobro.
@@ -769,6 +777,9 @@ Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espa
 ### `GlobalExceptionHandler.handleValidation(MethodArgumentNotValidException) → ErrorResponse`
 Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e todas as mensagens de campos inválidos concatenadas com `"; "` no corpo da resposta.
 
+### `GlobalExceptionHandler.handleTypeMismatch(MethodArgumentTypeMismatchException) → ErrorResponse`
+Converte valores de query param/path variable que não convertem para o tipo esperado (ex.: `?orcamento=abc`, `?excluirDuvida=abc`) em HTTP 400, informando nome do parâmetro, valor recebido e tipo esperado. Sem este handler a exceção cairia no `handleGeneric(Exception)` e seria reportada como `500`, tratando erro de cliente como falha de servidor.
+
 ---
 
 ## 9. Referência de Dados
@@ -895,6 +906,7 @@ mvn test jacoco:report
 |---|---|
 | `GET /api/time` | Monta o time completo da rodada |
 | `GET /api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
+| `GET /api/time?excluirDuvida=true` | Monta o time apenas com prováveis, sem jogadores em dúvida |
 | `GET /api/ranking` | Top atletas por score com filtros opcionais |
 | `GET /api/ranking?posicao=ATA` | Top atacantes |
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
@@ -913,7 +925,7 @@ Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 c
 | Código | Cenário |
 |---|---|
 | `200` | Time montado com sucesso |
-| `400` | `orcamento` inválido (deve ser > 0) |
+| `400` | `orcamento` inválido (deve ser > 0), ou valor que não converte para o tipo esperado (`?orcamento=abc`, `?excluirDuvida=abc`) |
 | `422` | Pool vazio — ODD_LIMITE muito restritivo ou sem API Key |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
@@ -925,6 +937,10 @@ desfeitos pela de **menor custo** (`score / preço` apenas como desempate). Sem 
 ordenação gulosa por score. A estratégia retornada é sempre `SCORE_MAXIMO`. A resposta expõe
 `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o
 orçamento não basta para completar a formação — `avisoOrcamento` (com o melhor time best-effort dentro do teto).
+
+**Parâmetro `excluirDuvida` (opcional, padrão `false`) em `GET /api/time`:** quando `true`, o pool é
+restrito aos atletas prováveis (`status_id == 7`) antes do cálculo de score, garantindo um time sem
+jogadores em dúvida entre titulares e reservas (ver 5.9). É combinável com `orcamento`.
 
 ---
 

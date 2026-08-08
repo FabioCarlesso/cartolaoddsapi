@@ -11,12 +11,16 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
 @Hidden
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** Limite de caracteres do valor recebido do cliente ecoado em mensagens de erro. */
+    private static final int VALOR_MAX_CHARS = 50;
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
@@ -34,6 +38,23 @@ public class GlobalExceptionHandler {
                 .orElse("Parametro invalido");
 
         log.warn("Validacao invalida: {}", mensagem);
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "Parametro invalido", mensagem));
+    }
+
+    /**
+     * Valor de query param/path variable que nao converte para o tipo esperado
+     * (ex.: {@code ?orcamento=abc}, {@code ?excluirDuvida=abc}). E erro do cliente:
+     * sem este handler cairia no generico e responderia 500.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        var tipoEsperado = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "desconhecido";
+        var mensagem = "Parametro '%s' invalido: '%s' nao e um valor valido do tipo %s."
+                .formatted(ex.getName(), truncar(ex.getValue()), tipoEsperado);
+
+        log.warn("Parametro com tipo invalido: {}", mensagem);
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(400, "Parametro invalido", mensagem));
@@ -69,6 +90,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ErrorResponse.of(404, "Recurso nao encontrado", ex.getResourcePath()));
+    }
+
+    /**
+     * Limita o valor recebido do cliente antes de eco-lo na resposta e no log, evitando
+     * que uma query string enorme vire corpo de erro e linha de log do mesmo tamanho.
+     */
+    private String truncar(Object valor) {
+        var texto = String.valueOf(valor);
+        return texto.length() <= VALOR_MAX_CHARS ? texto : texto.substring(0, VALOR_MAX_CHARS) + "...";
     }
 
     @ExceptionHandler(Exception.class)

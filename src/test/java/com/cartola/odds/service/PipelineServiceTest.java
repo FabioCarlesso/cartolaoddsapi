@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -187,6 +188,103 @@ class PipelineServiceTest {
     }
 
     @Nested
+    @DisplayName("executar — filtro excluirDuvida")
+    class ExecutarExcluirDuvida {
+
+        @Test
+        @DisplayName("deve remover atletas em duvida do pool quando excluirDuvida=true")
+        void deveRemoverAtletasEmDuvida() {
+            var atletas = List.of(provavel(1, "Provavel"), duvida(2, "Duvidoso"));
+            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of());
+
+            pipelineService.executar(null, true);
+
+            ArgumentCaptor<List<Atleta>> captor = ArgumentCaptor.captor();
+            verify(scoreService).calcularScores(captor.capture(), any(), any(), any());
+            assertThat(captor.getValue())
+                    .extracting(Atleta::getApelido)
+                    .containsExactly("Provavel");
+        }
+
+        @Test
+        @DisplayName("deve manter atletas em duvida no pool quando excluirDuvida=false")
+        void deveManterAtletasEmDuvida() {
+            var atletas = List.of(provavel(1, "Provavel"), duvida(2, "Duvidoso"));
+            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of());
+
+            pipelineService.executar(null, false);
+
+            verify(scoreService).calcularScores(eq(atletas), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("deve remover em duvida mesmo quando tem score maior que os provaveis")
+        void deveRemoverEmDuvidaComScoreMaior() {
+            var provavel  = provavel(1, "Provavel").withScore(5.0);
+            var duvidaTop = duvida(2, "DuvidaTop").withScore(99.0);
+            var atletas   = List.of(provavel, duvidaTop);
+            configurarMocks(atletas, Set.of("fla"), Set.of(1), Map.of());
+
+            pipelineService.executar(null, true);
+
+            ArgumentCaptor<List<Atleta>> captor = ArgumentCaptor.captor();
+            verify(scoreService).calcularScores(captor.capture(), any(), any(), any());
+            assertThat(captor.getValue()).doesNotContain(duvidaTop);
+        }
+
+        @Test
+        @DisplayName("deve montar time sem erro quando todos os candidatos estao em duvida")
+        void deveMontarTimeQuandoTodosEmDuvida() {
+            var atletas = List.of(duvida(1, "Duvidoso"));
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(Map.of());
+            when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(List.of());
+            when(montadorTimeService.montar(any(), eq(15), any(), isNull())).thenReturn(timeMock(15));
+
+            var resultado = pipelineService.executar(null, true);
+
+            assertThat(resultado).isNotNull();
+            verify(scoreService).calcularScores(eq(List.of()), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("deve combinar excluirDuvida com o orcamento informado")
+        void deveCombinarComOrcamento() {
+            var atletas = List.of(provavel(1, "Provavel"), duvida(2, "Duvidoso"));
+            when(cartolaDataService.buscarStatusMercado()).thenReturn(statusRodada15);
+            when(cartolaDataService.buscarDadosRodada())
+                    .thenReturn(new CartolaDataService.DadosRodada(Set.of(), Set.of()));
+            when(oddsService.buscarFavoritos(any())).thenReturn(Set.of());
+            when(cartolaDataService.buscarAtletasFiltrados(any())).thenReturn(atletas);
+            when(desempenhoService.calcularDesempenhoUltimasRodadas(15)).thenReturn(Map.of());
+            when(scoreService.calcularScores(any(), any(), any(), any())).thenReturn(atletas);
+            when(montadorTimeService.montar(any(), eq(15), any(), eq(120.0))).thenReturn(timeMock(15));
+
+            pipelineService.executar(120.0, true);
+
+            ArgumentCaptor<List<Atleta>> captor = ArgumentCaptor.captor();
+            verify(scoreService).calcularScores(captor.capture(), any(), any(), any());
+            assertThat(captor.getValue()).extracting(Atleta::getApelido).containsExactly("Provavel");
+            verify(montadorTimeService).montar(any(), eq(15), any(), eq(120.0));
+        }
+
+        @Test
+        @DisplayName("deve usar excluirDuvida=false na sobrecarga sem o parametro")
+        void deveUsarPadraoFalseNaSobrecarga() {
+            var atletas = List.of(provavel(1, "Provavel"), duvida(2, "Duvidoso"));
+            configurarMocks(atletas, Set.of(), Set.of(), Map.of());
+
+            pipelineService.executar(null);
+
+            verify(scoreService).calcularScores(eq(atletas), any(), any(), any());
+        }
+    }
+
+    @Nested
     @DisplayName("compararFormacoes")
     class CompararFormacoes {
 
@@ -282,11 +380,23 @@ class PipelineServiceTest {
     }
 
     private List<Atleta> atletasMinimos() {
-        return List.of(Atleta.builder()
-                .atletaId(1).apelido("Jogador").posicao(Posicao.ATA)
+        return List.of(provavel(1, "Jogador"));
+    }
+
+    private Atleta provavel(int atletaId, String apelido) {
+        return atleta(atletaId, apelido, StatusAtleta.PROVAVEL);
+    }
+
+    private Atleta duvida(int atletaId, String apelido) {
+        return atleta(atletaId, apelido, StatusAtleta.DUVIDA);
+    }
+
+    private Atleta atleta(int atletaId, String apelido, StatusAtleta status) {
+        return Atleta.builder()
+                .atletaId(atletaId).apelido(apelido).posicao(Posicao.ATA)
                 .clubeId(1).nomeClube("Fla").siglaClube("FLA").nomeClubeNorm("fla")
-                .status(StatusAtleta.PROVAVEL).mediaPontos(8.0).valorizacao(2.0)
-                .preco(15.0).desempenhoRecente(0.0).score(5.0).build());
+                .status(status).mediaPontos(8.0).valorizacao(2.0)
+                .preco(15.0).desempenhoRecente(0.0).score(5.0).build();
     }
 
     private Time timeMock(int rodada) {

@@ -15,6 +15,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -135,6 +139,35 @@ class HistoricoControllerTest {
             mockMvc.perform(post("/api/historico/99/atualizar-pontuacao"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.status").value(404));
+        }
+    }
+
+    @Nested
+    @DisplayName("Path variable com tipo invalido")
+    class PathVariableInvalida {
+
+        @Test
+        @DisplayName("deve retornar 400 quando rodadaId nao e numerico em GET")
+        void deveRetornar400NoGet() throws Exception {
+            mockMvc.perform(get("/api/historico/abc"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.erro").value("Parametro invalido"))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("rodadaId")))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("Integer")));
+
+            verify(escalacaoService, never()).buscarPorRodada(any());
+        }
+
+        @Test
+        @DisplayName("deve retornar 400 quando rodadaId nao e numerico em POST")
+        void deveRetornar400NoPost() throws Exception {
+            mockMvc.perform(post("/api/historico/abc/atualizar-pontuacao"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.status").value(400))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("rodadaId")));
+
+            verify(escalacaoService, never()).atualizarPontuacaoReal(any());
         }
     }
 }

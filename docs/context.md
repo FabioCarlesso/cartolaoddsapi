@@ -145,6 +145,7 @@ Para scrape com Prometheus, aponte o job para `GET :9090/actuator/prometheus`.
 ### Filtro de Atletas
 
 Apenas atletas com status **Provável (7)** ou **Dúvida (6)** e preço `> 0` são considerados.
+O parâmetro `excluirDuvida=true` (disponível em `GET /api/time` e `GET /api/ranking`) restringe o pool aos **Prováveis (7)**. O filtro é aplicado **pós-cache**, antes do cálculo de score, para não invalidar entradas de cache compartilhadas com o fluxo padrão.
 Antes de identificar favoritos, o `OddsService` cruza os jogos retornados pela The Odds API com os confrontos da rodada atual vindos de `/partidas`; odds de jogos fora da rodada atual são ignoradas.
 Quando odds não estão disponíveis, o filtro por time favorito é desativado e todos os elegíveis entram no pool.
 
@@ -205,8 +206,8 @@ com.cartola.odds/
 
 | Método | Endpoint | Descrição |
 |---|---|---|
-| `GET` | `/api/time` | Monta o time completo para a rodada atual |
-| `GET` | `/api/ranking` | Top atletas por score (filtrável por posição e limite) |
+| `GET` | `/api/time` | Monta o time completo para a rodada atual (opcionais: `orcamento`, `excluirDuvida`) |
+| `GET` | `/api/ranking` | Top atletas por score (filtrável por posição, limite e `excluirDuvida`) |
 | `GET` | `/api/favoritos` | Times favoritos com odds detalhadas |
 | `DELETE` | `/api/cache` | Invalida todos os caches |
 | `DELETE` | `/api/cache/{nome}` | Invalida um cache específico |

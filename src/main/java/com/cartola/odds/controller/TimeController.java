@@ -24,11 +24,17 @@ public class TimeController implements TimeApi {
     private final EscalacaoService escalacaoService;
 
     @Override
-    public ResponseEntity<TimeResponse> montarTime(Double orcamento) {
+    public ResponseEntity<TimeResponse> montarTime(Double orcamento, boolean excluirDuvida) {
         validarOrcamento(orcamento);
-        log.info("GET /api/time - Iniciando pipeline... | orcamento={}", orcamento);
-        var time = pipelineService.executar(orcamento);
-        registrarEscalacao(time);
+        log.info("GET /api/time - Iniciando pipeline... | orcamento={} | excluirDuvida={}",
+                orcamento, excluirDuvida);
+        var time = pipelineService.executar(orcamento, excluirDuvida);
+        if (excluirDuvida) {
+            log.info("Consulta comparativa (excluirDuvida=true) - escalacao da rodada {} nao registrada",
+                    time.getRodada());
+        } else {
+            registrarEscalacao(time);
+        }
         return ResponseEntity.ok(TimeResponse.from(time));
     }
 
@@ -52,6 +58,16 @@ public class TimeController implements TimeApi {
     /**
      * Persiste a escalacao sugerida de forma nao bloqueante: falhas ao salvar
      * sao logadas mas nao impedem o retorno do time.
+     *
+     * <p>Chamado em toda montagem exceto {@code excluirDuvida=true}. Como
+     * {@link EscalacaoService#salvarEscalacao} e idempotente por rodada (a primeira chamada
+     * vence), registrar a variante sem duvidas faria o historico gravar a primeira consulta
+     * feita na rodada em vez da sugestao canonica — cenario provavel, já que comparar
+     * {@code /api/time} com {@code /api/time?excluirDuvida=true} e o uso natural do parametro.
+     *
+     * <p>O {@code orcamento}, ao contrario, restringe o time a um teto real de cartoletas e
+     * continua produzindo a escalacao que o usuario de fato vai usar — por isso persiste
+     * normalmente.
      */
     private void registrarEscalacao(Time time) {
         try {

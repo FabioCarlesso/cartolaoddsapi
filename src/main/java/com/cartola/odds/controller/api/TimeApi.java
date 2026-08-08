@@ -39,7 +39,7 @@ public interface TimeApi {
 
             **Regras aplicadas:**
             - Somente atletas de times favoritos (odd ≤ ODD_LIMITE, padrao 3.0)
-            - Somente Provavel (7) e Duvida (6)
+            - Somente Provavel (7) e Duvida (6) — apenas Provavel (7) com `excluirDuvida=true`
             - Formacao: 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC
             - Reservas: somente Provaveis, mesma posicao, preferencialmente mais baratos; TEC nao tem reserva
             - Titulares em Duvida recebem substituto provavel da mesma posicao
@@ -51,13 +51,29 @@ public interface TimeApi {
               (custo-beneficio score/preco apenas como desempate) — estrategia SCORE_MAXIMO
             - Validacao: deve ser > 0
 
+            **Parametro `excluirDuvida`** *(opcional, padrao `false`)*:
+            - `false`: comportamento padrao — Provaveis (7) e Duvidas (6) concorrem as vagas,
+              e titulares em duvida recebem um substituto provavel sugerido
+            - `true`: considera apenas Provaveis (7), de modo que nenhum jogador em duvida
+              seja escalado como titular ou reserva. Sem duvidas escalados, `alertasDuvida`
+              vem vazio. Se faltarem provaveis para alguma posicao, a resposta e retornada
+              normalmente com `formacaoCompleta = false`
+            - Combinavel com `orcamento`
+
+            **Historico:** a escalacao da rodada e registrada em `/api/historico`, inclusive
+            quando `orcamento` e informado (o time cabe num teto real de cartoletas e continua
+            sendo a escalacao que sera usada). A unica excecao e `excluirDuvida=true`: por ser
+            uma consulta comparativa, nao persiste — do contrario o historico gravaria a
+            primeira variante consultada em vez da sugestao da rodada.
+
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
             """
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Time montado com sucesso",
             content = @Content(schema = @Schema(implementation = TimeResponse.class))),
-        @ApiResponse(responseCode = "400", description = "orcamento invalido (deve ser > 0)",
+        @ApiResponse(responseCode = "400",
+            description = "Parametro invalido (orcamento <= 0, ou valor que nao converte para o tipo esperado)",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "Nenhum atleta disponivel apos filtragem",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -72,7 +88,12 @@ public interface TimeApi {
                               + "maximiza o score dentro do limite (custo-beneficio so como "
                               + "desempate). Deve ser > 0.",
                    example = "120.0")
-        @RequestParam(required = false) Double orcamento
+        @RequestParam(required = false) Double orcamento,
+
+        @Parameter(description = "Quando true, monta o time apenas com jogadores provaveis, "
+                              + "removendo os em duvida (statusId 6) de titulares e reservas.",
+                   example = "false")
+        @RequestParam(defaultValue = "false") boolean excluirDuvida
     );
 
     @GetMapping("/comparar")
