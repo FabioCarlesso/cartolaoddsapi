@@ -29,11 +29,11 @@ public class TimeController implements TimeApi {
         log.info("GET /api/time - Iniciando pipeline... | orcamento={} | excluirDuvida={}",
                 orcamento, excluirDuvida);
         var time = pipelineService.executar(orcamento, excluirDuvida);
-        if (isConsultaPadrao(orcamento, excluirDuvida)) {
-            registrarEscalacao(time);
+        if (excluirDuvida) {
+            log.info("Consulta comparativa (excluirDuvida=true) - escalacao da rodada {} nao registrada",
+                    time.getRodada());
         } else {
-            log.info("Consulta exploratoria (orcamento={} | excluirDuvida={}) - escalacao da rodada {} nao registrada",
-                    orcamento, excluirDuvida, time.getRodada());
+            registrarEscalacao(time);
         }
         return ResponseEntity.ok(TimeResponse.from(time));
     }
@@ -56,22 +56,18 @@ public class TimeController implements TimeApi {
     }
 
     /**
-     * Somente a montagem padrao — sem {@code orcamento} e sem {@code excluirDuvida} — representa
-     * "a sugestao da rodada" e deve alimentar o historico.
-     *
-     * <p>Como {@link EscalacaoService#salvarEscalacao} e idempotente por rodada (a primeira
-     * chamada vence), persistir consultas parametrizadas faria o historico registrar a primeira
-     * variante consultada em vez da sugestao canonica — por exemplo ao comparar
-     * {@code /api/time} com {@code /api/time?excluirDuvida=true} na mesma rodada. Consultas
-     * exploratorias sao tratadas como o {@code /api/time/comparar}, que ja nao persiste.
-     */
-    private boolean isConsultaPadrao(Double orcamento, boolean excluirDuvida) {
-        return orcamento == null && !excluirDuvida;
-    }
-
-    /**
      * Persiste a escalacao sugerida de forma nao bloqueante: falhas ao salvar
      * sao logadas mas nao impedem o retorno do time.
+     *
+     * <p>Chamado em toda montagem exceto {@code excluirDuvida=true}. Como
+     * {@link EscalacaoService#salvarEscalacao} e idempotente por rodada (a primeira chamada
+     * vence), registrar a variante sem duvidas faria o historico gravar a primeira consulta
+     * feita na rodada em vez da sugestao canonica — cenario provavel, já que comparar
+     * {@code /api/time} com {@code /api/time?excluirDuvida=true} e o uso natural do parametro.
+     *
+     * <p>O {@code orcamento}, ao contrario, restringe o time a um teto real de cartoletas e
+     * continua produzindo a escalacao que o usuario de fato vai usar — por isso persiste
+     * normalmente.
      */
     private void registrarEscalacao(Time time) {
         try {

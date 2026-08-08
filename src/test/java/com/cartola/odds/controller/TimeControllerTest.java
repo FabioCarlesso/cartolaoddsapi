@@ -268,7 +268,7 @@ class TimeControllerTest {
         }
 
         @Test
-        @DisplayName("nao deve persistir escalacao quando excluirDuvida=true (consulta exploratoria)")
+        @DisplayName("nao deve persistir escalacao quando excluirDuvida=true (consulta comparativa)")
         void naoDevePersistirEscalacaoComExcluirDuvida() throws Exception {
             when(pipelineService.executar(isNull(), eq(true))).thenReturn(criarTimeMock());
 
@@ -279,12 +279,26 @@ class TimeControllerTest {
         }
 
         @Test
-        @DisplayName("nao deve persistir escalacao quando orcamento e informado (consulta exploratoria)")
-        void naoDevePersistirEscalacaoComOrcamento() throws Exception {
+        @DisplayName("deve persistir escalacao quando orcamento e informado (time real da rodada)")
+        void devePersistirEscalacaoComOrcamento() throws Exception {
             when(pipelineService.executar(eq(120.0), eq(false)))
                     .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
 
             mockMvc.perform(get("/api/time").param("orcamento", "120.0"))
+                    .andExpect(status().isOk());
+
+            verify(escalacaoService).salvarEscalacao(any(), eq(15));
+        }
+
+        @Test
+        @DisplayName("nao deve persistir escalacao ao combinar orcamento com excluirDuvida=true")
+        void naoDevePersistirEscalacaoComOrcamentoEExcluirDuvida() throws Exception {
+            when(pipelineService.executar(eq(120.0), eq(true)))
+                    .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
+
+            mockMvc.perform(get("/api/time")
+                            .param("orcamento", "120.0")
+                            .param("excluirDuvida", "true"))
                     .andExpect(status().isOk());
 
             verify(escalacaoService, never()).salvarEscalacao(any(), any());
@@ -324,6 +338,20 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.mensagem").value(containsString("Double")));
 
             verify(pipelineService, never()).executar(any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("deve truncar valor muito longo na mensagem de erro de tipo invalido")
+        void deveTruncarValorLongoNaMensagemDeErro() throws Exception {
+            var valorLongo = "x".repeat(500);
+
+            var corpo = mockMvc.perform(get("/api/time").param("excluirDuvida", valorLongo))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.mensagem").value(containsString("...")))
+                    .andReturn().getResponse().getContentAsString();
+
+            assertThat(corpo).doesNotContain(valorLongo);
+            assertThat(corpo.length()).isLessThan(300);
         }
     }
 

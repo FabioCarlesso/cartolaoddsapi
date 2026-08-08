@@ -525,11 +525,11 @@ Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`
 
 ### 5.12 Histórico de Escalações por Rodada
 
-A **montagem padrão** de `GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
+`GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
 
 - **Idempotência:** `salvarEscalacao(Time, rodadaId)` verifica `existsByRodadaId` antes de gravar; uma rodada já registrada não é sobrescrita.
 - **Não bloqueante:** a chamada parte do `TimeController` dentro de um `try/catch`; falhas ao persistir são logadas e não impedem o retorno do time.
-- **Somente a consulta canônica:** `TimeController.isConsultaPadrao` restringe a persistência às requisições sem `orcamento` e sem `excluirDuvida`. Como a gravação é idempotente por rodada, persistir variantes exploratórias faria o histórico registrar a **primeira** consulta feita na rodada em vez da sugestão canônica — por exemplo ao comparar `/api/time` com `/api/time?excluirDuvida=true`. Mesmo critério do `/api/time/comparar`, que já não persiste.
+- **Exceção para `excluirDuvida=true`:** o `TimeController` não persiste quando o parâmetro é usado. Como a gravação é idempotente por rodada, registrar a variante sem dúvidas faria o histórico gravar a **primeira** consulta feita na rodada em vez da sugestão da rodada — cenário provável, já que confrontar `/api/time` com `/api/time?excluirDuvida=true` é o uso natural do parâmetro. Mesmo critério do `/api/time/comparar`, que já não persiste. O `orcamento`, ao contrário, delimita um teto real de cartoletas e produz a escalação que de fato será usada, então **persiste normalmente**.
 - **Flags por atleta:** `capitao`, `reserva_luxo` e `em_duvida` são derivadas do `Time` montado. A `pontuacao_real` nasce `null`.
 
 Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atletas/pontuados` e preenche a `pontuacao_real` dos atletas encontrados (os ausentes permanecem `null`). No cálculo do total da rodada (`pontuacaoRealTotal`), a pontuação do capitão é contada em dobro.

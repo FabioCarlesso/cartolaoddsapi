@@ -19,6 +19,9 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /** Limite de caracteres do valor recebido do cliente ecoado em mensagens de erro. */
+    private static final int VALOR_MAX_CHARS = 50;
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponse> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Argumento invalido: {}", ex.getMessage());
@@ -49,7 +52,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
         var tipoEsperado = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "desconhecido";
         var mensagem = "Parametro '%s' invalido: '%s' nao e um valor valido do tipo %s."
-                .formatted(ex.getName(), ex.getValue(), tipoEsperado);
+                .formatted(ex.getName(), truncar(ex.getValue()), tipoEsperado);
 
         log.warn("Parametro com tipo invalido: {}", mensagem);
         return ResponseEntity
@@ -87,6 +90,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ErrorResponse.of(404, "Recurso nao encontrado", ex.getResourcePath()));
+    }
+
+    /**
+     * Limita o valor recebido do cliente antes de eco-lo na resposta e no log, evitando
+     * que uma query string enorme vire corpo de erro e linha de log do mesmo tamanho.
+     */
+    private String truncar(Object valor) {
+        var texto = String.valueOf(valor);
+        return texto.length() <= VALOR_MAX_CHARS ? texto : texto.substring(0, VALOR_MAX_CHARS) + "...";
     }
 
     @ExceptionHandler(Exception.class)

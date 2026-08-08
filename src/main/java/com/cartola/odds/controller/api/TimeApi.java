@@ -60,10 +60,11 @@ public interface TimeApi {
               normalmente com `formacaoCompleta = false`
             - Combinavel com `orcamento`
 
-            **Historico:** somente a montagem padrao (sem `orcamento` e sem `excluirDuvida`)
-            registra a escalacao da rodada em `/api/historico`. Consultas parametrizadas sao
-            exploratorias e nao persistem, evitando que a primeira variante consultada seja
-            gravada como a sugestao da rodada.
+            **Historico:** a escalacao da rodada e registrada em `/api/historico`, inclusive
+            quando `orcamento` e informado (o time cabe num teto real de cartoletas e continua
+            sendo a escalacao que sera usada). A unica excecao e `excluirDuvida=true`: por ser
+            uma consulta comparativa, nao persiste — do contrario o historico gravaria a
+            primeira variante consultada em vez da sugestao da rodada.
 
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
             """
