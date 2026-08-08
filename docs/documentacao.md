@@ -525,10 +525,11 @@ Para manter o dicionário, adicione novas entradas em `NormalizadorUtil.ALIASES`
 
 ### 5.12 Histórico de Escalações por Rodada
 
-Cada chamada a `GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
+A **montagem padrão** de `GET /api/time` persiste a escalação sugerida da rodada (titulares e reservas) na tabela `escalacao_rodada`, permitindo análise retroativa da qualidade das sugestões. A persistência é orquestrada pelo `EscalacaoService`:
 
 - **Idempotência:** `salvarEscalacao(Time, rodadaId)` verifica `existsByRodadaId` antes de gravar; uma rodada já registrada não é sobrescrita.
 - **Não bloqueante:** a chamada parte do `TimeController` dentro de um `try/catch`; falhas ao persistir são logadas e não impedem o retorno do time.
+- **Somente a consulta canônica:** `TimeController.isConsultaPadrao` restringe a persistência às requisições sem `orcamento` e sem `excluirDuvida`. Como a gravação é idempotente por rodada, persistir variantes exploratórias faria o histórico registrar a **primeira** consulta feita na rodada em vez da sugestão canônica — por exemplo ao comparar `/api/time` com `/api/time?excluirDuvida=true`. Mesmo critério do `/api/time/comparar`, que já não persiste.
 - **Flags por atleta:** `capitao`, `reserva_luxo` e `em_duvida` são derivadas do `Time` montado. A `pontuacao_real` nasce `null`.
 
 Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atletas/pontuados` e preenche a `pontuacao_real` dos atletas encontrados (os ausentes permanecem `null`). No cálculo do total da rodada (`pontuacaoRealTotal`), a pontuação do capitão é contada em dobro.
@@ -776,6 +777,9 @@ Remove acentos (Unicode NFD), converte para lowercase, transforma hífen em espa
 ### `GlobalExceptionHandler.handleValidation(MethodArgumentNotValidException) → ErrorResponse`
 Converte falhas de Bean Validation em HTTP 400 com `erro="Parametro invalido"` e todas as mensagens de campos inválidos concatenadas com `"; "` no corpo da resposta.
 
+### `GlobalExceptionHandler.handleTypeMismatch(MethodArgumentTypeMismatchException) → ErrorResponse`
+Converte valores de query param/path variable que não convertem para o tipo esperado (ex.: `?orcamento=abc`, `?excluirDuvida=abc`) em HTTP 400, informando nome do parâmetro, valor recebido e tipo esperado. Sem este handler a exceção cairia no `handleGeneric(Exception)` e seria reportada como `500`, tratando erro de cliente como falha de servidor.
+
 ---
 
 ## 9. Referência de Dados
@@ -921,7 +925,7 @@ Falhas de validação de request body em `PATCH /api/config` retornam HTTP 400 c
 | Código | Cenário |
 |---|---|
 | `200` | Time montado com sucesso |
-| `400` | `orcamento` inválido (deve ser > 0) |
+| `400` | `orcamento` inválido (deve ser > 0), ou valor que não converte para o tipo esperado (`?orcamento=abc`, `?excluirDuvida=abc`) |
 | `422` | Pool vazio — ODD_LIMITE muito restritivo ou sem API Key |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |

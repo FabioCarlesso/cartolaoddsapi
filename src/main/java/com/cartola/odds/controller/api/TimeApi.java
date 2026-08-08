@@ -39,7 +39,7 @@ public interface TimeApi {
 
             **Regras aplicadas:**
             - Somente atletas de times favoritos (odd ≤ ODD_LIMITE, padrao 3.0)
-            - Somente Provavel (7) e Duvida (6)
+            - Somente Provavel (7) e Duvida (6) — apenas Provavel (7) com `excluirDuvida=true`
             - Formacao: 1 GOL · 2 LAT · 2 ZAG · 3 MEI · 3 ATA · 1 TEC
             - Reservas: somente Provaveis, mesma posicao, preferencialmente mais baratos; TEC nao tem reserva
             - Titulares em Duvida recebem substituto provavel da mesma posicao
@@ -60,13 +60,19 @@ public interface TimeApi {
               normalmente com `formacaoCompleta = false`
             - Combinavel com `orcamento`
 
+            **Historico:** somente a montagem padrao (sem `orcamento` e sem `excluirDuvida`)
+            registra a escalacao da rodada em `/api/historico`. Consultas parametrizadas sao
+            exploratorias e nao persistem, evitando que a primeira variante consultada seja
+            gravada como a sugestao da rodada.
+
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
             """
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Time montado com sucesso",
             content = @Content(schema = @Schema(implementation = TimeResponse.class))),
-        @ApiResponse(responseCode = "400", description = "orcamento invalido (deve ser > 0)",
+        @ApiResponse(responseCode = "400",
+            description = "Parametro invalido (orcamento <= 0, ou valor que nao converte para o tipo esperado)",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "Nenhum atleta disponivel apos filtragem",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),

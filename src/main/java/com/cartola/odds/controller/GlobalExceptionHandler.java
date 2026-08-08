@@ -11,6 +11,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @Slf4j
@@ -34,6 +35,23 @@ public class GlobalExceptionHandler {
                 .orElse("Parametro invalido");
 
         log.warn("Validacao invalida: {}", mensagem);
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "Parametro invalido", mensagem));
+    }
+
+    /**
+     * Valor de query param/path variable que nao converte para o tipo esperado
+     * (ex.: {@code ?orcamento=abc}, {@code ?excluirDuvida=abc}). E erro do cliente:
+     * sem este handler cairia no generico e responderia 500.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        var tipoEsperado = ex.getRequiredType() != null ? ex.getRequiredType().getSimpleName() : "desconhecido";
+        var mensagem = "Parametro '%s' invalido: '%s' nao e um valor valido do tipo %s."
+                .formatted(ex.getName(), ex.getValue(), tipoEsperado);
+
+        log.warn("Parametro com tipo invalido: {}", mensagem);
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(400, "Parametro invalido", mensagem));

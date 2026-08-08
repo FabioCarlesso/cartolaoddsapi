@@ -23,7 +23,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
 | 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
 | 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
-| 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
+| 16 | **Histórico de Escalações** | A montagem padrão de `GET /api/time` persiste a escalação da rodada (idempotente); `/api/historico` permite comparar score sugerido vs. pontuação real |
 | 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o time de **maior score** que cabe no limite de cartoletas (otimização branch-and-bound; custo-benefício só como desempate) |
 | 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
 | 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
@@ -286,7 +286,9 @@ Passar um nome inválido retorna `400 Bad Request` com a lista de nomes aceitos.
 
 ### Histórico de escalações
 
-Cada chamada a `GET /api/time` persiste automaticamente a escalação sugerida da rodada (titulares e reservas). A operação é **idempotente** (uma rodada já registrada não é sobrescrita) e **não bloqueante** — se a persistência falhar, o time é retornado normalmente e o erro é logado.
+A **montagem padrão** de `GET /api/time` — sem `orcamento` e sem `excluirDuvida` — persiste automaticamente a escalação sugerida da rodada (titulares e reservas). A operação é **idempotente** (uma rodada já registrada não é sobrescrita) e **não bloqueante** — se a persistência falhar, o time é retornado normalmente e o erro é logado.
+
+> **Consultas parametrizadas não persistem.** `GET /api/time?orcamento=...` e `GET /api/time?excluirDuvida=true` são exploratórias: como a persistência é idempotente por rodada, gravá-las faria o histórico registrar *a primeira variante consultada* em vez da sugestão canônica da rodada. Mesmo critério já adotado pelo `GET /api/time/comparar`.
 
 Após o fechamento da rodada, `POST /api/historico/{rodadaId}/atualizar-pontuacao` consulta `/atletas/pontuados` e preenche a `pontuacaoReal` de cada atleta. Enquanto não for atualizada, `pontuacaoReal` permanece `null`. No total da rodada, a pontuação do capitão é contada em dobro.
 
@@ -419,6 +421,8 @@ curl "http://localhost:8080/api/time?orcamento=120&excluirDuvida=true"
 ```
 
 > O mesmo parâmetro já existe em `GET /api/ranking`, com a mesma semântica.
+>
+> Por ser uma consulta exploratória, `excluirDuvida=true` **não registra** a escalação no histórico — ver [Histórico de escalações](#histórico-de-escalações).
 
 ### Comparação de formações
 
@@ -479,6 +483,7 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 |---|---|
 | `200` | Sucesso |
 | `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `orcamento <= 0`) |
+| `400` | Valor que não converte para o tipo esperado (ex: `?orcamento=abc`, `?excluirDuvida=abc`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
@@ -697,7 +702,7 @@ mvn test jacoco:report
 | `ScoreServiceTest` | 31 — pesos, bônus, desempenho real vs proxy, fallback, score por posição (GOL/ATA), penalidade por desvio, exposição de desvioPadrao/rodadasConsideradas |
 | `MontadorTimeServiceTest` | 54 — formação, regra de defesa, limite por clube, fallback intermediário, capitão, reserva de luxo, dúvidas, reservas sem técnico, otimização por orçamento (score máximo, redução por clube em posição multi-vaga, empate por menor custo, best-effort, incompletude por clube sem aviso de orçamento), formação incompleta, override de formação |
 | `DesempenhoServiceTest` | 8 — média rodadas, fallback null, atleta parcial |
-| `PipelineServiceTest` | 12 — inclui etapa DesempenhoService, propagação de orçamento e comparação de formações |
+| `PipelineServiceTest` | 18 — inclui etapa DesempenhoService, propagação de orçamento, filtro `excluirDuvida` (pool filtrado, dúvida com score maior, todos em dúvida, combinação com orçamento) e comparação de formações |
 | `CacheConfigTest` | 2 — Caffeine registrado com 7 caches |
 | `CacheControllerTest` | 9 — DELETE todos / DELETE por nome / 400 nome inválido |
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
@@ -706,7 +711,7 @@ mvn test jacoco:report
 | `HistoricoControllerTest` | 6 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
-| `TimeControllerTest` | 24 — HTTP completo, persistência da escalação, comportamento não bloqueante, orçamento, aviso, validação e comparação de formações |
+| `TimeControllerTest` | 31 — HTTP completo, persistência apenas na consulta padrão, comportamento não bloqueante, orçamento, `excluirDuvida`, aviso, validação (incluindo tipo inválido → 400) e comparação de formações |
 | `FormacaoParserTest` | 16 — parsing e validação de formação única e lista (soma, mínimo/máximo, duplicatas) |
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
