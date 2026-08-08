@@ -459,6 +459,13 @@ Fluxo aplicado:
 - Substituto nunca é outro atleta já escalado como titular.
 - Alertas retornados em `alertasDuvida` no `TimeResponse`.
 
+**Opt-out via `excluirDuvida`:** o parâmetro opcional `excluirDuvida=true` em `GET /api/time`
+remove os atletas com `status_id == 6` do pool no `PipelineService`, **após o cache** e **antes**
+do `ScoreService` — de modo que nenhum jogador em dúvida seja escalado como titular ou reserva e
+`alertasDuvida` volte vazio. Como a filtragem é pós-cache, as entradas de cache compartilhadas com
+o fluxo padrão não são invalidadas. Padrão `false` (comportamento acima preservado). Quando faltam
+prováveis para alguma posição, a resposta continua válida com `formacaoCompleta = false`.
+
 
 ### 5.10 Endpoint de Ranking (`GET /api/ranking`)
 
@@ -895,6 +902,7 @@ mvn test jacoco:report
 |---|---|
 | `GET /api/time` | Monta o time completo da rodada |
 | `GET /api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
+| `GET /api/time?excluirDuvida=true` | Monta o time apenas com prováveis, sem jogadores em dúvida |
 | `GET /api/ranking` | Top atletas por score com filtros opcionais |
 | `GET /api/ranking?posicao=ATA` | Top atacantes |
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
@@ -925,6 +933,10 @@ desfeitos pela de **menor custo** (`score / preço` apenas como desempate). Sem 
 ordenação gulosa por score. A estratégia retornada é sempre `SCORE_MAXIMO`. A resposta expõe
 `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`, `formacaoCompleta` e — quando o
 orçamento não basta para completar a formação — `avisoOrcamento` (com o melhor time best-effort dentro do teto).
+
+**Parâmetro `excluirDuvida` (opcional, padrão `false`) em `GET /api/time`:** quando `true`, o pool é
+restrito aos atletas prováveis (`status_id == 7`) antes do cálculo de score, garantindo um time sem
+jogadores em dúvida entre titulares e reservas (ver 5.9). É combinável com `orcamento`.
 
 ---
 

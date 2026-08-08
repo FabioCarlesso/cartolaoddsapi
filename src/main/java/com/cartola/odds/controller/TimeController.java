@@ -24,10 +24,11 @@ public class TimeController implements TimeApi {
     private final EscalacaoService escalacaoService;
 
     @Override
-    public ResponseEntity<TimeResponse> montarTime(Double orcamento) {
+    public ResponseEntity<TimeResponse> montarTime(Double orcamento, boolean excluirDuvida) {
         validarOrcamento(orcamento);
-        log.info("GET /api/time - Iniciando pipeline... | orcamento={}", orcamento);
-        var time = pipelineService.executar(orcamento);
+        log.info("GET /api/time - Iniciando pipeline... | orcamento={} | excluirDuvida={}",
+                orcamento, excluirDuvida);
+        var time = pipelineService.executar(orcamento, excluirDuvida);
         registrarEscalacao(time);
         return ResponseEntity.ok(TimeResponse.from(time));
     }

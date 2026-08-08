@@ -51,6 +51,15 @@ public interface TimeApi {
               (custo-beneficio score/preco apenas como desempate) — estrategia SCORE_MAXIMO
             - Validacao: deve ser > 0
 
+            **Parametro `excluirDuvida`** *(opcional, padrao `false`)*:
+            - `false`: comportamento padrao — Provaveis (7) e Duvidas (6) concorrem as vagas,
+              e titulares em duvida recebem um substituto provavel sugerido
+            - `true`: considera apenas Provaveis (7), de modo que nenhum jogador em duvida
+              seja escalado como titular ou reserva. Sem duvidas escalados, `alertasDuvida`
+              vem vazio. Se faltarem provaveis para alguma posicao, a resposta e retornada
+              normalmente com `formacaoCompleta = false`
+            - Combinavel com `orcamento`
+
             **Cache:** respostas das APIs externas cacheadas por 10-60 min (Caffeine).
             """
     )
@@ -72,7 +81,12 @@ public interface TimeApi {
                               + "maximiza o score dentro do limite (custo-beneficio so como "
                               + "desempate). Deve ser > 0.",
                    example = "120.0")
-        @RequestParam(required = false) Double orcamento
+        @RequestParam(required = false) Double orcamento,
+
+        @Parameter(description = "Quando true, monta o time apenas com jogadores provaveis, "
+                              + "removendo os em duvida (statusId 6) de titulares e reservas.",
+                   example = "false")
+        @RequestParam(defaultValue = "false") boolean excluirDuvida
     );
 
     @GetMapping("/comparar")

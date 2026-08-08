@@ -27,6 +27,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o time de **maior score** que cabe no limite de cartoletas (otimização branch-and-bound; custo-benefício só como desempate) |
 | 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
 | 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
+| 20 | **Excluir Dúvidas do Time** | `GET /api/time?excluirDuvida=true` monta o time só com prováveis — nenhum jogador em dúvida entre titulares e reservas. Padrão `false`, combinável com `orcamento` |
 
 
 ---
@@ -185,6 +186,8 @@ odds.api.key=SUA_API_KEY_AQUI
 |---|---|---|
 | `GET` | `/api/time` | Monta o time completo para a rodada atual |
 | `GET` | `/api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
+| `GET` | `/api/time?excluirDuvida=true` | Monta o time apenas com prováveis, sem jogadores em dúvida |
+| `GET` | `/api/time?orcamento=120.0&excluirDuvida=true` | Monta o time só com prováveis dentro do orçamento informado |
 | `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3` | Compara o melhor time entre múltiplas formações (2 a 5) e ordena por `scoreTotal` |
 | `GET` | `/api/time/comparar?formacoes=4-3-3,3-4-3&orcamento=120.0` | Compara formações montando cada uma dentro do orçamento informado |
 | `GET` | `/api/favoritos` | Lista times favoritos com odds detalhadas |
@@ -396,6 +399,27 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
 
 > `orcamento` deve ser **maior que 0** — valores `<= 0` retornam `400 Bad Request`.
 
+### Excluir jogadores em dúvida
+
+O parâmetro **opcional** `excluirDuvida` (padrão `false`) em `GET /api/time` restringe o pool de montagem aos atletas **prováveis** (status 7):
+
+- **`excluirDuvida=false`** (padrão) → comportamento atual: prováveis e dúvidas concorrem às vagas e cada titular em dúvida recebe um substituto provável sugerido em `alertasDuvida`/`substitutoProvavel`.
+- **`excluirDuvida=true`** → jogadores em dúvida (status 6) são removidos **antes do cálculo de score**, de modo que nenhum deles apareça entre titulares ou reservas. Como não há dúvidas escaladas, `alertasDuvida` volta vazio.
+
+O filtro é aplicado **após o cache** — as respostas cacheadas das APIs externas são compartilhadas com o fluxo padrão e não são invalidadas.
+
+É combinável com `orcamento` (ex.: `GET /api/time?orcamento=120&excluirDuvida=true`). Se não sobrarem prováveis suficientes para alguma posição, a resposta é retornada normalmente com `formacaoCompleta: false` — o mesmo comportamento já adotado hoje para formações incompletas.
+
+```bash
+# Melhor time escalável sem nenhum jogador em dúvida
+curl "http://localhost:8080/api/time?excluirDuvida=true"
+
+# Combinando com orçamento
+curl "http://localhost:8080/api/time?orcamento=120&excluirDuvida=true"
+```
+
+> O mesmo parâmetro já existe em `GET /api/ranking`, com a mesma semântica.
+
 ### Comparação de formações
 
 `GET /api/time/comparar` monta o melhor time para **cada formação informada** usando o mesmo pool de atletas da rodada e retorna um comparativo ordenado por `scoreTotal`. É uma **consulta pontual**: a formação configurada no banco **não é alterada**.
@@ -477,7 +501,7 @@ Odds de confrontos fora da rodada atual são ignoradas. Se não for possível ob
 
 | Filtro | Regra |
 |---|---|
-| Status | Somente `Provável` (7) ou `Dúvida` (6) |
+| Status | Somente `Provável` (7) ou `Dúvida` (6) — apenas `Provável` (7) com `excluirDuvida=true` |
 | Preço | Deve ser `> 0` cartoletas |
 | Time | Clube deve estar no conjunto de times favoritos |
 

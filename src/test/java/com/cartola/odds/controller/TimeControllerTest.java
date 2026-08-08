@@ -24,6 +24,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -49,7 +50,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 200 com corpo preenchido quando pipeline executar com sucesso")
         void deveRetornar200ComTime() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -64,7 +65,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 422 quando pool de atletas estiver vazio")
         void deveRetornar422QuandoPoolVazio() throws Exception {
-            when(pipelineService.executar(any()))
+            when(pipelineService.executar(any(), anyBoolean()))
                     .thenThrow(new IllegalStateException("Nenhum atleta disponivel"));
 
             mockMvc.perform(get("/api/time"))
@@ -77,7 +78,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 502 quando API externa falhar")
         void deveRetornar502QuandoApiExternaFalhar() throws Exception {
-            when(pipelineService.executar(any()))
+            when(pipelineService.executar(any(), anyBoolean()))
                     .thenThrow(new org.springframework.web.client.RestClientException("Timeout"));
 
             mockMvc.perform(get("/api/time"))
@@ -88,7 +89,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 500 para erros inesperados")
         void deveRetornar500ParaErroGenerico() throws Exception {
-            when(pipelineService.executar(any()))
+            when(pipelineService.executar(any(), anyBoolean()))
                     .thenThrow(new RuntimeException("Erro inesperado"));
 
             mockMvc.perform(get("/api/time"))
@@ -101,7 +102,7 @@ class TimeControllerTest {
         @DisplayName("deve retornar avisoMercado preenchido quando mercado fechado")
         void deveRetornarAvisoQuandoMercadoFechado() throws Exception {
             var timeComAviso = criarTimeMockComAviso("Mercado fechado. Rodada em andamento.");
-            when(pipelineService.executar(any())).thenReturn(timeComAviso);
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(timeComAviso);
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -111,7 +112,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar avisoMercado null quando mercado aberto")
         void deveRetornarAvisoNullQuandoMercadoAberto() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -121,7 +122,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar capitao preenchido quando existe")
         void deveRetornarCapitao() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(jsonPath("$.capitao").isNotEmpty())
@@ -133,7 +134,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar todos os campos obrigatorios do atleta")
         void deveRetornarEstruturaCompletaDoAtleta() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(jsonPath("$.capitao.apelido").exists())
@@ -151,7 +152,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve persistir a escalacao apos montar o time")
         void devePersistirEscalacao() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk());
@@ -162,7 +163,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve retornar 200 mesmo se a persistencia da escalacao falhar (nao bloqueante)")
         void deveRetornar200QuandoPersistenciaFalha() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
             doThrow(new RuntimeException("falha ao salvar"))
                     .when(escalacaoService).salvarEscalacao(any(), any());
 
@@ -174,7 +175,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve incluir timestamp no corpo de resposta de erro")
         void deveRetornarTimestampNoErro() throws Exception {
-            when(pipelineService.executar(any()))
+            when(pipelineService.executar(any(), anyBoolean()))
                     .thenThrow(new IllegalStateException("Pool vazio"));
 
             mockMvc.perform(get("/api/time"))
@@ -184,7 +185,7 @@ class TimeControllerTest {
         @Test
         @DisplayName("deve usar estrategia SCORE_MAXIMO quando orcamento nao informado")
         void deveEstrategiaScoreMaximoSemOrcamento() throws Exception {
-            when(pipelineService.executar(any())).thenReturn(criarTimeMock());
+            when(pipelineService.executar(any(), anyBoolean())).thenReturn(criarTimeMock());
 
             mockMvc.perform(get("/api/time"))
                     .andExpect(status().isOk())
@@ -194,13 +195,13 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.saldoRestante").doesNotExist())
                     .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
 
-            verify(pipelineService).executar(isNull());
+            verify(pipelineService).executar(isNull(), eq(false));
         }
 
         @Test
         @DisplayName("deve propagar orcamento e expor campos de orcamento quando informado")
         void devePropagarOrcamentoEExporCampos() throws Exception {
-            when(pipelineService.executar(eq(120.0)))
+            when(pipelineService.executar(eq(120.0), anyBoolean()))
                     .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
 
             mockMvc.perform(get("/api/time").param("orcamento", "120.0"))
@@ -212,13 +213,13 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.formacaoCompleta").value(true))
                     .andExpect(jsonPath("$.avisoOrcamento").doesNotExist());
 
-            verify(pipelineService).executar(eq(120.0));
+            verify(pipelineService).executar(eq(120.0), eq(false));
         }
 
         @Test
         @DisplayName("deve expor avisoOrcamento e formacaoCompleta=false quando orcamento insuficiente")
         void deveExporAvisoQuandoOrcamentoInsuficiente() throws Exception {
-            when(pipelineService.executar(eq(30.0)))
+            when(pipelineService.executar(eq(30.0), anyBoolean()))
                     .thenReturn(criarTimeMockIncompleto(30.0, 24.0));
 
             mockMvc.perform(get("/api/time").param("orcamento", "30.0"))
@@ -236,7 +237,34 @@ class TimeControllerTest {
                     .andExpect(jsonPath("$.status").value(400))
                     .andExpect(jsonPath("$.mensagem").value(containsString("orcamento")));
 
-            verify(pipelineService, never()).executar(any());
+            verify(pipelineService, never()).executar(any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("deve propagar excluirDuvida=true ao pipeline")
+        void devePropagarExcluirDuvida() throws Exception {
+            when(pipelineService.executar(isNull(), eq(true))).thenReturn(criarTimeMock());
+
+            mockMvc.perform(get("/api/time").param("excluirDuvida", "true"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.rodada").value(15));
+
+            verify(pipelineService).executar(isNull(), eq(true));
+        }
+
+        @Test
+        @DisplayName("deve combinar excluirDuvida com orcamento")
+        void deveCombinarExcluirDuvidaComOrcamento() throws Exception {
+            when(pipelineService.executar(eq(120.0), eq(true)))
+                    .thenReturn(criarTimeMockComOrcamento(120.0, 118.3));
+
+            mockMvc.perform(get("/api/time")
+                            .param("orcamento", "120.0")
+                            .param("excluirDuvida", "true"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.orcamentoInformado").value(120.0));
+
+            verify(pipelineService).executar(eq(120.0), eq(true));
         }
     }
 
