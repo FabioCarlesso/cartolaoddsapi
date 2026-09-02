@@ -29,6 +29,30 @@ Endpoints Cartola utilizados: `/mercado/status`, `/atletas/mercado`, `/clubes`, 
 
 ## Decisões Arquiteturais
 
+### Autenticação por JWT com `tokenVersion`
+
+A API é fechada por JWT porque cada consulta fora do cache gasta cota paga da The Odds API —
+publicá-la aberta seria entregar essa cota a quem descobrisse o endereço.
+
+A escolha por token stateless (em vez de sessão no servidor) traz o problema de revogação: um
+token válido continua valendo até expirar. A resposta é o campo `token_version` no usuário,
+copiado como claim na emissão e comparado com o banco a cada requisição. Trocar a senha ou
+desativar o usuário incrementa o contador e derruba todos os tokens anteriores, sem estado de
+sessão — ao custo de uma consulta ao usuário por requisição, aceitável no volume deste projeto.
+
+O administrador inicial nasce de variáveis de ambiente no primeiro boot, nunca de senha em
+migration. Sem `APP_ADMIN_INICIAL_SENHA` e sem nenhum ADMIN ativo no banco, a aplicação recusa
+subir em qualquer perfil — antes mesmo de abrir a porta. A alternativa, avisar em log e subir
+assim mesmo, produzia uma API no ar que ninguém conseguia autenticar, com o aviso passando
+despercebido. A exigência cai quando já existe um ADMIN ativo, para que produção não precise
+manter para sempre a senha do primeiro acesso depois de trocada.
+
+O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP: atrás do nginx e da
+borda da plataforma, `getRemoteAddr()` devolve o endereço do proxy, igual para todo mundo, e ler
+`X-Forwarded-For` com segurança depende de configuração de ambiente que só chega com o deploy. O
+e-mail descreve exatamente o alvo — adivinhar a senha do administrador é martelar sempre o mesmo
+endereço.
+
 ### Pipeline de Montagem do Time
 
 O `PipelineService` orquestra a montagem em etapas:

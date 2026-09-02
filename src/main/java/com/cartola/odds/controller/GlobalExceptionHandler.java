@@ -1,11 +1,13 @@
 package com.cartola.odds.controller;
 
 import com.cartola.odds.exception.RecursoNaoEncontradoException;
+import com.cartola.odds.exception.TentativasExcedidasException;
 import com.cartola.odds.model.response.ErrorResponse;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -74,6 +76,31 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNPROCESSABLE_ENTITY)
                 .body(ErrorResponse.of(422, "Erro no pipeline", ex.getMessage()));
+    }
+
+    /**
+     * Falha de login vinda do {@code AuthenticationManager}. Mensagem generica de proposito:
+     * credencial errada, e-mail inexistente e usuario inativo respondem o mesmo 401, para
+     * que o cliente nao consiga enumerar usuarios.
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ErrorResponse> handleAuthentication(AuthenticationException ex) {
+        log.warn("Falha de autenticacao: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.UNAUTHORIZED)
+                .body(ErrorResponse.of(401, "Credenciais invalidas", "E-mail ou senha invalidos."));
+    }
+
+    /**
+     * Freio de forca bruta no login. Vem antes do 401 de propósito: a resposta diz que
+     * houve excesso de tentativas, nao se a credencial estava certa.
+     */
+    @ExceptionHandler(TentativasExcedidasException.class)
+    public ResponseEntity<ErrorResponse> handleTentativasExcedidas(TentativasExcedidasException ex) {
+        log.warn("Tentativas de login excedidas: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.TOO_MANY_REQUESTS)
+                .body(ErrorResponse.of(429, "Tentativas excedidas", ex.getMessage()));
     }
 
     @ExceptionHandler(RestClientException.class)
