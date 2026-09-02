@@ -1,12 +1,16 @@
 package com.cartola.odds.controller;
 
+import com.cartola.odds.exception.ConflitoException;
 import com.cartola.odds.exception.RecursoNaoEncontradoException;
+import com.cartola.odds.exception.SenhaInvalidaException;
 import com.cartola.odds.exception.TentativasExcedidasException;
 import com.cartola.odds.model.response.ErrorResponse;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -101,6 +105,60 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.TOO_MANY_REQUESTS)
                 .body(ErrorResponse.of(429, "Tentativas excedidas", ex.getMessage()));
+    }
+
+    /**
+     * Estado atual do recurso impede a operacao: e-mail ja cadastrado, administrador
+     * agindo sobre a propria conta ou operacao que deixaria a instancia sem administrador.
+     */
+    @ExceptionHandler(ConflitoException.class)
+    public ResponseEntity<ErrorResponse> handleConflito(ConflitoException ex) {
+        log.warn("Conflito de estado: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(409, "Conflito", ex.getMessage()));
+    }
+
+    /**
+     * Rede de seguranca para a corrida entre a checagem de e-mail duplicado e o INSERT:
+     * duas criacoes simultaneas do mesmo e-mail passam pela checagem e uma delas esbarra
+     * na UNIQUE do banco. A mensagem do driver nao e ecoada — ela carrega nome de tabela
+     * e de constraint.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ErrorResponse> handleIntegridade(DataIntegrityViolationException ex) {
+        log.warn("Violacao de integridade: {}", ex.getMostSpecificCause().getMessage());
+        return ResponseEntity
+                .status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of(409, "Conflito",
+                        "A operacao conflita com um registro existente."));
+    }
+
+    /**
+     * Senha atual errada na troca de senha. E 422, e nao 401: quem chama ja esta
+     * autenticado — um 401 faria o cliente achar que a sessao caiu.
+     */
+    @ExceptionHandler(SenhaInvalidaException.class)
+    public ResponseEntity<ErrorResponse> handleSenhaInvalida(SenhaInvalidaException ex) {
+        log.warn("Senha invalida: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.UNPROCESSABLE_ENTITY)
+                .body(ErrorResponse.of(422, "Senha invalida", ex.getMessage()));
+    }
+
+    /**
+     * Recusa vinda do {@code @PreAuthorize}. Sem este handler a excecao seria capturada
+     * pelo {@code handleGeneric} — que responde 500 — antes de chegar ao
+     * {@code ErroSegurancaHandler}, que so ve o que escapa do MVC. A resposta repete o
+     * texto dele, para que 403 tenha um corpo so, venha do filtro ou do metodo.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex) {
+        log.warn("Acesso negado: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.FORBIDDEN)
+                .body(ErrorResponse.of(403, "Acesso negado",
+                        "Voce nao tem permissao para acessar este recurso."));
     }
 
     @ExceptionHandler(RestClientException.class)

@@ -12,5 +12,10 @@ public interface UsuarioRepository extends JpaRepository<Usuario, Long> {
 
     Optional<Usuario> findByEmailIgnoreCase(String email);
 
+    boolean existsByEmailIgnoreCase(String email);
+
     boolean existsByPerfilAndAtivoTrue(Perfil perfil);
+
+    /** Usado para recusar a operacao que deixaria a instancia sem nenhum administrador. */
+    long countByPerfilAndAtivoTrue(Perfil perfil);
 }

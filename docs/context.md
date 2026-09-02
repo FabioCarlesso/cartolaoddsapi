@@ -36,9 +36,9 @@ publicá-la aberta seria entregar essa cota a quem descobrisse o endereço.
 
 A escolha por token stateless (em vez de sessão no servidor) traz o problema de revogação: um
 token válido continua valendo até expirar. A resposta é o campo `token_version` no usuário,
-copiado como claim na emissão e comparado com o banco a cada requisição. Trocar a senha ou
-desativar o usuário incrementa o contador e derruba todos os tokens anteriores, sem estado de
-sessão — ao custo de uma consulta ao usuário por requisição, aceitável no volume deste projeto.
+copiado como claim na emissão e comparado com o banco a cada requisição. Trocar a senha,
+desativar o usuário ou rebaixar seu perfil incrementa o contador e derruba todos os tokens
+anteriores, sem estado de sessão — ao custo de uma consulta ao usuário por requisição, aceitável no volume deste projeto.
 
 O administrador inicial nasce de variáveis de ambiente no primeiro boot, nunca de senha em
 migration. Sem `APP_ADMIN_INICIAL_SENHA` e sem nenhum ADMIN ativo no banco, a aplicação recusa
@@ -52,6 +52,32 @@ borda da plataforma, `getRemoteAddr()` devolve o endereço do proxy, igual para 
 `X-Forwarded-For` com segurança depende de configuração de ambiente que só chega com o deploy. O
 e-mail descreve exatamente o alvo — adivinhar a senha do administrador é martelar sempre o mesmo
 endereço.
+
+### Gestão de usuários pela API, restrita a administradores
+
+Com a API fechada por JWT, o único usuário de uma instância nova é o administrador do bootstrap.
+Liberar acesso a mais alguém exigiria `INSERT` manual no banco de produção com hash BCrypt gerado à
+mão — `/api/usuarios` existe para tirar essa operação do banco e colocá-la na API.
+
+Não há auto-cadastro público, e a escolha é a mesma que fechou a API: cada consulta fora do cache
+gasta cota paga da The Odds API. Quem entra é decisão de quem administra a instância.
+
+A autorização das rotas de usuários vive em `@PreAuthorize`, ao lado de cada endpoint, e não em
+matcher de URL no `SecurityConfig`. Elas misturam operações de administrador com as do próprio
+usuário (`/me`), e uma segunda declaração da mesma regra só teria a chance de divergir da primeira.
+O efeito colateral é que a recusa nasce dentro do MVC: o `GlobalExceptionHandler` precisa tratar
+`AccessDeniedException` explicitamente, ou o handler genérico a transformaria em 500 antes de ela
+chegar ao `ErroSegurancaHandler`.
+
+A exclusão é lógica (`ativo = false`), nunca física: o registro sustenta o histórico de escalações
+que aquele usuário produziu. E o rebaixamento de perfil entrou na lista do que incrementa a
+`tokenVersion`, junto da troca de senha e da desativação — sem isso, um administrador recém-
+-rebaixado continuaria administrando a aplicação até o token expirar.
+
+Duas operações são recusadas com 409 mesmo vindas de um administrador: mexer na própria conta
+(desativar ou rebaixar) e desativar ou rebaixar o último `ADMIN` ativo. A primeira é quase sempre
+engano; a segunda deixaria a instância sem nenhum acesso administrativo, recuperável só por acesso
+direto ao banco — exatamente o que o bootstrap do admin inicial existe para evitar.
 
 ### Pipeline de Montagem do Time
 
@@ -238,6 +264,13 @@ com.cartola.odds/
 | `GET` | `/api/config` | Retorna configuração atual |
 | `PATCH` | `/api/config` | Atualiza parâmetros em runtime |
 | `POST` | `/api/config/reset` | Restaura defaults |
+| `POST` | `/api/usuarios` | Cria usuário (`ADMIN`) |
+| `GET` | `/api/usuarios` | Lista usuários, paginada (`ADMIN`) |
+| `GET` | `/api/usuarios/{id}` | Detalhe do usuário (`ADMIN`) |
+| `PATCH` | `/api/usuarios/{id}` | Atualiza nome, e-mail, perfil e situação (`ADMIN`) |
+| `DELETE` | `/api/usuarios/{id}` | Desativação lógica (`ADMIN`) |
+| `GET` | `/api/usuarios/me` | Dados da própria conta (autenticado) |
+| `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha (autenticado) |
 | `GET` | `/swagger-ui.html` | Documentação interativa |
 | `GET` | `:9090/actuator/health` | Status de saúde da aplicação |
 | `GET` | `:9090/actuator/metrics` | Lista de métricas disponíveis |
@@ -264,7 +297,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-424 cenários distribuídos em 23 classes de teste cobrindo serviços, controllers, domínio, utilitários e endpoints de observabilidade.
+544 cenários distribuídos em 32 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

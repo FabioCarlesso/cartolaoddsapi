@@ -263,8 +263,9 @@ que não vem do cache — o acesso aberto era o que impedia publicá-la.
 
 **Claims do token:** `sub` (e-mail), `perfil`, `usuarioId` e `tokenVersion`.
 
-A `tokenVersion` é comparada com a do banco a cada requisição: incrementá-la — ao trocar a senha
-ou desativar o usuário — invalida na hora todos os tokens já emitidos, sem sessão no servidor.
+A `tokenVersion` é comparada com a do banco a cada requisição: incrementá-la — ao trocar a senha,
+desativar o usuário ou rebaixar seu perfil — invalida na hora todos os tokens já emitidos, sem
+sessão no servidor.
 
 **Segredos sem padrão versionado.** Nem `JWT_SECRET` nem `APP_ADMIN_INICIAL_SENHA` têm default.
 
@@ -283,8 +284,71 @@ que o token é. Mesma escolha do `expires_in` do OAuth 2.
 borda da plataforma `getRemoteAddr()` é o endereço do proxy — igual para todos. O e-mail descreve o
 alvo real do ataque.
 
-> A distinção `USER` × `ADMIN` por rota e o fechamento de Swagger/Actuator em produção ficam para
-> a issue #38.
+> A distinção `USER` × `ADMIN` nas demais rotas e o fechamento de Swagger/Actuator em produção
+> ficam para a issue #38. As rotas de `/api/usuarios` já distinguem perfil — ver 3.5.
+
+### 3.5 Gestão de usuários
+
+Cadastro e manutenção de contas pela própria API, para que liberar acesso não dependa de `INSERT`
+manual no banco de produção com hash BCrypt gerado à mão. Não há auto-cadastro público: toda conta
+nasce de um administrador.
+
+| Classe | Papel |
+|---|---|
+| `UsuarioApi` | Contrato REST e documentação Swagger dos sete endpoints |
+| `UsuarioController` | Implementação limpa; carrega os `@PreAuthorize` de cada rota |
+| `UsuarioService` | Regras de criação, atualização, desativação lógica e troca de senha |
+| `PaginaResponse<T>` | Envelope de paginação da API, reusável pelos próximos endpoints paginados |
+| `ConflitoException` / `SenhaInvalidaException` | Mapeadas a `409` e `422` no `GlobalExceptionHandler` |
+
+**Endpoints:**
+
+| Método | Rota | Acesso |
+|---|---|---|
+| `POST` | `/api/usuarios` | `ADMIN` — `201` com `Location` |
+| `GET` | `/api/usuarios` | `ADMIN` — paginado (`page`, `size`, `sort`) |
+| `GET` | `/api/usuarios/{id}` | `ADMIN` |
+| `PATCH` | `/api/usuarios/{id}` | `ADMIN` — `nome`, `email`, `perfil`, `ativo` |
+| `DELETE` | `/api/usuarios/{id}` | `ADMIN` — desativação lógica, `204` |
+| `GET` | `/api/usuarios/me` | Qualquer autenticado |
+| `PATCH` | `/api/usuarios/me/senha` | Qualquer autenticado, exige a senha atual |
+
+**Autorização em `@PreAuthorize`, não em matcher de URL.** As rotas de `/api/usuarios` misturam
+operações de administrador com as do próprio usuário (`/me`). Declarar quem acessa o quê ao lado
+do endpoint mantém uma fonte de verdade só; repetir a regra em `SecurityConfig` criaria uma
+segunda, com a chance de divergirem. O `@EnableMethodSecurity` que liga isso está no
+`SecurityConfig`, junto do restante da política de acesso.
+
+Como consequência, a recusa nasce **dentro** do MVC, e não no filter chain: sem um
+`@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler`, ela seria capturada
+pelo handler genérico e viraria `500`. O handler responde o mesmo texto do `ErroSegurancaHandler`,
+para que `403` tenha um corpo só, venha de onde vier.
+
+**A senha nunca sai.** As respostas usam `UsuarioResponse`, e não a entidade `Usuario` — assim um
+campo novo na entidade não vaza o hash BCrypt por descuido. `PATCH /api/usuarios/{id}` também não
+aceita senha: quem troca é o dono da conta, confirmando a senha atual.
+
+**Desativação é lógica.** `DELETE` marca `ativo = false` e mantém o registro, para não apagar o
+histórico de quem o produziu. Repetir sobre alguém já inativo responde `204` sem alterar nada.
+
+**Proteções contra ficar sem administrador** (`409`, sem alterar o registro):
+
+- um `ADMIN` não desativa nem rebaixa a própria conta — perderia o acesso no ato, quase sempre por
+  engano;
+- ninguém desativa ou rebaixa o **último** `ADMIN` ativo — a instância só voltaria a ter
+  administrador por acesso direto ao banco.
+
+**Normalização de e-mail.** Gravado sempre em minúsculas: a `UNIQUE` do Postgres é sensível a
+caixa, o login (`findByEmailIgnoreCase`) não é. Sem normalizar, `Fabio@x.com` e `fabio@x.com`
+coexistiriam na tabela e o login ficaria ambíguo. A checagem de duplicidade acontece no service; a
+`UNIQUE` continua sendo a rede para duas criações simultâneas, e o `DataIntegrityViolationException`
+resultante também vira `409`.
+
+**Paginação.** `PaginaResponse<T>` em vez do `Page` do Spring Data: o JSON daquela classe é detalhe
+interno do framework, muda entre versões e o próprio Spring avisa disso no log. O envelope é
+`conteudo`, `pagina`, `tamanho`, `totalElementos`, `totalPaginas` e `ultima`.
+
+**Fora de escopo (issue #37):** auto-cadastro público, convite por e-mail e recuperação de senha.
 
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
 
