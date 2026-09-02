@@ -28,6 +28,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
 | 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
 | 20 | **Excluir Dúvidas do Time** | `GET /api/time?excluirDuvida=true` monta o time só com prováveis — nenhum jogador em dúvida entre titulares e reservas. Padrão `false`, combinável com `orcamento` |
+| 21 | **Autenticação JWT** | A API é fechada: `POST /api/auth/login` emite o access token e todo o resto exige `Authorization: Bearer`. Admin inicial criado no primeiro boot |
 
 
 ---
@@ -39,6 +40,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 - [Início Rápido com Docker](#início-rápido-com-docker)
 - [Início Rápido sem Docker](#início-rápido-sem-docker)
 - [Configuração](#configuração)
+- [Autenticação](#autenticação)
 - [Endpoints](#endpoints)
 - [Regras de Negócio](#regras-de-negócio)
 - [Estrutura do Projeto](#estrutura-do-projeto)
@@ -168,6 +170,10 @@ odds.api.key=SUA_API_KEY_AQUI
 | `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
 | `MANAGEMENT_SERVER_PORT` | `9090` | Porta dos endpoints Actuator |
 | `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | Interface onde o Actuator escuta |
+| `JWT_SECRET` | — | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). **Obrigatório em produção** |
+| `JWT_EXPIRATION_MS` | `86400000` | Validade do access token em milissegundos (24 h) |
+| `APP_ADMIN_INICIAL_EMAIL` | `admin@cartolaodds.local` | E-mail do administrador criado no primeiro boot |
+| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). **Obrigatória em produção** |
 
 > **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
@@ -180,10 +186,74 @@ odds.api.key=SUA_API_KEY_AQUI
 
 ---
 
+## Autenticação
+
+A API é fechada por JWT: fora `POST /api/auth/login`, da documentação OpenAPI e do Actuator,
+toda requisição precisa do header `Authorization: Bearer <accessToken>`. O motivo é direto — cada
+consulta que não vem do cache gasta cota da [The Odds API](https://the-odds-api.com), que é paga.
+
+### Administrador inicial
+
+No primeiro boot, se não existir nenhum administrador ativo, a aplicação cria um a partir de
+`APP_ADMIN_INICIAL_EMAIL` e `APP_ADMIN_INICIAL_SENHA`. A senha **nunca** é versionada:
+
+- **Em produção** (`SPRING_PROFILES_ACTIVE=prod`), sem `APP_ADMIN_INICIAL_SENHA` a aplicação
+  **falha ao iniciar**, com a variável nomeada na mensagem.
+- **Fora de produção**, sem a senha a aplicação sobe, avisa no log e não cria o usuário — a API
+  fica sem nenhum acesso até que a variável seja definida.
+
+O bootstrap é idempotente: nos boots seguintes ele encontra o administrador ativo e não faz nada.
+
+O mesmo vale para o `JWT_SECRET`: obrigatório em produção e, quando ausente fora dela, a aplicação
+gera uma chave efêmera a cada boot — os tokens emitidos deixam de valer no restart, e o log avisa.
+
+### Fluxo de uso
+
+```bash
+# 1. Autenticar
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@cartolaodds.local","senha":"sua-senha-aqui"}' | jq -r .accessToken)
+
+# 2. Usar o token nas demais chamadas
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/time
+```
+
+No **Swagger UI**, o botão **Authorize** recebe apenas o valor do `accessToken`.
+
+### O que o token carrega
+
+| Claim | Conteúdo |
+|---|---|
+| `sub` | E-mail do usuário |
+| `perfil` | `ADMIN` ou `USER` |
+| `usuarioId` | Id do usuário |
+| `tokenVersion` | Versão do token no momento da emissão |
+
+A `tokenVersion` é o que permite revogar tokens já emitidos sem manter sessão no servidor: ela viaja
+no token e é comparada com a do banco a cada requisição. Trocar a senha ou desativar o usuário
+incrementa o contador, e todo token anterior deixa de valer na mesma hora.
+
+### Acesso atual por rota
+
+| Rota | Acesso |
+|---|---|
+| `POST /api/auth/login` | Público |
+| `/swagger-ui.html`, `/v3/api-docs/**` | Público |
+| `/actuator/**` | Público *(porta separada, exposta só em `127.0.0.1`)* |
+| Todo o resto de `/api/**` | Autenticado |
+
+> A distinção entre `USER` e `ADMIN` por rota — restringir `PATCH /api/config` e `DELETE /api/cache`
+> a administradores e fechar Swagger e Actuator em produção — chega na
+> [issue #38](https://github.com/FabioCarlesso/cartolaoddsapi/issues/38), junto com o deploy.
+
+---
+
 ## Endpoints
 
 | Método | Endpoint | Descrição |
 |---|---|---|
+| `POST` | `/api/auth/login` | **Público** — valida e-mail/senha e emite o access token JWT |
 | `GET` | `/api/time` | Monta o time completo para a rodada atual |
 | `GET` | `/api/time?orcamento=120.0` | Monta o time de maior score que cabe no orçamento em cartoletas |
 | `GET` | `/api/time?excluirDuvida=true` | Monta o time apenas com prováveis, sem jogadores em dúvida |
@@ -485,6 +555,8 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `orcamento <= 0`) |
 | `400` | Valor que não converte para o tipo esperado (ex: `?orcamento=abc`, `?excluirDuvida=abc`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
+| `401` | Credenciais inválidas no login, ou requisição sem token / com token inválido, expirado ou revogado |
+| `403` | Autenticado, mas sem permissão para o recurso |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
@@ -601,21 +673,22 @@ cartola/
 └── src/
     ├── main/
     │   ├── java/com/cartola/odds/
-    │   │   ├── config/          (OddsProperties, CartolaProperties,
-    │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig)
+    │   │   ├── config/          (OddsProperties, CartolaProperties, JwtProperties,
+    │   │   │                     AdminInicialProperties, AdminInicialBootstrap,
+    │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig, SecurityConfig)
     │   │   ├── client/          (OddsClient, CartolaClient)
-    │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository)
+    │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository, UsuarioRepository)
     │   │   ├── service/         (OddsService, CartolaDataService, ScoreService,
     │   │   │                     DesempenhoService, MontadorTimeService, PipelineService,
     │   │   │                     RankingService, ConfiguracaoService, EscalacaoService)
-    │   │   ├── controller/api/  (TimeApi, RankingApi, FavoritosApi, CacheApi,
+    │   │   ├── controller/api/  (AuthApi, TimeApi, RankingApi, FavoritosApi, CacheApi,
     │   │   │                     ConfiguracaoApi, HistoricoApi — Swagger docs)
-    │   │   ├── controller/      (TimeController, RankingController, FavoritosController,
-    │   │   │                     CacheController, ConfiguracaoController, HistoricoController,
-    │   │   │                     GlobalExceptionHandler)
+    │   │   ├── controller/      (AuthController, TimeController, RankingController,
+    │   │   │                     FavoritosController, CacheController, ConfiguracaoController,
+    │   │   │                     HistoricoController, GlobalExceptionHandler)
     │   │   ├── exception/       (RecursoNaoEncontradoException)
-    │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, enums/,
-    │   │   │                     request/ConfiguracaoRequest, response/)
+    │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, Usuario, enums/,
+    │   │   │                     request/ConfiguracaoRequest, request/LoginRequest, response/)
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
     │       ├── application.properties        # Lê variáveis de ambiente com fallback
@@ -626,9 +699,10 @@ cartola/
     │           ├── V4__add_limite_atletas_por_clube.sql          # Limite configurável por clube
     │           ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
-    │           └── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
+    │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
+    │           └── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
     └── test/
-        ├── java/                            # 23 classes de teste — 424 cenários
+        ├── java/                            # 28 classes de teste — 479 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2

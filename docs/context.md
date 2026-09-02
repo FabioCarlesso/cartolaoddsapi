@@ -29,6 +29,21 @@ Endpoints Cartola utilizados: `/mercado/status`, `/atletas/mercado`, `/clubes`, 
 
 ## Decisões Arquiteturais
 
+### Autenticação por JWT com `tokenVersion`
+
+A API é fechada por JWT porque cada consulta fora do cache gasta cota paga da The Odds API —
+publicá-la aberta seria entregar essa cota a quem descobrisse o endereço.
+
+A escolha por token stateless (em vez de sessão no servidor) traz o problema de revogação: um
+token válido continua valendo até expirar. A resposta é o campo `token_version` no usuário,
+copiado como claim na emissão e comparado com o banco a cada requisição. Trocar a senha ou
+desativar o usuário incrementa o contador e derruba todos os tokens anteriores, sem estado de
+sessão — ao custo de uma consulta ao usuário por requisição, aceitável no volume deste projeto.
+
+O administrador inicial nasce de variáveis de ambiente no primeiro boot, nunca de senha em
+migration. Em `prod`, sem `APP_ADMIN_INICIAL_SENHA` ou `JWT_SECRET`, a aplicação recusa subir:
+é preferível falhar no deploy a subir com credencial previsível.
+
 ### Pipeline de Montagem do Time
 
 O `PipelineService` orquestra a montagem em etapas:

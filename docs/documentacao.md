@@ -234,6 +234,40 @@ CREATE TABLE configuracao (
 | `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
 | `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
 | `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
+| `JWT_SECRET` | — | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). Obrigatório em `prod` |
+| `JWT_EXPIRATION_MS` | `86400000` | Validade do access token em milissegundos |
+| `APP_ADMIN_INICIAL_EMAIL` | `admin@cartolaodds.local` | E-mail do administrador criado no primeiro boot |
+| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). Obrigatória em `prod` |
+
+### 3.4 Autenticação (JWT)
+
+Todos os endpoints exigem `Authorization: Bearer <accessToken>`, exceto `POST /api/auth/login`,
+a documentação OpenAPI e o Actuator. A API consome cota paga da The Odds API a cada chamada
+que não vem do cache — o acesso aberto era o que impedia publicá-la.
+
+**Componentes:**
+
+| Classe | Papel |
+|---|---|
+| `SecurityConfig` | Cadeia stateless, CSRF desabilitado, rotas públicas e o filtro JWT |
+| `JwtService` | Emite e lê o token (HS256); resolve o segredo no boot |
+| `JwtAuthenticationFilter` | Lê o header, valida token, `ativo` e `tokenVersion`, popula o `SecurityContext` |
+| `UsuarioDetailsService` | Carrega o `Usuario` pelo e-mail para o Spring Security |
+| `AuthService` | Valida credenciais pelo `AuthenticationManager` e emite o token |
+| `ErroSegurancaHandler` | Escreve 401 e 403 no contrato `ErrorResponse` |
+| `AdminInicialBootstrap` | Cria o administrador inicial no primeiro boot, de forma idempotente |
+
+**Claims do token:** `sub` (e-mail), `perfil`, `usuarioId` e `tokenVersion`.
+
+A `tokenVersion` é comparada com a do banco a cada requisição: incrementá-la — ao trocar a senha
+ou desativar o usuário — invalida na hora todos os tokens já emitidos, sem sessão no servidor.
+
+**Segredos sem padrão versionado.** `JWT_SECRET` e `APP_ADMIN_INICIAL_SENHA` não têm valor default.
+Em `prod`, ausentes, a aplicação falha ao iniciar. Fora de `prod`, o segredo JWT vira uma chave
+efêmera por boot e o admin inicial simplesmente não é criado — ambos com aviso no log.
+
+> A distinção `USER` × `ADMIN` por rota e o fechamento de Swagger/Actuator em produção ficam para
+> a issue #38.
 
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
 
