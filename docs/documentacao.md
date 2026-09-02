@@ -237,7 +237,10 @@ CREATE TABLE configuracao (
 | `JWT_SECRET` | — | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). Obrigatório em `prod` |
 | `JWT_EXPIRATION_MS` | `86400000` | Validade do access token em milissegundos |
 | `APP_ADMIN_INICIAL_EMAIL` | `admin@cartolaodds.local` | E-mail do administrador criado no primeiro boot |
-| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). Obrigatória em `prod` |
+| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). Obrigatória enquanto não houver ADMIN ativo |
+| `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
+| `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens liberadas para CORS, separadas por vírgula |
 
 ### 3.4 Autenticação (JWT)
 
@@ -255,6 +258,7 @@ que não vem do cache — o acesso aberto era o que impedia publicá-la.
 | `UsuarioDetailsService` | Carrega o `Usuario` pelo e-mail para o Spring Security |
 | `AuthService` | Valida credenciais pelo `AuthenticationManager` e emite o token |
 | `ErroSegurancaHandler` | Escreve 401 e 403 no contrato `ErrorResponse` |
+| `LoginThrottle` | Freio de força bruta por e-mail, com janela configurável |
 | `AdminInicialBootstrap` | Cria o administrador inicial no primeiro boot, de forma idempotente |
 
 **Claims do token:** `sub` (e-mail), `perfil`, `usuarioId` e `tokenVersion`.
@@ -262,9 +266,22 @@ que não vem do cache — o acesso aberto era o que impedia publicá-la.
 A `tokenVersion` é comparada com a do banco a cada requisição: incrementá-la — ao trocar a senha
 ou desativar o usuário — invalida na hora todos os tokens já emitidos, sem sessão no servidor.
 
-**Segredos sem padrão versionado.** `JWT_SECRET` e `APP_ADMIN_INICIAL_SENHA` não têm valor default.
-Em `prod`, ausentes, a aplicação falha ao iniciar. Fora de `prod`, o segredo JWT vira uma chave
-efêmera por boot e o admin inicial simplesmente não é criado — ambos com aviso no log.
+**Segredos sem padrão versionado.** Nem `JWT_SECRET` nem `APP_ADMIN_INICIAL_SENHA` têm default.
+
+- `APP_ADMIN_INICIAL_SENHA`: exigida em **qualquer perfil** quando não há ADMIN ativo no banco —
+  sem ela a aplicação falha ao iniciar, antes de o servidor web abrir a porta
+  (`SmartInitializingSingleton`, ainda dentro do refresh do contexto). Com um ADMIN ativo, deixa de ser exigida, para que produção não
+  carregue para sempre a senha do primeiro acesso.
+- `JWT_SECRET`: obrigatório em `prod`; fora dele, ausente, vira chave efêmera por boot, com aviso.
+
+**Duração em vez de instante.** O login devolve `expiraEmSegundos`, não uma data. O container roda
+em UTC e um horário sem fuso seria lido como local pelo cliente, que acharia a sessão mais longa do
+que o token é. Mesma escolha do `expires_in` do OAuth 2.
+
+**Freio de força bruta por e-mail.** `LoginThrottle` conta falhas por e-mail normalizado e responde
+`429` ao atingir o limite da janela. A chave é o e-mail, e não o IP, porque atrás do nginx e da
+borda da plataforma `getRemoteAddr()` é o endereço do proxy — igual para todos. O e-mail descreve o
+alvo real do ataque.
 
 > A distinção `USER` × `ADMIN` por rota e o fechamento de Swagger/Actuator em produção ficam para
 > a issue #38.

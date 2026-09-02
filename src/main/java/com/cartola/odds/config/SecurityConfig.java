@@ -14,8 +14,14 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 /**
  * Politica de seguranca da API: stateless, autenticada por JWT.
@@ -45,7 +51,8 @@ public class SecurityConfig {
             HttpSecurity http,
             JwtService jwtService,
             UsuarioDetailsService usuarioDetailsService,
-            ErroSegurancaHandler erroSegurancaHandler) throws Exception {
+            ErroSegurancaHandler erroSegurancaHandler,
+            CorsConfigurationSource corsConfigurationSource) throws Exception {
 
         var jwtAuthenticationFilter = new JwtAuthenticationFilter(jwtService, usuarioDetailsService);
 
@@ -57,6 +64,10 @@ public class SecurityConfig {
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // Sem isto, o preflight OPTIONS do navegador cai em anyRequest().authenticated()
+                // e volta 401 — o browser nem chega a enviar a requisicao real. Preflight nao
+                // carrega Authorization, entao ele precisa passar antes da autorizacao.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(erroSegurancaHandler)
                         .accessDeniedHandler(erroSegurancaHandler))
@@ -80,5 +91,23 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    /**
+     * Origens liberadas por ambiente, nunca {@code *}: o token viaja em header e uma origem
+     * curinga deixaria qualquer site chamar a API com o token da vitima.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(
+            @Value("${app.cors.allowed-origins:http://localhost:4200}") String origensPermitidas) {
+        var config = new CorsConfiguration();
+        config.setAllowedOrigins(List.of(origensPermitidas.split(",")));
+        config.setAllowedMethods(List.of("GET", "POST", "PATCH", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        config.setMaxAge(3600L);
+
+        var source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 }

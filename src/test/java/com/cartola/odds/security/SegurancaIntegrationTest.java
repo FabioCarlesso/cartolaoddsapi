@@ -19,7 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -110,7 +112,9 @@ class SegurancaIntegrationTest {
                 .andExpect(jsonPath("$.accessToken").isNotEmpty())
                 .andExpect(jsonPath("$.tipo").value("Bearer"))
                 .andExpect(jsonPath("$.perfil").value("ADMIN"))
-                .andExpect(jsonPath("$.expiraEm").exists());
+                // Duracao, e nao instante: o container roda em UTC e um horario sem fuso
+                // seria lido como local pelo cliente.
+                .andExpect(jsonPath("$.expiraEmSegundos").value(3600));
     }
 
     @Test
@@ -218,5 +222,62 @@ class SegurancaIntegrationTest {
     @DisplayName("deve manter a documentacao OpenAPI acessivel sem token")
     void deveManterOpenApiPublico() throws Exception {
         mockMvc.perform(get("/v3/api-docs")).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("deve liberar o preflight CORS da origem configurada, que nao carrega token")
+    void deveLiberarPreflightCors() throws Exception {
+        mockMvc.perform(options("/api/config")
+                        .header("Origin", "http://localhost:4200")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:4200"));
+    }
+
+    @Test
+    @DisplayName("deve recusar o preflight de origem nao configurada")
+    void deveRecusarPreflightDeOutraOrigem() throws Exception {
+        mockMvc.perform(options("/api/config")
+                        .header("Origin", "https://site-malicioso.example")
+                        .header("Access-Control-Request-Method", "GET"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("deve responder 429 apos o limite de tentativas malsucedidas no mesmo e-mail")
+    void deveBloquearAposExcessoDeTentativas() throws Exception {
+        // E-mail proprio deste teste: o freio e um bean singleton, e sujar o e-mail
+        // compartilhado deixaria os demais testes dependendo da ordem de execucao.
+        var alvo = "alvo-do-freio@cartolaodds.local";
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(post("/api/auth/login")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(corpoLogin(alvo, "tentativa-errada")))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(corpoLogin(alvo, "tentativa-errada")))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.erro").value("Tentativas excedidas"));
+    }
+
+    @Test
+    @DisplayName("deve manter o login de outro usuario liberado enquanto um e-mail esta bloqueado")
+    void naoDeveBloquearOutrosUsuarios() throws Exception {
+        var alvo = "outro-alvo-do-freio@cartolaodds.local";
+        for (int i = 0; i < 6; i++) {
+            mockMvc.perform(post("/api/auth/login")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(corpoLogin(alvo, "tentativa-errada")));
+        }
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(corpoLogin(EMAIL_ATIVO, SENHA)))
+                .andExpect(status().isOk());
     }
 }

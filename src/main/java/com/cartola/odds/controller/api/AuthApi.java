@@ -33,8 +33,14 @@ public interface AuthApi {
             - Nas chamadas a API: header `Authorization: Bearer <accessToken>`
             - No Swagger UI: botao **Authorize**, colando apenas o valor do `accessToken`
 
-            O token vale por 24 horas (configuravel em `JWT_EXPIRATION_MS`) e deixa de
-            valer antes disso se a senha do usuario for trocada ou se ele for desativado.
+            O campo `expiraEmSegundos` diz por quanto tempo o token vale a partir da
+            resposta — o cliente conta pelo proprio relogio, sem depender do fuso do
+            servidor. O token deixa de valer antes disso se a senha do usuario for trocada
+            ou se ele for desativado.
+
+            **Freio de forca bruta:** tentativas malsucedidas seguidas para o mesmo e-mail
+            passam a receber `429` ate a janela expirar (`APP_LOGIN_MAX_TENTATIVAS` e
+            `APP_LOGIN_JANELA_MINUTOS`). Um login bem-sucedido zera a contagem.
 
             **A criacao de usuarios nao e publica** — ela e feita por um administrador.
             """
@@ -45,6 +51,8 @@ public interface AuthApi {
         @ApiResponse(responseCode = "400", description = "Payload invalido",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "401", description = "Credenciais invalidas ou usuario inativo",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "429", description = "Excesso de tentativas de login para o e-mail informado",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request);

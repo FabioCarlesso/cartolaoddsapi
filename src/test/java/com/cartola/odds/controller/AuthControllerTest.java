@@ -1,5 +1,6 @@
 package com.cartola.odds.controller;
 
+import com.cartola.odds.exception.TentativasExcedidasException;
 import com.cartola.odds.model.enums.Perfil;
 import com.cartola.odds.model.response.LoginResponse;
 import com.cartola.odds.service.AuthService;
@@ -14,8 +15,7 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-import java.time.LocalDateTime;
-
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -42,7 +42,7 @@ class AuthControllerTest {
         when(authService.login(any())).thenReturn(LoginResponse.builder()
                 .accessToken("token-jwt")
                 .tipo("Bearer")
-                .expiraEm(LocalDateTime.now().plusHours(24))
+                .expiraEmSegundos(86_400L)
                 .nome("Administrador")
                 .perfil(Perfil.ADMIN)
                 .build());
@@ -51,6 +51,7 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accessToken").value("token-jwt"))
                 .andExpect(jsonPath("$.tipo").value("Bearer"))
+                .andExpect(jsonPath("$.expiraEmSegundos").value(86_400))
                 .andExpect(jsonPath("$.perfil").value("ADMIN"))
                 .andExpect(jsonPath("$.nome").value("Administrador"));
     }
@@ -75,6 +76,19 @@ class AuthControllerTest {
         mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_VALIDO))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.mensagem").value("E-mail ou senha invalidos."));
+    }
+
+    @Test
+    @DisplayName("deve retornar 429 quando o freio de tentativas bloqueia o e-mail")
+    void deveRetornar429QuandoBloqueado() throws Exception {
+        when(authService.login(any()))
+                .thenThrow(new TentativasExcedidasException("Muitas tentativas de login. Tente novamente em ate 5 minutos."));
+
+        mockMvc.perform(post("/api/auth/login").contentType(MediaType.APPLICATION_JSON).content(LOGIN_VALIDO))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.erro").value("Tentativas excedidas"))
+                .andExpect(jsonPath("$.mensagem").value(containsString("5 minutos")));
     }
 
     @Test

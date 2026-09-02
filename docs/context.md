@@ -41,8 +41,17 @@ desativar o usuário incrementa o contador e derruba todos os tokens anteriores,
 sessão — ao custo de uma consulta ao usuário por requisição, aceitável no volume deste projeto.
 
 O administrador inicial nasce de variáveis de ambiente no primeiro boot, nunca de senha em
-migration. Em `prod`, sem `APP_ADMIN_INICIAL_SENHA` ou `JWT_SECRET`, a aplicação recusa subir:
-é preferível falhar no deploy a subir com credencial previsível.
+migration. Sem `APP_ADMIN_INICIAL_SENHA` e sem nenhum ADMIN ativo no banco, a aplicação recusa
+subir em qualquer perfil — antes mesmo de abrir a porta. A alternativa, avisar em log e subir
+assim mesmo, produzia uma API no ar que ninguém conseguia autenticar, com o aviso passando
+despercebido. A exigência cai quando já existe um ADMIN ativo, para que produção não precise
+manter para sempre a senha do primeiro acesso depois de trocada.
+
+O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP: atrás do nginx e da
+borda da plataforma, `getRemoteAddr()` devolve o endereço do proxy, igual para todo mundo, e ler
+`X-Forwarded-For` com segurança depende de configuração de ambiente que só chega com o deploy. O
+e-mail descreve exatamente o alvo — adivinhar a senha do administrador é martelar sempre o mesmo
+endereço.
 
 ### Pipeline de Montagem do Time
 

@@ -7,9 +7,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
-
-import java.time.LocalDateTime;
 
 @Slf4j
 @Service
@@ -18,6 +17,7 @@ public class AuthService {
 
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
+    private final LoginThrottle loginThrottle;
 
     /**
      * Valida as credenciais e emite o access token.
@@ -28,16 +28,25 @@ public class AuthService {
      * e, com isso, nao consegue enumerar usuarios.
      */
     public LoginResponse login(LoginRequest request) {
-        var autenticacao = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(request.getEmail(), request.getSenha()));
+        loginThrottle.verificar(request.getEmail());
 
-        var usuario = (Usuario) autenticacao.getPrincipal();
+        Usuario usuario;
+        try {
+            var autenticacao = authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(request.getEmail(), request.getSenha()));
+            usuario = (Usuario) autenticacao.getPrincipal();
+        } catch (AuthenticationException e) {
+            loginThrottle.registrarFalha(request.getEmail());
+            throw e;
+        }
+
+        loginThrottle.registrarSucesso(request.getEmail());
         log.info("Login efetuado: {} ({})", usuario.getEmail(), usuario.getPerfil());
 
         return LoginResponse.builder()
                 .accessToken(jwtService.gerarToken(usuario))
                 .tipo("Bearer")
-                .expiraEm(LocalDateTime.now().plusNanos(jwtService.getExpirationMs() * 1_000_000L))
+                .expiraEmSegundos(jwtService.getExpirationSegundos())
                 .nome(usuario.getNome())
                 .perfil(usuario.getPerfil())
                 .build();

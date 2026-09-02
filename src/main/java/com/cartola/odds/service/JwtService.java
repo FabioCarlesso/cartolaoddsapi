@@ -8,6 +8,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.SecretKey;
@@ -77,6 +78,11 @@ public class JwtService {
         return expirationMs;
     }
 
+    /** Tempo de vida do token em segundos, para o {@code expiraEmSegundos} do login. */
+    public long getExpirationSegundos() {
+        return expirationMs / 1000L;
+    }
+
     /**
      * Segredo ausente e erro fatal em producao. Fora dela, gera uma chave aleatoria
      * para a aplicacao subir sem configuracao — ao custo de invalidar os tokens
@@ -84,7 +90,7 @@ public class JwtService {
      */
     private static SecretKey resolverChave(String secret, Environment environment) {
         if (secret == null || secret.isBlank()) {
-            if (environment.acceptsProfiles(org.springframework.core.env.Profiles.of("prod"))) {
+            if (environment.acceptsProfiles(Profiles.of("prod"))) {
                 throw new IllegalStateException(
                         "JWT_SECRET nao configurado. Em producao o segredo e obrigatorio "
                                 + "(minimo de " + SECRET_MIN_CHARS + " caracteres).");

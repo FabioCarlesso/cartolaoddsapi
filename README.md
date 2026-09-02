@@ -80,18 +80,29 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 # 1. Configure as variáveis de ambiente
 cp .env.example .env
 
-# 2. Edite o .env e insira sua API Key
+# 2. Edite o .env e preencha as TRÊS variáveis obrigatórias
 #    ODDS_API_KEY=sua_chave_aqui
+#    APP_ADMIN_INICIAL_SENHA=uma_senha_com_8_ou_mais_caracteres
+#    JWT_SECRET=$(openssl rand -base64 48)
 
 # 3. Suba o container
 docker compose up -d
 
-# 4. Acesse
-#    Swagger UI: http://localhost:8080/swagger-ui.html
-#    Time:       http://localhost:8080/api/time
-#    Favoritos:  http://localhost:8080/api/favoritos
-#    Ranking:    http://localhost:8080/api/ranking
+# 4. Autentique-se — a API é fechada, todo endpoint exige token
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@cartolaodds.local","senha":"a_senha_do_passo_2"}' | jq -r .accessToken)
+
+# 5. Acesse
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/time
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/favoritos
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/ranking
+#    Swagger UI: http://localhost:8080/swagger-ui.html (botão Authorize)
 ```
+
+> **Sem `APP_ADMIN_INICIAL_SENHA` a aplicação não sobe** quando o banco não tem nenhum
+> administrador ativo — de propósito. Uma API no ar que ninguém consegue autenticar é pior
+> do que uma que falha dizendo qual variável falta.
 
 ### Comandos Docker úteis
 
@@ -173,7 +184,10 @@ odds.api.key=SUA_API_KEY_AQUI
 | `JWT_SECRET` | — | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). **Obrigatório em produção** |
 | `JWT_EXPIRATION_MS` | `86400000` | Validade do access token em milissegundos (24 h) |
 | `APP_ADMIN_INICIAL_EMAIL` | `admin@cartolaodds.local` | E-mail do administrador criado no primeiro boot |
-| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). **Obrigatória em produção** |
+| `APP_ADMIN_INICIAL_SENHA` | — | Senha do administrador inicial (mínimo 8 caracteres). **Obrigatória enquanto não houver nenhum administrador ativo no banco** |
+| `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
+| `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas para CORS, separadas por vírgula |
 
 > **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
@@ -195,14 +209,18 @@ consulta que não vem do cache gasta cota da [The Odds API](https://the-odds-api
 ### Administrador inicial
 
 No primeiro boot, se não existir nenhum administrador ativo, a aplicação cria um a partir de
-`APP_ADMIN_INICIAL_EMAIL` e `APP_ADMIN_INICIAL_SENHA`. A senha **nunca** é versionada:
+`APP_ADMIN_INICIAL_EMAIL` e `APP_ADMIN_INICIAL_SENHA`. A senha **nunca** é versionada, e a regra
+é a mesma em todos os perfis:
 
-- **Em produção** (`SPRING_PROFILES_ACTIVE=prod`), sem `APP_ADMIN_INICIAL_SENHA` a aplicação
-  **falha ao iniciar**, com a variável nomeada na mensagem.
-- **Fora de produção**, sem a senha a aplicação sobe, avisa no log e não cria o usuário — a API
-  fica sem nenhum acesso até que a variável seja definida.
+- **Sem administrador ativo e sem `APP_ADMIN_INICIAL_SENHA`**, a aplicação **falha ao iniciar**,
+  com a variável nomeada na mensagem. Subir uma API que ninguém consegue autenticar seria pior —
+  e um aviso em log passa despercebido.
+- **Com um administrador ativo no banco**, a variável deixa de ser necessária: ela é exigida só
+  quando há um usuário a criar. Assim produção não precisa carregar para sempre a senha do
+  primeiro acesso depois que ela já foi trocada.
 
-O bootstrap é idempotente: nos boots seguintes ele encontra o administrador ativo e não faz nada.
+A validação roda ao fim da instanciação dos singletons, antes de o servidor web abrir a porta. O bootstrap é
+idempotente: nos boots seguintes ele encontra o administrador ativo e não faz nada.
 
 O mesmo vale para o `JWT_SECRET`: obrigatório em produção e, quando ausente fora dela, a aplicação
 gera uma chave efêmera a cada boot — os tokens emitidos deixam de valer no restart, e o log avisa.
@@ -220,6 +238,23 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/time
 ```
 
 No **Swagger UI**, o botão **Authorize** recebe apenas o valor do `accessToken`.
+
+A resposta traz `expiraEmSegundos` — o tempo de vida do token a partir da resposta, e não um
+instante absoluto. O container roda em UTC, e um horário sem fuso seria lido como local pelo
+cliente, que passaria a achar que a sessão dura horas a mais do que o token realmente vale.
+
+### Freio de força bruta
+
+Falhas seguidas de login para o **mesmo e-mail** passam a receber `429` até a janela expirar —
+`APP_LOGIN_MAX_TENTATIVAS` (padrão 5) dentro de `APP_LOGIN_JANELA_MINUTOS` (padrão 5). Um login
+bem-sucedido zera a contagem, e o bloqueio de um e-mail não afeta os demais usuários.
+
+A contagem é por e-mail, e não por IP: atrás do nginx e da borda da plataforma, `getRemoteAddr()`
+devolve o endereço do proxy — igual para todo mundo. Ler `X-Forwarded-For` com segurança exige
+saber quantos saltos confiar, o que é configuração de ambiente e chega com o deploy
+([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39)). O e-mail, por outro lado,
+descreve exatamente o alvo: quem tenta adivinhar a senha do administrador martela sempre o mesmo
+endereço.
 
 ### O que o token carrega
 
@@ -241,6 +276,7 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `POST /api/auth/login` | Público |
 | `/swagger-ui.html`, `/v3/api-docs/**` | Público |
 | `/actuator/**` | Público *(porta separada, exposta só em `127.0.0.1`)* |
+| Preflight `OPTIONS` das origens em `CORS_ALLOWED_ORIGINS` | Público (não carrega token) |
 | Todo o resto de `/api/**` | Autenticado |
 
 > A distinção entre `USER` e `ADMIN` por rota — restringir `PATCH /api/config` e `DELETE /api/cache`
@@ -556,7 +592,8 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | `400` | Valor que não converte para o tipo esperado (ex: `?orcamento=abc`, `?excluirDuvida=abc`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
 | `401` | Credenciais inválidas no login, ou requisição sem token / com token inválido, expirado ou revogado |
-| `403` | Autenticado, mas sem permissão para o recurso |
+| `403` | Autenticado, mas sem permissão para o recurso; ou preflight CORS de origem não liberada |
+| `429` | Excesso de tentativas de login para o e-mail informado |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
@@ -674,7 +711,7 @@ cartola/
     ├── main/
     │   ├── java/com/cartola/odds/
     │   │   ├── config/          (OddsProperties, CartolaProperties, JwtProperties,
-    │   │   │                     AdminInicialProperties, AdminInicialBootstrap,
+    │   │   │                     LoginProperties, AdminInicialProperties, AdminInicialBootstrap,
     │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig, SecurityConfig)
     │   │   ├── client/          (OddsClient, CartolaClient)
     │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository, UsuarioRepository)
@@ -686,7 +723,7 @@ cartola/
     │   │   ├── controller/      (AuthController, TimeController, RankingController,
     │   │   │                     FavoritosController, CacheController, ConfiguracaoController,
     │   │   │                     HistoricoController, GlobalExceptionHandler)
-    │   │   ├── exception/       (RecursoNaoEncontradoException)
+    │   │   ├── exception/       (RecursoNaoEncontradoException, TentativasExcedidasException)
     │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, Usuario, enums/,
     │   │   │                     request/ConfiguracaoRequest, request/LoginRequest, response/)
     │   │   └── util/            (NormalizadorUtil)
@@ -702,7 +739,7 @@ cartola/
     │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     │           └── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
     └── test/
-        ├── java/                            # 28 classes de teste — 479 cenários
+        ├── java/                            # 29 classes de teste — 490 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2

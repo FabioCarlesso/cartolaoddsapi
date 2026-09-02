@@ -9,9 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.junit.jupiter.MockitoSettings;
-import org.mockito.quality.Strictness;
-import org.springframework.mock.env.MockEnvironment;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
@@ -23,7 +20,6 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@MockitoSettings(strictness = Strictness.LENIENT)
 @DisplayName("AdminInicialBootstrap")
 class AdminInicialBootstrapTest {
 
@@ -31,21 +27,23 @@ class AdminInicialBootstrapTest {
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
-    private AdminInicialBootstrap bootstrap(String senha, String... perfis) {
+    private AdminInicialBootstrap bootstrap(String senha) {
         var props = new AdminInicialProperties();
         props.setEmail("admin@cartolaodds.local");
         props.setSenha(senha);
-        var environment = new MockEnvironment();
-        environment.setActiveProfiles(perfis);
-        return new AdminInicialBootstrap(props, usuarioRepository, passwordEncoder, environment);
+        return new AdminInicialBootstrap(props, usuarioRepository, passwordEncoder);
+    }
+
+    private void semAdminAtivo() {
+        when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(false);
     }
 
     @Test
     @DisplayName("deve criar o admin inicial quando nao existe ADMIN ativo")
     void deveCriarAdminInicial() {
-        when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(false);
+        semAdminAtivo();
 
-        bootstrap("senha-forte-123").run(null);
+        bootstrap("senha-forte-123").executar();
 
         var captor = ArgumentCaptor.forClass(Usuario.class);
         verify(usuarioRepository).save(captor.capture());
@@ -58,9 +56,9 @@ class AdminInicialBootstrapTest {
     @Test
     @DisplayName("deve gravar a senha com hash BCrypt, nunca em claro")
     void deveGravarSenhaComHash() {
-        when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(false);
+        semAdminAtivo();
 
-        bootstrap("senha-forte-123").run(null);
+        bootstrap("senha-forte-123").executar();
 
         var captor = ArgumentCaptor.forClass(Usuario.class);
         verify(usuarioRepository).save(captor.capture());
@@ -74,33 +72,37 @@ class AdminInicialBootstrapTest {
     void naoDeveDuplicarAdmin() {
         when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(true);
 
-        bootstrap("senha-forte-123").run(null);
+        bootstrap("senha-forte-123").executar();
 
         verify(usuarioRepository, never()).save(any());
     }
 
     @Test
-    @DisplayName("deve falhar ao iniciar em producao sem APP_ADMIN_INICIAL_SENHA")
-    void deveFalharEmProducaoSemSenha() {
-        assertThatThrownBy(() -> bootstrap(null, "prod").run(null))
+    @DisplayName("nao deve exigir a senha quando ja existe ADMIN ativo, para nao manter segredo obsoleto no ambiente")
+    void naoDeveExigirSenhaComAdminExistente() {
+        when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(true);
+
+        bootstrap(null).executar();
+
+        verify(usuarioRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("deve falhar ao iniciar quando nao ha ADMIN ativo e a senha nao foi configurada")
+    void deveFalharSemAdminESemSenha() {
+        semAdminAtivo();
+
+        assertThatThrownBy(() -> bootstrap(" ").executar())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("APP_ADMIN_INICIAL_SENHA nao configurada");
     }
 
     @Test
-    @DisplayName("deve seguir sem criar admin fora de producao quando a senha esta ausente")
-    void deveSeguirSemCriarForaDeProducao() {
-        when(usuarioRepository.existsByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(false);
-
-        bootstrap(" ").run(null);
-
-        verify(usuarioRepository, never()).save(any());
-    }
-
-    @Test
     @DisplayName("deve falhar quando a senha do admin inicial e curta demais")
     void deveFalharComSenhaCurta() {
-        assertThatThrownBy(() -> bootstrap("curta").run(null))
+        semAdminAtivo();
+
+        assertThatThrownBy(() -> bootstrap("curta").executar())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("minimo e 8");
     }
