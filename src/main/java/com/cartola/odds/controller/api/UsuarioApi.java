@@ -70,11 +70,16 @@ public interface UsuarioApi {
             Aceita os parametros padrao de paginacao (`page`, `size`, `sort`); sem eles,
             devolve os 20 primeiros ordenados por nome. A senha nao aparece na resposta,
             nem em hash.
+
+            `sort` aceita apenas `id`, `nome`, `email`, `perfil`, `ativo` e `criadoEm`;
+            qualquer outro campo responde `400`.
             """
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Pagina de usuarios",
             content = @Content(schema = @Schema(implementation = PaginaResponse.class))),
+        @ApiResponse(responseCode = "400", description = "Campo de ordenacao nao suportado",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "401", description = "Nao autenticado",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "403", description = "Autenticado, mas sem perfil ADMIN",
@@ -110,6 +115,10 @@ public interface UsuarioApi {
             usado nesta chamada: a `tokenVersion` e incrementada e a proxima requisicao com
             o token antigo responde `401`. E preciso autenticar de novo com a senha nova.
 
+            **Freio de forca bruta:** a conferencia da senha atual usa o mesmo contador do
+            login. Tentativas malsucedidas seguidas passam a receber `429` ate a janela
+            expirar — um token roubado nao vira tentativas ilimitadas de adivinhar a senha.
+
             Nao ha recuperacao de senha por e-mail nesta versao: quem esquece a senha
             depende do administrador da instancia.
             """
@@ -121,6 +130,8 @@ public interface UsuarioApi {
         @ApiResponse(responseCode = "401", description = "Nao autenticado",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "422", description = "Senha atual incorreta",
+            content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
+        @ApiResponse(responseCode = "429", description = "Excesso de tentativas com a senha atual errada",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     ResponseEntity<Void> alterarSenha(@Valid @RequestBody AlterarSenhaRequest request);
@@ -152,7 +163,9 @@ public interface UsuarioApi {
 
             **Efeito nos tokens:** rebaixar o perfil ou desativar o usuario incrementa a
             `tokenVersion` e derruba os tokens ja emitidos para ele. Trocar o e-mail tem o
-            mesmo efeito na pratica — o e-mail e o `subject` do token.
+            mesmo efeito na pratica — o e-mail e o `subject` do token. Vale inclusive para
+            o administrador que troca o **proprio** e-mail: ele precisa autenticar de novo
+            logo apos a chamada.
 
             **Protecoes:** um administrador nao pode desativar nem rebaixar a propria conta,
             e a API recusa (`409`) a operacao que deixaria a instancia sem nenhum

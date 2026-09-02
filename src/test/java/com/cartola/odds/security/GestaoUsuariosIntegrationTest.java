@@ -17,6 +17,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -202,6 +204,111 @@ class GestaoUsuariosIntegrationTest {
                 .andExpect(jsonPath("$.totalElementos").value(3))
                 .andExpect(jsonPath("$.totalPaginas").value(2))
                 .andExpect(jsonPath("$.ultima").value(false));
+    }
+
+    // ── Payload e parametros invalidos ────────────────────────────────
+
+    @Test
+    @DisplayName("deve responder 400, e nao 500, para ordenacao por campo inexistente")
+    void deveRecusarOrdenacaoDesconhecida() throws Exception {
+        mockMvc.perform(get("/api/usuarios").param("sort", "naoExiste")
+                        .header("Authorization", bearer(autenticar(EMAIL_ADMIN, SENHA))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.mensagem").value(containsString("Campos aceitos")))
+                // Nem o nome da entidade interna nem o campo recebido voltam ao cliente.
+                .andExpect(jsonPath("$.mensagem").value(not(containsString("Usuario"))))
+                .andExpect(jsonPath("$.mensagem").value(not(containsString("naoExiste"))));
+    }
+
+    @Test
+    @DisplayName("deve responder 400 para ordenacao pela senha")
+    void deveRecusarOrdenacaoPorSenha() throws Exception {
+        mockMvc.perform(get("/api/usuarios").param("sort", "senha")
+                        .header("Authorization", bearer(autenticar(EMAIL_ADMIN, SENHA))))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("deve aceitar ordenacao pelos campos suportados")
+    void deveAceitarOrdenacaoSuportada() throws Exception {
+        mockMvc.perform(get("/api/usuarios").param("sort", "criadoEm,desc")
+                        .header("Authorization", bearer(autenticar(EMAIL_ADMIN, SENHA))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.conteudo.length()").value(3));
+    }
+
+    @Test
+    @DisplayName("deve responder 400, e nao 500, para valor fora do enum de perfil")
+    void deveRecusarPerfilInvalido() throws Exception {
+        mockMvc.perform(post("/api/usuarios")
+                        .header("Authorization", bearer(autenticar(EMAIL_ADMIN, SENHA)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome": "X", "email": "x@cartolaodds.local", "senha": "senha-forte-123", "perfil": "SUPERADMIN"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.mensagem").value(not(containsString("SUPERADMIN"))));
+
+        assertThat(usuarioRepository.existsByEmailIgnoreCase("x@cartolaodds.local")).isFalse();
+    }
+
+    @Test
+    @DisplayName("deve responder 400 quando o nome vem apenas com espacos, sem gravar nome vazio")
+    void deveRecusarNomeEmBranco() throws Exception {
+        mockMvc.perform(patch("/api/usuarios/" + idDe(EMAIL_USER))
+                        .header("Authorization", bearer(autenticar(EMAIL_ADMIN, SENHA)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome": "   "}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        assertThat(usuarioRepository.findByEmailIgnoreCase(EMAIL_USER).orElseThrow().getNome())
+                .isEqualTo("Usuario comum");
+    }
+
+    @Test
+    @DisplayName("deve responder 429 apos exceder tentativas com a senha atual errada")
+    void deveBloquearTrocaDeSenhaAposExcessoDeTentativas() throws Exception {
+        // Usuario proprio deste teste: o freio e um bean singleton e seu contador
+        // sobrevive ao rollback da transacao, entao queimar as tentativas de um e-mail
+        // compartilhado deixaria os demais testes dependendo da ordem de execucao.
+        var emailAlvo = "alvo-freio-senha@cartolaodds.local";
+        usuarioRepository.save(criar("Alvo do freio", emailAlvo, Perfil.USER));
+
+        var token = autenticar(emailAlvo, SENHA);
+        var corpoErrado = """
+                {"senhaAtual": "senha-errada", "novaSenha": "senha-nova-456"}
+                """;
+
+        for (int i = 0; i < 5; i++) {
+            mockMvc.perform(patch("/api/usuarios/me/senha")
+                            .header("Authorization", bearer(token))
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(corpoErrado))
+                    .andExpect(status().isUnprocessableEntity());
+        }
+
+        mockMvc.perform(patch("/api/usuarios/me/senha")
+                        .header("Authorization", bearer(token))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(corpoErrado))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.erro").value("Tentativas excedidas"));
+
+        // O freio e compartilhado com o login: o mesmo e-mail ja nao autentica.
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\": \"%s\", \"senha\": \"%s\"}".formatted(emailAlvo, SENHA)))
+                .andExpect(status().isTooManyRequests());
+
+        // E o bloqueio nao respinga em quem nao errou senha nenhuma.
+        mockMvc.perform(get("/api/usuarios/me")
+                        .header("Authorization", bearer(autenticar(EMAIL_USER, SENHA))))
+                .andExpect(status().isOk());
     }
 
     // ── Propria conta ─────────────────────────────────────────────────

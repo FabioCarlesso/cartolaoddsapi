@@ -300,6 +300,7 @@ nasce de um administrador.
 | `UsuarioService` | Regras de criação, atualização, desativação lógica e troca de senha |
 | `PaginaResponse<T>` | Envelope de paginação da API, reusável pelos próximos endpoints paginados |
 | `ConflitoException` / `SenhaInvalidaException` | Mapeadas a `409` e `422` no `GlobalExceptionHandler` |
+| `LoginThrottle` | Freio de força bruta compartilhado entre o login e a conferência da senha atual |
 
 **Endpoints:**
 
@@ -338,6 +339,20 @@ histórico de quem o produziu. Repetir sobre alguém já inativo responde `204` 
 - ninguém desativa ou rebaixa o **último** `ADMIN` ativo — a instância só voltaria a ter
   administrador por acesso direto ao banco.
 
+A segunda checagem usa `travarAtivosPorPerfil`, com `@Lock(PESSIMISTIC_WRITE)`: uma contagem
+simples seria check-then-act, e duas requisições simultâneas leriam "há 2 administradores" e cada
+uma removeria o seu. O `SELECT ... FOR UPDATE` serializa as duas, e a segunda já enxerga o estado
+que a primeira deixou.
+
+Trocar o **próprio e-mail** não é bloqueado, mas desloga o administrador na prática — o e-mail é o
+`subject` do token. O `@Operation` do endpoint avisa disso.
+
+**Freio de força bruta na troca de senha.** `alterarSenha` chama o mesmo `LoginThrottle` do login,
+com o mesmo contador por e-mail. Um token roubado tem validade limitada; sem freio, ele renderia
+tentativas ilimitadas de adivinhar `senhaAtual` e, no acerto, takeover permanente — a troca derruba
+os tokens do dono legítimo. Contadores separados dariam ao atacante duas janelas para o mesmo
+segredo.
+
 **Normalização de e-mail.** Gravado sempre em minúsculas: a `UNIQUE` do Postgres é sensível a
 caixa, o login (`findByEmailIgnoreCase`) não é. Sem normalizar, `Fabio@x.com` e `fabio@x.com`
 coexistiriam na tabela e o login ficaria ambíguo. A checagem de duplicidade acontece no service; a
@@ -347,6 +362,16 @@ resultante também vira `409`.
 **Paginação.** `PaginaResponse<T>` em vez do `Page` do Spring Data: o JSON daquela classe é detalhe
 interno do framework, muda entre versões e o próprio Spring avisa disso no log. O envelope é
 `conteudo`, `pagina`, `tamanho`, `totalElementos`, `totalPaginas` e `ultima`.
+
+O `sort` é restrito a `id`, `nome`, `email`, `perfil`, `ativo` e `criadoEm`. Sem a lista fechada,
+uma propriedade inexistente virava `500` com o nome da entidade interna na resposta, e `sort=senha`
+era aceito. A mensagem de erro não ecoa o campo recebido — a lista de aceitos basta para corrigir a
+chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
+
+**Payload inválido é `400`, nunca `500`.** O `GlobalExceptionHandler` trata
+`HttpMessageNotReadableException` (JSON mal formado, valor fora do enum `Perfil`) e
+`PropertyReferenceException` (ordenação desconhecida). Nos dois casos a mensagem original fica só
+no log: ela nomeia a classe Java e chega a listar os valores aceitos do enum.
 
 **Fora de escopo (issue #37):** auto-cadastro público, convite por e-mail e recuperação de senha.
 

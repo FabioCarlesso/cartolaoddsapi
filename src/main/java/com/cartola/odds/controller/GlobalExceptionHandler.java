@@ -8,7 +8,9 @@ import com.cartola.odds.model.response.ErrorResponse;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.mapping.PropertyReferenceException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
@@ -64,6 +66,38 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of(400, "Parametro invalido", mensagem));
+    }
+
+    /**
+     * Corpo que o Jackson nao consegue ler: JSON mal formado ou valor fora de um enum
+     * (ex.: {@code "perfil": "SUPERADMIN"}). E erro do cliente — sem este handler cairia
+     * no generico e responderia 500.
+     *
+     * <p>A mensagem original nao e ecoada: ela descreve a classe Java e lista os valores
+     * aceitos do enum, detalhe interno que nao precisa atravessar a resposta. O log
+     * guarda o texto completo para quem investiga.
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleCorpoIlegivel(HttpMessageNotReadableException ex) {
+        log.warn("Corpo da requisicao ilegivel: {}", ex.getMostSpecificCause().getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "Parametro invalido",
+                        "Corpo da requisicao invalido ou mal formatado."));
+    }
+
+    /**
+     * {@code ?sort=} apontando para propriedade que a entidade nao tem. Erro do cliente,
+     * e nao 500 — e a mensagem original ("No property 'x' found for type 'Usuario'")
+     * fica so no log, por nomear a entidade interna.
+     */
+    @ExceptionHandler(PropertyReferenceException.class)
+    public ResponseEntity<ErrorResponse> handlePropriedadeInvalida(PropertyReferenceException ex) {
+        log.warn("Propriedade de ordenacao invalida: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of(400, "Parametro invalido",
+                        "Parametro de ordenacao invalido."));
     }
 
     @ExceptionHandler(RecursoNaoEncontradoException.class)
@@ -124,10 +158,15 @@ public class GlobalExceptionHandler {
      * duas criacoes simultaneas do mesmo e-mail passam pela checagem e uma delas esbarra
      * na UNIQUE do banco. A mensagem do driver nao e ecoada — ela carrega nome de tabela
      * e de constraint.
+     *
+     * <p>O log e {@code error}, e nao {@code warn}, porque o handler e mais largo do que o
+     * caso que o motivou: violacao de NOT NULL ou de chave estrangeira e bug de servidor,
+     * e responder 409 a apresentaria como erro do cliente. O 409 atende quem chamou; o
+     * nivel de log preserva o alerta para quem opera.
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ErrorResponse> handleIntegridade(DataIntegrityViolationException ex) {
-        log.warn("Violacao de integridade: {}", ex.getMostSpecificCause().getMessage());
+        log.error("Violacao de integridade: {}", ex.getMostSpecificCause().getMessage());
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
                 .body(ErrorResponse.of(409, "Conflito",

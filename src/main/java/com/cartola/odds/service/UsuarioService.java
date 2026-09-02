@@ -14,11 +14,13 @@ import com.cartola.odds.repository.UsuarioRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -38,8 +40,18 @@ import java.util.Locale;
 @Transactional(readOnly = true)
 public class UsuarioService {
 
+    /**
+     * Campos aceitos no {@code sort} da listagem. A lista existe por dois motivos: uma
+     * propriedade inexistente derrubava a requisicao em 500 vindo do Spring Data, e
+     * {@code sort=senha} era aceito — ordenar pelo hash nao o revela, mas nada na API
+     * deveria alcanca-lo.
+     */
+    private static final List<String> CAMPOS_ORDENAVEIS =
+            List.of("id", "nome", "email", "perfil", "ativo", "criadoEm");
+
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
+    private final LoginThrottle loginThrottle;
 
     @Transactional
     public UsuarioResponse criar(UsuarioRequest request) {
@@ -61,6 +73,7 @@ public class UsuarioService {
     }
 
     public PaginaResponse<UsuarioResponse> listar(Pageable pageable) {
+        validarOrdenacao(pageable.getSort());
         return PaginaResponse.from(usuarioRepository.findAll(pageable).map(UsuarioResponse::from));
     }
 
@@ -111,15 +124,24 @@ public class UsuarioService {
         return UsuarioResponse.from(usuarioAutenticado());
     }
 
+    /**
+     * O mesmo freio de forca bruta do login protege a conferencia da senha atual aqui.
+     * Sem ele, um token roubado — cuja validade e limitada — daria tentativas ilimitadas
+     * para adivinhar a senha e, acertando, tomar a conta em definitivo: a troca derruba
+     * os tokens do dono legitimo.
+     */
     @Transactional
     public void alterarSenha(AlterarSenhaRequest request) {
         var usuario = usuarioAutenticado();
+        loginThrottle.verificar(usuario.getEmail());
 
         if (!passwordEncoder.matches(request.getSenhaAtual(), usuario.getSenha())) {
+            loginThrottle.registrarFalha(usuario.getEmail());
             log.warn("Troca de senha recusada para {}: senha atual incorreta.", usuario.getEmail());
             throw new SenhaInvalidaException("A senha atual informada nao confere.");
         }
 
+        loginThrottle.registrarSucesso(usuario.getEmail());
         usuario.setSenha(passwordEncoder.encode(request.getNovaSenha()));
         usuario.incrementarTokenVersion();
         usuarioRepository.save(usuario);
@@ -176,18 +198,38 @@ public class UsuarioService {
      * por engano, e sem ninguem para desfazer se ele for o unico.
      */
     private void verificarProprioAdmin(Usuario alvo, String acao) {
-        var logado = usuarioAutenticado();
-        if (logado.getId().equals(alvo.getId())) {
+        if (idDoUsuarioAutenticado().equals(alvo.getId())) {
             throw new ConflitoException("Um administrador nao pode " + acao + ".");
         }
     }
 
-    /** Uma instancia sem administrador ativo so voltaria a ter um por acesso ao banco. */
+    /**
+     * Uma instancia sem administrador ativo so voltaria a ter um por acesso ao banco.
+     *
+     * <p>A consulta trava as linhas dos administradores ativos ({@code SELECT ... FOR
+     * UPDATE}) em vez de apenas conta-las: duas requisicoes simultaneas contando veriam
+     * "ha 2" e cada uma removeria o seu, justamente o resultado que esta regra existe
+     * para impedir.
+     */
     private void verificarUltimoAdmin(Usuario alvo, String acao) {
         if (alvo.getPerfil() == Perfil.ADMIN
                 && alvo.isAtivo()
-                && usuarioRepository.countByPerfilAndAtivoTrue(Perfil.ADMIN) <= 1) {
+                && usuarioRepository.travarAtivosPorPerfil(Perfil.ADMIN).size() <= 1) {
             throw new ConflitoException("Nao e possivel " + acao + ".");
+        }
+    }
+
+    /** Ordenacao restrita: campo desconhecido vira 400, e nao o 500 do Spring Data. */
+    private void validarOrdenacao(Sort sort) {
+        var invalido = sort.stream()
+                .map(Sort.Order::getProperty)
+                .anyMatch(campo -> !CAMPOS_ORDENAVEIS.contains(campo));
+
+        if (invalido) {
+            // O campo recebido nao e ecoado: a lista de aceitos ja basta para corrigir a
+            // chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
+            throw new IllegalArgumentException(
+                    "Ordenacao nao suportada. Campos aceitos: " + String.join(", ", CAMPOS_ORDENAVEIS) + ".");
         }
     }
 
@@ -200,9 +242,22 @@ public class UsuarioService {
     }
 
     /**
-     * Recarrega o usuario do banco a cada chamada, em vez de usar o principal do token:
-     * o principal e a foto do usuario no momento da autenticacao, e a regra do ultimo
-     * administrador precisa do estado atual.
+     * Id do usuario da requisicao, lido direto do principal: id nao muda depois da
+     * emissao do token, entao nao ha o que recarregar — e as autoprotecoes so comparam
+     * identidade. Evita uma consulta por checagem.
+     */
+    private Long idDoUsuarioAutenticado() {
+        var autenticacao = SecurityContextHolder.getContext().getAuthentication();
+        if (autenticacao != null && autenticacao.getPrincipal() instanceof Usuario usuario) {
+            return usuario.getId();
+        }
+        return usuarioAutenticado().getId();
+    }
+
+    /**
+     * Recarrega o usuario do banco, em vez de usar o principal do token: o principal e a
+     * foto do usuario no momento da autenticacao, e {@code /me} e a troca de senha
+     * precisam do estado e do hash atuais.
      */
     private Usuario usuarioAutenticado() {
         var autenticacao = SecurityContextHolder.getContext().getAuthentication();

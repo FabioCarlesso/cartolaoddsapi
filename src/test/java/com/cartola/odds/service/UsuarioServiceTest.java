@@ -3,6 +3,7 @@ package com.cartola.odds.service;
 import com.cartola.odds.exception.ConflitoException;
 import com.cartola.odds.exception.RecursoNaoEncontradoException;
 import com.cartola.odds.exception.SenhaInvalidaException;
+import com.cartola.odds.exception.TentativasExcedidasException;
 import com.cartola.odds.model.Usuario;
 import com.cartola.odds.model.enums.Perfil;
 import com.cartola.odds.model.request.AlterarSenhaRequest;
@@ -18,6 +19,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -29,6 +32,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,11 +45,12 @@ class UsuarioServiceTest {
     private static final String EMAIL_ADMIN = "admin@cartolaodds.local";
 
     @Mock UsuarioRepository usuarioRepository;
+    @Mock LoginThrottle loginThrottle;
 
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     private UsuarioService service() {
-        return new UsuarioService(usuarioRepository, passwordEncoder);
+        return new UsuarioService(usuarioRepository, passwordEncoder, loginThrottle);
     }
 
     private Usuario usuario(Long id, String email, Perfil perfil, boolean ativo) {
@@ -59,13 +64,24 @@ class UsuarioServiceTest {
         return usuario;
     }
 
-    /** Deixa o admin de id 1 como usuario da requisicao, como faria o filtro JWT. */
+    /**
+     * Deixa o admin de id 1 como usuario da requisicao, como faria o filtro JWT. As
+     * autoprotecoes leem o id direto do principal, sem consultar o banco — por isso a
+     * releitura fica em {@link #stubReleituraDoLogado(Usuario)}, so para quem precisa.
+     */
     private Usuario autenticarAdmin() {
         var admin = usuario(1L, EMAIL_ADMIN, Perfil.ADMIN, true);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(admin, null, admin.getAuthorities()));
-        when(usuarioRepository.findByEmailIgnoreCase(EMAIL_ADMIN)).thenReturn(Optional.of(admin));
         return admin;
+    }
+
+    private void stubReleituraDoLogado(Usuario logado) {
+        when(usuarioRepository.findByEmailIgnoreCase(logado.getEmail())).thenReturn(Optional.of(logado));
+    }
+
+    private void stubAdminsAtivos(Usuario... admins) {
+        when(usuarioRepository.travarAtivosPorPerfil(Perfil.ADMIN)).thenReturn(List.of(admins));
     }
 
     private Usuario salvoNoRepositorio() {
@@ -169,7 +185,7 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("deve devolver o dono do token em buscarLogado")
     void deveBuscarLogado() {
-        autenticarAdmin();
+        stubReleituraDoLogado(autenticarAdmin());
 
         var response = service().buscarLogado();
 
@@ -231,10 +247,10 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("deve incrementar tokenVersion ao rebaixar o perfil de um administrador")
     void deveIncrementarTokenVersionAoRebaixar() {
-        autenticarAdmin();
+        var admin = autenticarAdmin();
         var outroAdmin = usuario(2L, "outro@cartolaodds.local", Perfil.ADMIN, true);
         when(usuarioRepository.findById(2L)).thenReturn(Optional.of(outroAdmin));
-        when(usuarioRepository.countByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(2L);
+        stubAdminsAtivos(admin, outroAdmin);
         when(usuarioRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
         var request = new UsuarioUpdateRequest();
@@ -291,7 +307,7 @@ class UsuarioServiceTest {
         autenticarAdmin();
         var ultimoAdmin = usuario(2L, "outro@cartolaodds.local", Perfil.ADMIN, true);
         when(usuarioRepository.findById(2L)).thenReturn(Optional.of(ultimoAdmin));
-        when(usuarioRepository.countByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(1L);
+        stubAdminsAtivos(ultimoAdmin);
 
         var request = new UsuarioUpdateRequest();
         request.setPerfil(Perfil.USER);
@@ -309,7 +325,7 @@ class UsuarioServiceTest {
         autenticarAdmin();
         var ultimoAdmin = usuario(2L, "outro@cartolaodds.local", Perfil.ADMIN, true);
         when(usuarioRepository.findById(2L)).thenReturn(Optional.of(ultimoAdmin));
-        when(usuarioRepository.countByPerfilAndAtivoTrue(Perfil.ADMIN)).thenReturn(1L);
+        stubAdminsAtivos(ultimoAdmin);
 
         assertThatThrownBy(() -> service().desativar(2L))
                 .isInstanceOf(ConflitoException.class)
@@ -361,12 +377,97 @@ class UsuarioServiceTest {
         assertThat(alvo.getTokenVersion()).isZero();
     }
 
+    // ── Ordenacao da listagem ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("deve recusar ordenacao por campo que a entidade nao tem")
+    void deveRecusarOrdenacaoDesconhecida() {
+        var pageable = PageRequest.of(0, 20, Sort.by("naoExiste"));
+
+        assertThatThrownBy(() -> service().listar(pageable))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Campos aceitos")
+                // O campo recebido do cliente nao volta ecoado na mensagem.
+                .hasMessageNotContaining("naoExiste");
+        verify(usuarioRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("deve recusar ordenacao pela senha, ainda que a propriedade exista")
+    void deveRecusarOrdenacaoPorSenha() {
+        var pageable = PageRequest.of(0, 20, Sort.by("senha"));
+
+        assertThatThrownBy(() -> service().listar(pageable))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(usuarioRepository, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    @DisplayName("deve aceitar os campos suportados de ordenacao")
+    void deveAceitarOrdenacaoSuportada() {
+        var pageable = PageRequest.of(0, 20, Sort.by("criadoEm").descending().and(Sort.by("email")));
+        when(usuarioRepository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(), pageable, 0));
+
+        assertThat(service().listar(pageable).getConteudo()).isEmpty();
+    }
+
+    // ── Freio de forca bruta na troca de senha ────────────────────────
+
+    @Test
+    @DisplayName("deve registrar falha no freio quando a senha atual esta errada")
+    void deveRegistrarFalhaNoFreio() {
+        stubReleituraDoLogado(autenticarAdmin());
+
+        var request = new AlterarSenhaRequest();
+        request.setSenhaAtual("senha-errada");
+        request.setNovaSenha("senha-nova-456");
+
+        assertThatThrownBy(() -> service().alterarSenha(request))
+                .isInstanceOf(SenhaInvalidaException.class);
+
+        verify(loginThrottle).verificar(EMAIL_ADMIN);
+        verify(loginThrottle).registrarFalha(EMAIL_ADMIN);
+        verify(loginThrottle, never()).registrarSucesso(EMAIL_ADMIN);
+    }
+
+    @Test
+    @DisplayName("deve zerar o freio quando a senha atual confere")
+    void deveZerarFreioNaTrocaBemSucedida() {
+        stubReleituraDoLogado(autenticarAdmin());
+
+        var request = new AlterarSenhaRequest();
+        request.setSenhaAtual(SENHA);
+        request.setNovaSenha("senha-nova-456");
+
+        service().alterarSenha(request);
+
+        verify(loginThrottle).registrarSucesso(EMAIL_ADMIN);
+        verify(loginThrottle, never()).registrarFalha(EMAIL_ADMIN);
+    }
+
+    @Test
+    @DisplayName("deve barrar a troca antes de conferir a senha quando o freio ja bloqueou o e-mail")
+    void deveBarrarTrocaComFreioAtivo() {
+        stubReleituraDoLogado(autenticarAdmin());
+        doThrow(new TentativasExcedidasException("Muitas tentativas malsucedidas."))
+                .when(loginThrottle).verificar(EMAIL_ADMIN);
+
+        var request = new AlterarSenhaRequest();
+        request.setSenhaAtual(SENHA);
+        request.setNovaSenha("senha-nova-456");
+
+        assertThatThrownBy(() -> service().alterarSenha(request))
+                .isInstanceOf(TentativasExcedidasException.class);
+        verify(usuarioRepository, never()).save(any());
+    }
+
     // ── Troca de senha ────────────────────────────────────────────────
 
     @Test
     @DisplayName("deve trocar a senha e invalidar os tokens anteriores")
     void deveTrocarSenha() {
         var admin = autenticarAdmin();
+        stubReleituraDoLogado(admin);
 
         var request = new AlterarSenhaRequest();
         request.setSenhaAtual(SENHA);
@@ -383,7 +484,7 @@ class UsuarioServiceTest {
     @Test
     @DisplayName("deve recusar a troca quando a senha atual nao confere")
     void deveRecusarSenhaAtualErrada() {
-        autenticarAdmin();
+        stubReleituraDoLogado(autenticarAdmin());
 
         var request = new AlterarSenhaRequest();
         request.setSenhaAtual("senha-errada");

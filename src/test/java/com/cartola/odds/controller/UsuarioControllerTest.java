@@ -3,6 +3,7 @@ package com.cartola.odds.controller;
 import com.cartola.odds.exception.ConflitoException;
 import com.cartola.odds.exception.RecursoNaoEncontradoException;
 import com.cartola.odds.exception.SenhaInvalidaException;
+import com.cartola.odds.exception.TentativasExcedidasException;
 import com.cartola.odds.model.enums.Perfil;
 import com.cartola.odds.model.response.PaginaResponse;
 import com.cartola.odds.model.response.UsuarioResponse;
@@ -23,6 +24,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
@@ -148,6 +151,37 @@ class UsuarioControllerTest {
                                 """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.mensagem").value("senha deve ter entre 8 e 72 caracteres"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("deve retornar 400, e nao 500, para valor fora do enum de perfil")
+    void deveRetornar400ParaPerfilInvalido() throws Exception {
+        mockMvc.perform(post("/api/usuarios")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome": "Novo", "email": "novo@cartolaodds.local", "senha": "senha-forte-123", "perfil": "SUPERADMIN"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.mensagem").value("Corpo da requisicao invalido ou mal formatado."))
+                // A resposta nao enumera os valores aceitos nem nomeia a classe do enum.
+                .andExpect(jsonPath("$.mensagem").value(not(containsString("Perfil"))));
+
+        verify(usuarioService, never()).criar(any());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("deve retornar 400, e nao 500, para JSON mal formado")
+    void deveRetornar400ParaJsonMalFormado() throws Exception {
+        mockMvc.perform(post("/api/usuarios")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"nome\": "))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400));
+
+        verify(usuarioService, never()).criar(any());
     }
 
     // ── GET /api/usuarios ─────────────────────────────────────────────
@@ -276,6 +310,23 @@ class UsuarioControllerTest {
         verify(usuarioService, never()).alterarSenha(any());
     }
 
+    @Test
+    @WithMockUser(username = "user@cartolaodds.local", roles = "USER")
+    @DisplayName("deve retornar 429 quando o freio bloqueia a conferencia da senha atual")
+    void deveRetornar429NaTrocaDeSenhaBloqueada() throws Exception {
+        doThrow(new TentativasExcedidasException("Muitas tentativas malsucedidas. Tente novamente em ate 5 minutos."))
+                .when(usuarioService).alterarSenha(any());
+
+        mockMvc.perform(patch("/api/usuarios/me/senha")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"senhaAtual": "senha-errada", "novaSenha": "senha-nova-456"}
+                                """))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.status").value(429))
+                .andExpect(jsonPath("$.erro").value("Tentativas excedidas"));
+    }
+
     // ── PATCH /api/usuarios/{id} ──────────────────────────────────────
 
     @Test
@@ -309,6 +360,21 @@ class UsuarioControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.status").value(409))
                 .andExpect(jsonPath("$.mensagem").value("Nao e possivel rebaixar o perfil do ultimo administrador ativo."));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    @DisplayName("deve retornar 400 quando o nome vem apenas com espacos")
+    void deveRetornar400ParaNomeEmBranco() throws Exception {
+        mockMvc.perform(patch("/api/usuarios/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nome": "   "}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.mensagem").value("nome nao pode ser apenas espacos"));
+
+        verify(usuarioService, never()).atualizar(any(), any());
     }
 
     @Test

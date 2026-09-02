@@ -3,6 +3,7 @@ package com.cartola.odds.model.request;
 import com.cartola.odds.model.enums.Perfil;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -18,7 +19,10 @@ import lombok.Setter;
 @Schema(description = "Campos a atualizar no usuario. Todos sao opcionais — envie apenas o que deseja alterar.")
 public class UsuarioUpdateRequest {
 
-    @Size(min = 1, max = 120, message = "nome deve ter entre 1 e 120 caracteres")
+    // O @Pattern e o que impede "   " de virar nome vazio: o service faz trim antes de
+    // gravar, e um @Size(min = 1) aprovaria a string de espacos que sobra vazia depois.
+    @Pattern(regexp = ".*\\S.*", message = "nome nao pode ser apenas espacos")
+    @Size(max = 120, message = "nome deve ter no maximo 120 caracteres")
     @Schema(description = "Nome do usuario", example = "Fabio Carlesso")
     private String nome;
 

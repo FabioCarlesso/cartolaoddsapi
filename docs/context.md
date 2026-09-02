@@ -77,7 +77,18 @@ que aquele usuário produziu. E o rebaixamento de perfil entrou na lista do que 
 Duas operações são recusadas com 409 mesmo vindas de um administrador: mexer na própria conta
 (desativar ou rebaixar) e desativar ou rebaixar o último `ADMIN` ativo. A primeira é quase sempre
 engano; a segunda deixaria a instância sem nenhum acesso administrativo, recuperável só por acesso
-direto ao banco — exatamente o que o bootstrap do admin inicial existe para evitar.
+direto ao banco — exatamente o que o bootstrap do admin inicial existe para evitar. Essa segunda
+checagem trava as linhas dos administradores ativos (`SELECT ... FOR UPDATE`) em vez de contá-las:
+uma contagem seria check-then-act, e duas requisições simultâneas removeriam um administrador cada.
+
+A conferência da senha atual na troca de senha reusa o freio do login, com o mesmo contador. Um
+token roubado tem validade limitada; sem freio, ele daria tentativas ilimitadas para adivinhar a
+senha e, acertando, tomar a conta em definitivo — a troca derruba os tokens do dono legítimo.
+Contadores separados para login e troca dariam ao atacante duas janelas para o mesmo segredo.
+
+A ordenação da listagem é restrita a uma lista fechada de campos. Fora dela, o Spring Data
+respondia 500 com o nome da entidade interna, e `sort=senha` era aceito — ordenar pelo hash não o
+revela, mas nada na API deveria alcançá-lo.
 
 ### Pipeline de Montagem do Time
 

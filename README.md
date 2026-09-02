@@ -251,6 +251,11 @@ Falhas seguidas de login para o **mesmo e-mail** passam a receber `429` até a j
 `APP_LOGIN_MAX_TENTATIVAS` (padrão 5) dentro de `APP_LOGIN_JANELA_MINUTOS` (padrão 5). Um login
 bem-sucedido zera a contagem, e o bloqueio de um e-mail não afeta os demais usuários.
 
+O mesmo contador protege a conferência da senha atual em `PATCH /api/usuarios/me/senha`. Os dois
+compartilham a contagem de propósito: conferem o mesmo segredo, e separá-los daria ao atacante duas
+janelas para adivinhar a mesma senha. Um token roubado tem validade limitada — sem esse freio,
+bastaria martelar `senhaAtual` para trocar a senha e tomar a conta em definitivo.
+
 A contagem é por e-mail, e não por IP: atrás do nginx e da borda da plataforma, `getRemoteAddr()`
 devolve o endereço do proxy — igual para todo mundo. Ler `X-Forwarded-For` com segurança exige
 saber quantos saltos confiar, o que é configuração de ambiente e chega com o deploy
@@ -368,6 +373,14 @@ de resolver um usuário sozinho.
 
 Em ambos os casos o registro não é alterado.
 
+A checagem do último administrador trava as linhas dos `ADMIN` ativos (`SELECT ... FOR UPDATE`)
+em vez de apenas contá-las: uma contagem simples seria *check-then-act*, e duas requisições
+simultâneas leriam "há 2 administradores" e cada uma removeria o seu — exatamente o resultado que
+a regra existe para impedir.
+
+Trocar o **próprio e-mail** não é bloqueado, mas tem efeito semelhante: o e-mail é o `subject` do
+token, então o administrador precisa autenticar de novo logo em seguida.
+
 ### Recuperação de senha
 
 Não existe nesta versão: sem envio de e-mail, quem esquece a senha depende do administrador da
@@ -392,7 +405,10 @@ reusar — em vez de serializar o `Page` do Spring Data, cujo JSON é detalhe in
 ```
 
 Sem parâmetros, devolve os 20 primeiros ordenados por nome. `page`, `size` e `sort` são os
-parâmetros padrão do Spring Data.
+parâmetros padrão do Spring Data, mas `sort` aceita apenas `id`, `nome`, `email`, `perfil`,
+`ativo` e `criadoEm` — qualquer outro campo responde `400`. A lista fechada existe por dois
+motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do Spring Data, e
+`sort=senha` era aceito (ordenar pelo hash não o revela, mas nada na API deveria alcançá-lo).
 
 ---
 
@@ -709,11 +725,13 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `orcamento <= 0`) |
 | `400` | Valor que não converte para o tipo esperado (ex: `?orcamento=abc`, `?excluirDuvida=abc`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
+| `400` | Corpo mal formatado ou valor fora de um enum (ex: `"perfil": "SUPERADMIN"`) |
+| `400` | `?sort=` com campo não suportado em endpoint paginado |
 | `401` | Credenciais inválidas no login, ou requisição sem token / com token inválido, expirado ou revogado |
 | `403` | Autenticado, mas sem permissão para o recurso; ou preflight CORS de origem não liberada |
 | `404` | Recurso inexistente (ex: `GET /api/usuarios/{id}` de um id que não existe) |
 | `409` | E-mail já cadastrado, ou operação que deixaria a instância sem administrador ativo |
-| `429` | Excesso de tentativas de login para o e-mail informado |
+| `429` | Excesso de tentativas de login, ou de senha atual errada em `PATCH /api/usuarios/me/senha` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
 | `422` | Senha atual incorreta em `PATCH /api/usuarios/me/senha` |
 | `502` | Falha de comunicação com API externa |
@@ -864,7 +882,7 @@ cartola/
     │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     │           └── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
     └── test/
-        ├── java/                            # 32 classes de teste — 544 cenários
+        ├── java/                            # 32 classes de teste — 560 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -952,9 +970,9 @@ mvn test jacoco:report
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
-| `UsuarioServiceTest` | 20 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha |
-| `UsuarioControllerTest` | 19 — HTTP 201 com `Location`, 400 de validação, 403 para `USER`, 404, 409 e 422; senha ausente das respostas |
-| `GestaoUsuariosIntegrationTest` | 15 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador |
+| `UsuarioServiceTest` | 26 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha, whitelist de ordenação e freio de força bruta |
+| `UsuarioControllerTest` | 23 — HTTP 201 com `Location`, 400 de validação/corpo ilegível, 403 para `USER`, 404, 409, 422 e 429; senha ausente das respostas |
+| `GestaoUsuariosIntegrationTest` | 21 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador; ordenação e payloads inválidos em 400; freio de força bruta na troca de senha |
 | `ActuatorEndpointsTest` | 10 — health, metrics, prometheus e bloqueio de endpoints sensíveis |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
