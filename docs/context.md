@@ -80,10 +80,15 @@ documentação está lá, atrás de uma senha; o `404` não confirma nada. O con
 mapa que um atacante levaria tempo montando na mão, e o *Try it out* do Swagger UI deixa disparar as
 chamadas dali mesmo.
 
-O HSTS sai condicionado à requisição ter chegado por TLS, lendo também `X-Forwarded-Proto`, porque
-atrás da borda da plataforma o TLS termina no proxy e o Tomcat vê HTTP puro — sem essa leitura o
-cabeçalho nunca apareceria em produção. A condição evita o outro extremo: mandar HSTS em
-`http://localhost` trava o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+O HSTS sai condicionado à requisição ter chegado por TLS. Atrás da borda da plataforma o TLS termina
+no proxy e o Tomcat veria HTTP puro, então o cabeçalho nunca apareceria em produção; quem resolve é
+`server.forward-headers-strategy=framework`, que põe o `ForwardedHeaderFilter` na frente da cadeia
+para normalizar esquema, host e porta a partir dos `X-Forwarded-*`. Ler o `X-Forwarded-Proto` na mão
+dentro do `SecurityConfig` também funcionaria, mas deixaria a aplicação confiando em header de
+cliente em dois lugares com regras diferentes — o `LoginThrottle` recusa o `X-Forwarded-For` por não
+saber quantos saltos confiar. Concentrar no filtro do framework deixa uma decisão só. A condição
+evita o outro extremo: mandar HSTS em `http://localhost` trava o navegador do desenvolvedor em HTTPS
+para todo o host por um ano.
 
 ### Gestão de usuários pela API, restrita a administradores
 
@@ -238,7 +243,7 @@ Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos, 
 
 A tag `application=cartolaoddsapi` é adicionada a todas as métricas via `management.metrics.tags.application`.
 
-Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus` com um access token de `ADMIN` no header `Authorization`.
+Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus` com um access token de `ADMIN` no header `Authorization`. Esse token expira em 24 h e não há renovação — a coleta contínua depende de um credencial de conta de máquina, tratado na issue #44.
 
 ### Filtro de Atletas
 

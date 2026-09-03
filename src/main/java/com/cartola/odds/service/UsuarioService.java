@@ -68,7 +68,7 @@ public class UsuarioService {
         usuario.setAtivo(true);
 
         var salvo = usuarioRepository.save(usuario);
-        log.info("Usuario criado: {} ({})", salvo.getEmail(), salvo.getPerfil());
+        log.info("Usuario criado: id={} ({})", salvo.getId(), salvo.getPerfil());
         return UsuarioResponse.from(salvo);
     }
 
@@ -117,7 +117,7 @@ public class UsuarioService {
 
         aplicarAtivo(usuario, false);
         usuarioRepository.save(usuario);
-        log.info("Usuario desativado: id={} ({})", usuario.getId(), usuario.getEmail());
+        log.info("Usuario desativado: id={}", usuario.getId());
     }
 
     public UsuarioResponse buscarLogado() {
@@ -137,7 +137,7 @@ public class UsuarioService {
 
         if (!passwordEncoder.matches(request.getSenhaAtual(), usuario.getSenha())) {
             loginThrottle.registrarFalha(usuario.getEmail());
-            log.warn("Troca de senha recusada para {}: senha atual incorreta.", usuario.getEmail());
+            log.warn("Troca de senha recusada para id={}: senha atual incorreta.", usuario.getId());
             throw new SenhaInvalidaException("A senha atual informada nao confere.");
         }
 
@@ -145,7 +145,7 @@ public class UsuarioService {
         usuario.setSenha(passwordEncoder.encode(request.getNovaSenha()));
         usuario.incrementarTokenVersion();
         usuarioRepository.save(usuario);
-        log.info("Senha alterada para {}: tokens anteriores invalidados.", usuario.getEmail());
+        log.info("Senha alterada para id={}: tokens anteriores invalidados.", usuario.getId());
     }
 
     // ── Regras de alteracao ───────────────────────────────────────────

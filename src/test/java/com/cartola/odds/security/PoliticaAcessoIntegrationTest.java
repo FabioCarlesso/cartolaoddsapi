@@ -6,19 +6,19 @@ import com.cartola.odds.repository.UsuarioRepository;
 import com.cartola.odds.service.EscalacaoService;
 import com.cartola.odds.service.OddsService;
 import com.cartola.odds.service.PipelineService;
+import com.cartola.odds.service.JwtService;
 import com.cartola.odds.service.RankingService;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -61,7 +61,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("Seguranca — matriz de acesso por rota")
 class PoliticaAcessoIntegrationTest {
 
-    private static final String SENHA = "senha-forte-123";
+    /** Nenhum caso aqui confere senha; o campo so nao pode ser nulo na entidade. */
+    private static final String HASH_IRRELEVANTE = "$2a$10$naoUsadoPorNenhumCasoDesteTeste......";
     private static final String EMAIL_ADMIN = "admin-matriz@cartolaodds.local";
     private static final String EMAIL_USER = "user-matriz@cartolaodds.local";
 
@@ -78,8 +79,7 @@ class PoliticaAcessoIntegrationTest {
 
     @Autowired MockMvc mockMvc;
     @Autowired UsuarioRepository usuarioRepository;
-    @Autowired PasswordEncoder passwordEncoder;
-    @Autowired ObjectMapper objectMapper;
+    @Autowired JwtService jwtService;
 
     @MockitoBean PipelineService pipelineService;
     @MockitoBean RankingService rankingService;
@@ -128,11 +128,28 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.GET, "/actuator/prometheus", Acesso.ADMIN));
     }
 
+    private String tokenUser;
+    private String tokenAdmin;
+
+    /**
+     * Os tokens sao emitidos direto pelo {@link JwtService}, sem passar por
+     * {@code POST /api/auth/login}. O JUnit instancia a classe uma vez por metodo de teste,
+     * entao qualquer login aqui se multiplicaria pelas dezenas de linhas da matriz — e cada
+     * um custa uma verificacao BCrypt, que e cara de proposito. O que esta sob teste e a
+     * autorizacao, nao a troca de senha por token: o fluxo de login tem cobertura propria no
+     * {@code SegurancaIntegrationTest}.
+     *
+     * <p>Pelo mesmo motivo a senha gravada e um hash fixo, e nao {@code encode(SENHA)}:
+     * ninguem confere senha neste teste, e gerar dois hashes BCrypt por metodo so somaria
+     * tempo de suite.
+     */
     @BeforeEach
     void setUp() {
         usuarioRepository.deleteAll();
-        usuarioRepository.save(criar("Administrador", EMAIL_ADMIN, Perfil.ADMIN));
-        usuarioRepository.save(criar("Usuario comum", EMAIL_USER, Perfil.USER));
+        var admin = usuarioRepository.save(criar("Administrador", EMAIL_ADMIN, Perfil.ADMIN));
+        var user = usuarioRepository.save(criar("Usuario comum", EMAIL_USER, Perfil.USER));
+        tokenAdmin = jwtService.gerarToken(admin);
+        tokenUser = jwtService.gerarToken(user);
     }
 
     @ParameterizedTest(name = "sem token: {0}")
@@ -152,7 +169,7 @@ class PoliticaAcessoIntegrationTest {
     @MethodSource("matriz")
     @DisplayName("autenticado como USER, tudo passa menos o que e de ADMIN")
     void comoUser(Caso caso) throws Exception {
-        var status = executar(caso, autenticar(EMAIL_USER));
+        var status = executar(caso, tokenUser);
 
         if (caso.acesso() == Acesso.ADMIN) {
             assertThat(status).describedAs("operacao de administrador liberada para USER").isEqualTo(403);
@@ -165,9 +182,29 @@ class PoliticaAcessoIntegrationTest {
     @MethodSource("matriz")
     @DisplayName("autenticado como ADMIN, toda a matriz passa")
     void comoAdmin(Caso caso) throws Exception {
-        assertThat(executar(caso, autenticar(EMAIL_ADMIN)))
+        assertThat(executar(caso, tokenAdmin))
                 .describedAs("rota recusada para ADMIN")
                 .isNotIn(401, 403);
+    }
+
+    /**
+     * As linhas {@code PUBLICO} da matriz afirmam so o veredito da autorizacao, entao uma
+     * documentacao que parasse de existir no perfil default passaria despercebida por la —
+     * 404 nao e 401 nem 403. Aqui o status exato e cobrado.
+     */
+    @ParameterizedTest(name = "{0} → {1}")
+    @CsvSource({
+            "/actuator/health, 200",
+            "/actuator/info, 200",
+            "/v3/api-docs, 200",
+            "/v3/api-docs/swagger-config, 200",
+            "/swagger-ui/index.html, 200",
+            // O springdoc redireciona /swagger-ui.html para /swagger-ui/index.html
+            "/swagger-ui.html, 302"
+    })
+    @DisplayName("rotas publicas devem responder de fato, e nao apenas escapar do 401")
+    void rotasPublicasDevemResponder(String rota, int statusEsperado) throws Exception {
+        mockMvc.perform(get(rota)).andExpect(status().is(statusEsperado));
     }
 
     @Test
@@ -186,7 +223,7 @@ class PoliticaAcessoIntegrationTest {
     @DisplayName("deve devolver 403 no contrato ErrorResponse, em JSON")
     void deveDevolver403NoContratoDeErro() throws Exception {
         mockMvc.perform(MockMvcRequestBuilders.delete("/api/cache")
-                        .header("Authorization", "Bearer " + autenticar(EMAIL_USER)))
+                        .header("Authorization", "Bearer " + tokenUser))
                 .andExpect(status().isForbidden())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value(403))
@@ -212,7 +249,7 @@ class PoliticaAcessoIntegrationTest {
     }
 
     @Test
-    @DisplayName("deve mandar HSTS quando o proxy sinaliza X-Forwarded-Proto: https")
+    @DisplayName("deve mandar HSTS quando o ForwardedHeaderFilter le X-Forwarded-Proto: https do proxy")
     void deveEnviarHstsAtrasDeProxyHttps() throws Exception {
         mockMvc.perform(get("/actuator/health").header("X-Forwarded-Proto", "https"))
                 .andExpect(header().string("Strict-Transport-Security",
@@ -243,20 +280,9 @@ class PoliticaAcessoIntegrationTest {
         var usuario = new Usuario();
         usuario.setNome(nome);
         usuario.setEmail(email);
-        usuario.setSenha(passwordEncoder.encode(SENHA));
+        usuario.setSenha(HASH_IRRELEVANTE);
         usuario.setPerfil(perfil);
         usuario.setAtivo(true);
         return usuario;
-    }
-
-    private String autenticar(String email) throws Exception {
-        var resposta = mockMvc.perform(MockMvcRequestBuilders.post("/api/auth/login")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"email\": \"%s\", \"senha\": \"%s\"}".formatted(email, SENHA)))
-                .andExpect(status().isOk())
-                .andReturn()
-                .getResponse()
-                .getContentAsString();
-        return objectMapper.readTree(resposta).get("accessToken").asText();
     }
 }

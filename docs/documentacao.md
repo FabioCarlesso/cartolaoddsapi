@@ -163,7 +163,8 @@ Arquivo: `src/main/resources/application-prod.properties` — só o que muda em 
 springdoc.api-docs.enabled=false
 springdoc.swagger-ui.enabled=false
 
-# DEBUG imprimiria e-mail de quem autentica e payload de requisição a cada chamada
+# DEBUG imprime o e-mail do dono de um token recusado e a URI de cada 401/403.
+# As linhas de operação já identificam o usuário por id — ver 3.6.
 logging.level.com.cartola=INFO
 ```
 
@@ -452,8 +453,15 @@ não sustenta esse arranjo. Na porta única quem protege é a matriz acima:
 desligado as rotas não existem e respondem `404`, enquanto um `401` confirmaria que a documentação
 está lá, atrás de uma senha. O contrato completo da API é o mapa que um atacante levaria tempo
 montando na mão, e o *Try it out* do Swagger UI deixa disparar as chamadas dali mesmo. No mesmo
-arquivo, `logging.level.com.cartola=INFO`: em `DEBUG` o log imprime e-mail de quem autentica e
-payload de requisição a cada chamada.
+arquivo, `logging.level.com.cartola=INFO`: em `DEBUG` o log imprime, a cada requisição, o e-mail do
+dono de um token recusado (`JwtAuthenticationFilter`) e a URI de cada `401`/`403`
+(`ErroSegurancaHandler`).
+
+**E-mail fora do log não depende do nível.** As linhas de operação — login, criação de usuário,
+desativação, troca de senha — identificam o usuário por `id`. Amarrar isso ao `logging.level` seria
+frágil: bastaria alguém subir o nível para depurar um incidente e o log voltaria a acumular dado
+pessoal. A única exceção é `AdminInicialBootstrap`, que cita o e-mail uma vez por instância ao criar
+o administrador inicial, repetindo o valor de `APP_ADMIN_INICIAL_EMAIL`.
 
 **CORS parametrizado, nunca `*`.** `app.cors.allowed-origins` lê `CORS_ALLOWED_ORIGINS` (padrão
 `http://localhost:4200`); métodos e headers são listados um a um. O token viaja em header, e uma
@@ -470,10 +478,23 @@ sem chegar a enviar a requisição real.
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | `SecurityConfig` |
 | `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | `SecurityConfig`, só em requisição por TLS |
 
-O HSTS é condicionado a `request.isSecure()` **ou** `X-Forwarded-Proto: https`: atrás da borda da
-plataforma o TLS termina no proxy e o Tomcat vê HTTP puro, então `isSecure()` sozinho nunca seria
-verdadeiro e o cabeçalho jamais apareceria em produção. A condição evita o outro extremo — mandar
-HSTS em `http://localhost` trava o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+O HSTS usa o matcher padrão do Spring Security, que só o emite quando `request.isSecure()`. Atrás da
+borda da plataforma o TLS termina no proxy e o Tomcat veria HTTP puro — quem corrige é o
+`ForwardedHeaderFilter`, ligado por `server.forward-headers-strategy=framework` no
+`application.properties`, que normaliza esquema, host e porta a partir dos `X-Forwarded-*` antes de a
+requisição chegar ao filter chain, e conserta também o `Location` das respostas `201`.
+
+Ler o `X-Forwarded-Proto` diretamente no `SecurityConfig` também funcionaria, mas colocaria a
+aplicação confiando em header de cliente em dois lugares com regras diferentes — o `LoginThrottle`
+recusa o `X-Forwarded-For` justamente por não saber quantos saltos confiar. Concentrar a normalização
+no filtro do framework deixa uma decisão só, no lugar onde a plataforma espera encontrá-la. A
+premissa continua sendo a de sempre: o proxy à frente sobrescreve os `X-Forwarded-*` que um cliente
+tente enviar por conta própria.
+
+A condição evita o outro extremo — mandar HSTS em `http://localhost` trava o navegador do
+desenvolvedor em HTTPS para todo o host por um ano.
+
+**Pendência conhecida.** Com `/actuator/prometheus` restrito a `ADMIN`, o scrape passa a depender de um access token que expira em 24 h sem renovação — a coleta contínua não tem caminho sustentável hoje. Tratado na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44).
 
 **Verificação.** `PoliticaAcessoIntegrationTest` percorre a matriz rota a rota nos três estados
 (sem token, `USER`, `ADMIN`) e afirma apenas o veredito da autorização, não o status de negócio do
@@ -1113,7 +1134,8 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência e aliases |
-| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS condicionado a `X-Forwarded-Proto` |
+| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS atrás de proxy |
+| `CorsConfigTest` | Unitário | Origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
 | `SwaggerProdIntegrationTest` | Integração (`@ActiveProfiles("prod")`) | Swagger UI e `/v3/api-docs` respondem 404 em produção |
 | `ActuatorEndpointsTest` | Integração (HTTP real) | `health`/`info` públicos, `health` sem detalhes para anônimo e com detalhes para `ADMIN`, `metrics`/`prometheus` exigindo `ADMIN`, endpoints sensíveis não expostos |
 

@@ -37,7 +37,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
         "odds.api.key=TEST_KEY",
         "cartola.api.base-url=https://api.cartola.globo.com",
-        "odds.api.base-url=https://api.the-odds-api.com/v4"
+        "odds.api.base-url=https://api.the-odds-api.com/v4",
+        // Banco proprio. As chamadas aqui saem por HTTP real, numa thread do Tomcat, entao
+        // nao ha transacao de teste para reverter o que este teste escreve — e o H2 padrao
+        // da suite (cartola_test) tem o mesmo nome para todos os contextos do JVM, de modo
+        // que um deleteAll() daqui apagaria usuarios commitados por outra classe.
+        "spring.datasource.url=jdbc:h2:mem:actuator_test;DB_CLOSE_DELAY=-1;MODE=PostgreSQL"
 })
 @DisplayName("Actuator Endpoints")
 class ActuatorEndpointsTest {
@@ -63,7 +68,8 @@ class ActuatorEndpointsTest {
 
     /**
      * Sem {@code @Transactional}: as chamadas saem por HTTP real, numa thread do Tomcat que
-     * nao enxergaria uma transacao aberta pela thread do teste.
+     * nao enxergaria uma transacao aberta pela thread do teste. O isolamento vem do banco
+     * proprio declarado no {@code @TestPropertySource}, nao de rollback.
      */
     @BeforeEach
     void setUp() {

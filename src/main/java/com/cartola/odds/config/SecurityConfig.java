@@ -4,7 +4,6 @@ import com.cartola.odds.security.ErroSegurancaHandler;
 import com.cartola.odds.security.JwtAuthenticationFilter;
 import com.cartola.odds.service.JwtService;
 import com.cartola.odds.service.UsuarioDetailsService;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -136,26 +135,30 @@ public class SecurityConfig {
      * {@code X-Frame-Options: DENY} ja vem ligados por padrao no Spring Security; aqui
      * entram os dois que faltam.
      *
-     * <p>O HSTS sai condicionado a requisicao ter chegado por TLS. Atras da borda da
-     * plataforma o TLS termina no proxy e o Tomcat ve HTTP puro, entao
-     * {@code isSecure()} sozinho nunca seria verdadeiro e o cabecalho jamais apareceria em
-     * producao — dai a leitura do {@code X-Forwarded-Proto}. A condicao evita o outro
-     * extremo: mandar HSTS em {@code http://localhost} trava o navegador do desenvolvedor
-     * em HTTPS para todo o host por um ano.
+     * <p>O HSTS fica com o matcher padrao do Spring Security, que so o emite quando
+     * {@code request.isSecure()}. Atras da borda da plataforma o TLS termina no proxy e o
+     * Tomcat veria HTTP puro — quem corrige isso e o {@code ForwardedHeaderFilter}, ligado
+     * por {@code server.forward-headers-strategy=framework} no
+     * {@code application.properties}: ele normaliza esquema, host e porta a partir dos
+     * {@code X-Forwarded-*} antes de a requisicao chegar aqui.
+     *
+     * <p>Ler o {@code X-Forwarded-Proto} na mao aqui tambem funcionaria, mas colocaria a
+     * aplicacao confiando num header de cliente em dois lugares diferentes e com regras
+     * diferentes — o {@code LoginThrottle} recusa o {@code X-Forwarded-For} exatamente por
+     * nao saber quantos saltos confiar. Concentrar a normalizacao no filtro do framework
+     * deixa uma decisao so, no lugar onde a plataforma espera encontra-la, e de quebra
+     * conserta o {@code Location} das respostas {@code 201}.
+     *
+     * <p>A condicao evita o outro extremo: mandar HSTS em {@code http://localhost} travaria
+     * o navegador do desenvolvedor em HTTPS para todo o host por um ano.
      */
     private static void cabecalhos(HeadersConfigurer<HttpSecurity> headers) {
         headers
                 .referrerPolicy(referrer -> referrer
                         .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
                 .httpStrictTransportSecurity(hsts -> hsts
-                        .requestMatcher(SecurityConfig::viaHttps)
                         .includeSubDomains(true)
                         .maxAgeInSeconds(31_536_000L));
-    }
-
-    private static boolean viaHttps(HttpServletRequest request) {
-        return request.isSecure()
-                || "https".equalsIgnoreCase(request.getHeader("X-Forwarded-Proto"));
     }
 
     /**

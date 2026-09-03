@@ -342,8 +342,12 @@ Toda resposta sai com:
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Evita que a URL completa vaze como referrer para outro site |
 | `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | Só quando a requisição chegou por TLS |
 
-O HSTS é condicional: atrás da borda da plataforma o TLS termina no proxy e o Tomcat vê HTTP puro,
-por isso a condição também lê `X-Forwarded-Proto: https`. E ele **não** sai em `http://localhost` —
+O HSTS é condicional: só sai quando a requisição chegou por TLS. Atrás da borda da plataforma o TLS
+termina no proxy e o Tomcat veria HTTP puro — quem corrige isso é o `ForwardedHeaderFilter`, ligado
+por `server.forward-headers-strategy=framework`, que normaliza esquema, host e porta a partir dos
+`X-Forwarded-*` antes de a requisição chegar ao filter chain (e de quebra conserta o `Location` das
+respostas `201`). Isso confia no proxy à frente para sobrescrever `X-Forwarded-*` enviados pelo
+cliente — premissa das plataformas de deploy usadas aqui. E o HSTS **não** sai em `http://localhost`:
 mandar HSTS ali travaria o navegador do desenvolvedor em HTTPS para todo o host por um ano.
 
 ### Perfil de produção
@@ -354,9 +358,14 @@ Com `SPRING_PROFILES_ACTIVE=prod`, o `application-prod.properties` desliga o spr
   da API é o mapa que um atacante levaria tempo montando na mão, e o *Try it out* do Swagger UI
   deixa disparar as chamadas dali mesmo. `404` sequer confirma que a documentação existe atrás de
   uma senha.
-- `logging.level.com.cartola` cai para `INFO`: em `DEBUG` o log imprime e-mail de quem autentica e
-  payload de requisição a cada chamada, o que em produção vira retenção de dado pessoal no log da
-  plataforma.
+- `logging.level.com.cartola` cai para `INFO`: em `DEBUG` o log imprime, a cada requisição, o
+  e-mail do dono de um token recusado e a URI de cada `401`/`403`.
+
+O que **não** depende desse ajuste: as linhas de operação (login, criação de usuário, desativação,
+troca de senha) identificam o usuário por `id`, não por e-mail, justamente para não retenção de dado
+pessoal ficar refém do nível de log. A única linha que ainda cita e-mail é a criação do
+administrador inicial — uma vez por instância, repetindo o valor que o operador configurou em
+`APP_ADMIN_INICIAL_EMAIL`.
 
 No perfil default as duas rotas continuam abertas, para não atrapalhar o desenvolvimento.
 
@@ -1006,7 +1015,7 @@ scrape_configs:
       credentials: '<access token de um usuário ADMIN>'
 ```
 
-> O scrape precisa de um token de `ADMIN`. Como o access token expira (`JWT_EXPIRATION_MS`, padrão 24 h), um Prometheus de longa duração pede um `JWT_EXPIRATION_MS` maior para o usuário de scrape ou um mecanismo de renovação — nenhum dos dois existe ainda nesta API.
+> ⚠️ O scrape precisa de um token de `ADMIN`, e o access token expira (`JWT_EXPIRATION_MS`, padrão 24 h) sem mecanismo de renovação — na prática o Prometheus para de coletar quando o token vence. Um credencial próprio para conta de máquina está na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44). Até lá, a coleta contínua exige colar um token novo periodicamente.
 
 > Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
@@ -1050,7 +1059,8 @@ mvn test jacoco:report
 | `UsuarioServiceTest` | 26 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha, whitelist de ordenação e freio de força bruta |
 | `UsuarioControllerTest` | 23 — HTTP 201 com `Location`, 400 de validação/corpo ilegível, 403 para `USER`, 404, 409, 422 e 429; senha ausente das respostas |
 | `GestaoUsuariosIntegrationTest` | 21 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador; ordenação e payloads inválidos em 400; freio de força bruta na troca de senha |
-| `PoliticaAcessoIntegrationTest` | 86 — matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS condicionado a `X-Forwarded-Proto` |
+| `PoliticaAcessoIntegrationTest` | 92 — matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS atrás de proxy |
+| `CorsConfigTest` | 6 — origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
 | `SwaggerProdIntegrationTest` | 4 — Swagger UI e `/v3/api-docs` respondem 404 com `SPRING_PROFILES_ACTIVE=prod` |
 | `ActuatorEndpointsTest` | 14 — health e info públicos, health sem detalhes para anônimo e com detalhes para `ADMIN`, metrics/prometheus exigindo `ADMIN` (401 sem token, 403 para `USER`) e bloqueio de endpoints sensíveis |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
