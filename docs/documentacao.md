@@ -142,8 +142,29 @@ springdoc.swagger-ui.path=/swagger-ui.html
 springdoc.swagger-ui.try-it-out-enabled=true
 springdoc.api-docs.path=/v3/api-docs
 
+# ── Actuator ──────────────────────────────────────────────────────────
+# Mesma porta da aplicação; quem separa acesso é a matriz do SecurityConfig
+management.endpoints.web.exposure.include=health,info,metrics,prometheus
+management.endpoint.health.show-details=when_authorized
+management.endpoint.health.roles=ADMIN
+
+# ── CORS ──────────────────────────────────────────────────────────────
+app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
 # ── Servidor ──────────────────────────────────────────────────────────
 server.port=8080
+```
+
+Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
+(`SPRING_PROFILES_ACTIVE=prod`):
+
+```properties
+# Swagger e OpenAPI desligados: as rotas passam a responder 404 (ver 3.6)
+springdoc.api-docs.enabled=false
+springdoc.swagger-ui.enabled=false
+
+# DEBUG imprimiria e-mail de quem autentica e payload de requisição a cada chamada
+logging.level.com.cartola=INFO
 ```
 
 ### 3.2 Parâmetros de Negócio via Banco de Dados
@@ -241,12 +262,17 @@ CREATE TABLE configuracao (
 | `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
 | `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens liberadas para CORS, separadas por vírgula |
+| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot; `prod` desliga Swagger/`api-docs` (`404`) e baixa o log de `com.cartola` para `INFO` |
 
 ### 3.4 Autenticação (JWT)
 
 Todos os endpoints exigem `Authorization: Bearer <accessToken>`, exceto `POST /api/auth/login`,
-a documentação OpenAPI e o Actuator. A API consome cota paga da The Odds API a cada chamada
-que não vem do cache — o acesso aberto era o que impedia publicá-la.
+o healthcheck (`/actuator/health`, `/actuator/info`) e a documentação OpenAPI — esta última só fora
+de produção. A API consome cota paga da The Odds API a cada chamada que não vem do cache — o acesso
+aberto era o que impedia publicá-la.
+
+Autenticar diz *quem* está chamando; a política de acesso da seção 3.6 diz *o que cada um pode
+fazer*.
 
 **Componentes:**
 
@@ -284,8 +310,8 @@ que o token é. Mesma escolha do `expires_in` do OAuth 2.
 borda da plataforma `getRemoteAddr()` é o endereço do proxy — igual para todos. O e-mail descreve o
 alvo real do ataque.
 
-> A distinção `USER` × `ADMIN` nas demais rotas e o fechamento de Swagger/Actuator em produção
-> ficam para a issue #38. As rotas de `/api/usuarios` já distinguem perfil — ver 3.5.
+> A matriz completa de acesso por rota, o fechamento de Swagger no perfil `prod` e os cabeçalhos de
+> segurança estão em 3.6.
 
 ### 3.5 Gestão de usuários
 
@@ -314,11 +340,12 @@ nasce de um administrador.
 | `GET` | `/api/usuarios/me` | Qualquer autenticado |
 | `PATCH` | `/api/usuarios/me/senha` | Qualquer autenticado, exige a senha atual |
 
-**Autorização em `@PreAuthorize`, não em matcher de URL.** As rotas de `/api/usuarios` misturam
-operações de administrador com as do próprio usuário (`/me`). Declarar quem acessa o quê ao lado
-do endpoint mantém uma fonte de verdade só; repetir a regra em `SecurityConfig` criaria uma
-segunda, com a chance de divergirem. O `@EnableMethodSecurity` que liga isso está no
-`SecurityConfig`, junto do restante da política de acesso.
+**Regra fina em `@PreAuthorize`, piso em matcher de URL.** As rotas de `/api/usuarios` misturam
+operações de administrador com as do próprio usuário (`/me`), e é ao lado do endpoint que essa
+distinção fica legível — daí o `@PreAuthorize`, ligado pelo `@EnableMethodSecurity` do
+`SecurityConfig`. O `SecurityConfig` declara sobre elas apenas um piso (`/api/usuarios/me` para
+qualquer autenticado, o resto de `/api/usuarios/**` para `ADMIN`): ele não repete a regra de cada
+método, e cobre o caso de um endpoint novo nascer sem `@PreAuthorize`.
 
 Como consequência, a recusa nasce **dentro** do MVC, e não no filter chain: sem um
 `@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler`, ela seria capturada
@@ -374,6 +401,85 @@ chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
 no log: ela nomeia a classe Java e chega a listar os valores aceitos do enum.
 
 **Fora de escopo (issue #37):** auto-cadastro público, convite por e-mail e recuperação de senha.
+
+### 3.6 Política de acesso por rota e hardening do perfil `prod`
+
+**Matriz de acesso** (declarada no `SecurityConfig`):
+
+| Rota | Acesso |
+|---|---|
+| `POST /api/auth/login` | Público |
+| `/actuator/health`, `/actuator/health/**`, `/actuator/info` | Público — healthcheck da plataforma |
+| `/actuator/**` (`metrics`, `prometheus`) | `ADMIN` |
+| `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**` | Público fora de produção; `404` no perfil `prod` |
+| `GET /api/time`, `/api/time/comparar`, `/api/ranking`, `/api/favoritos`, `/api/historico**` | Autenticado |
+| `GET /api/config` | Autenticado |
+| `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
+| `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
+| `/api/usuarios/me`, `/api/usuarios/me/senha` | Autenticado |
+| `/api/usuarios/**` | `ADMIN` |
+| Qualquer outra | Autenticado |
+
+**Por que essas três rotas exigem `ADMIN`.** `PATCH /api/config` e `POST /api/config/reset` mudam
+pesos do score, formação e `odd_limite` da instância inteira; `DELETE /api/cache` força chamadas
+novas à The Odds API, cuja cota mensal é paga. São operações de dono, não de convidado.
+
+**A ordem dos matchers importa.** Vale o primeiro que casa: `/api/usuarios/me` vem antes de
+`/api/usuarios/**`, e as regras de `ADMIN` vêm antes do `anyRequest().authenticated()`. Um matcher
+por método cobre só aquele método — **`HEAD` não herda a autorização de `GET`** —, e por isso as
+regras de `ADMIN` citam apenas os verbos que escrevem: leitura e `HEAD` caem na regra final, que já
+é fechada. Essa regra final ser `authenticated()` é o que faz uma rota nova nascer fechada.
+
+**401 e 403 no contrato `ErrorResponse`.** Os dois nascem no filter chain, antes do MVC, e não
+passariam pelo `GlobalExceptionHandler` — sem o `authenticationEntryPoint` e o `accessDeniedHandler`
+apontando para o `ErroSegurancaHandler`, o cliente receberia a página de erro do container em vez de
+JSON. O `403` que nasce de um `@PreAuthorize` é tratado dentro do MVC (ver 3.5) com o mesmo texto,
+para que o corpo seja um só.
+
+**Actuator na porta única.** Antes ele vivia em `management.server.port=9090` com bind em
+`127.0.0.1`, e era o bind — não uma regra — que o protegia; uma plataforma que publica uma porta só
+não sustenta esse arranjo. Na porta única quem protege é a matriz acima:
+
+- `health` e `info` públicos, para o healthcheck consultar antes de qualquer token existir;
+- `metrics` e `prometheus` restritos a `ADMIN` — descrevem uso de memória, latência por rota e
+  contagem de erros;
+- `management.endpoint.health.show-details=when_authorized` com
+  `management.endpoint.health.roles=ADMIN`: o corpo anônimo é só `{"status":"UP"}`, sem estado de
+  banco, disco e dependências.
+
+**Perfil `prod` (`application-prod.properties`).** `springdoc.api-docs.enabled=false` e
+`springdoc.swagger-ui.enabled=false`. Desligar em vez de proteger é proposital: com o springdoc
+desligado as rotas não existem e respondem `404`, enquanto um `401` confirmaria que a documentação
+está lá, atrás de uma senha. O contrato completo da API é o mapa que um atacante levaria tempo
+montando na mão, e o *Try it out* do Swagger UI deixa disparar as chamadas dali mesmo. No mesmo
+arquivo, `logging.level.com.cartola=INFO`: em `DEBUG` o log imprime e-mail de quem autentica e
+payload de requisição a cada chamada.
+
+**CORS parametrizado, nunca `*`.** `app.cors.allowed-origins` lê `CORS_ALLOWED_ORIGINS` (padrão
+`http://localhost:4200`); métodos e headers são listados um a um. O token viaja em header, e uma
+origem curinga deixaria qualquer site chamar a API com o token da vítima. O preflight `OPTIONS`
+passa antes da autorização — ele não carrega `Authorization`, e sem isso o navegador levaria `401`
+sem chegar a enviar a requisição real.
+
+**Cabeçalhos de segurança na resposta:**
+
+| Cabeçalho | Valor | Origem |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Padrão do Spring Security |
+| `X-Frame-Options` | `DENY` | Padrão do Spring Security |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | `SecurityConfig` |
+| `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | `SecurityConfig`, só em requisição por TLS |
+
+O HSTS é condicionado a `request.isSecure()` **ou** `X-Forwarded-Proto: https`: atrás da borda da
+plataforma o TLS termina no proxy e o Tomcat vê HTTP puro, então `isSecure()` sozinho nunca seria
+verdadeiro e o cabeçalho jamais apareceria em produção. A condição evita o outro extremo — mandar
+HSTS em `http://localhost` trava o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+
+**Verificação.** `PoliticaAcessoIntegrationTest` percorre a matriz rota a rota nos três estados
+(sem token, `USER`, `ADMIN`) e afirma apenas o veredito da autorização, não o status de negócio do
+endpoint — amarrar ao status exato faria a matriz quebrar a cada mudança de validação.
+`SwaggerProdIntegrationTest` confirma os `404` com `@ActiveProfiles("prod")`, e
+`ActuatorEndpointsTest` cobre o Actuator por HTTP real.
 
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
 
@@ -821,6 +927,7 @@ cartola/
     │       └── NormalizadorUtil.java
     ├── main/resources/
     │   ├── application.properties
+    │   ├── application-prod.properties
     │   └── db/migration/
     │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │       ├── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
@@ -1006,6 +1113,9 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência e aliases |
+| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS condicionado a `X-Forwarded-Proto` |
+| `SwaggerProdIntegrationTest` | Integração (`@ActiveProfiles("prod")`) | Swagger UI e `/v3/api-docs` respondem 404 em produção |
+| `ActuatorEndpointsTest` | Integração (HTTP real) | `health`/`info` públicos, `health` sem detalhes para anônimo e com detalhes para `ADMIN`, `metrics`/`prometheus` exigindo `ADMIN`, endpoints sensíveis não expostos |
 
 Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
 
@@ -1039,6 +1149,9 @@ mvn test jacoco:report
 |---|---|
 | `http://localhost:8080/swagger-ui.html` | Interface gráfica — Try it out habilitado |
 | `http://localhost:8080/v3/api-docs` | JSON OpenAPI 3 (importar no Postman/Insomnia) |
+
+> Ambas respondem **`404`** com `SPRING_PROFILES_ACTIVE=prod`: o `application-prod.properties`
+> desliga o springdoc. Ver 3.6.
 
 **Endpoints disponíveis:**
 

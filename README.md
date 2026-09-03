@@ -42,6 +42,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 - [Início Rápido sem Docker](#início-rápido-sem-docker)
 - [Configuração](#configuração)
 - [Autenticação](#autenticação)
+- [Matriz de acesso por rota](#matriz-de-acesso-por-rota)
 - [Gestão de Usuários](#gestão-de-usuários)
 - [Endpoints](#endpoints)
 - [Regras de Negócio](#regras-de-negócio)
@@ -180,9 +181,7 @@ odds.api.key=SUA_API_KEY_AQUI
 | `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
 | `POSTGRES_USER` | `cartola` | Usuário criado no container PostgreSQL |
 | `POSTGRES_PASSWORD` | `cartola` | Senha do container PostgreSQL |
-| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot |
-| `MANAGEMENT_SERVER_PORT` | `9090` | Porta dos endpoints Actuator |
-| `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | Interface onde o Actuator escuta |
+| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot. Use `prod` em produção: desliga Swagger e `/v3/api-docs` (passam a responder `404`) e baixa o log de `com.cartola` para `INFO` |
 | `JWT_SECRET` | — | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). **Obrigatório em produção** |
 | `JWT_EXPIRATION_MS` | `86400000` | Validade do access token em milissegundos (24 h) |
 | `APP_ADMIN_INICIAL_EMAIL` | `admin@cartolaodds.local` | E-mail do administrador criado no primeiro boot |
@@ -204,9 +203,13 @@ odds.api.key=SUA_API_KEY_AQUI
 
 ## Autenticação
 
-A API é fechada por JWT: fora `POST /api/auth/login`, da documentação OpenAPI e do Actuator,
-toda requisição precisa do header `Authorization: Bearer <accessToken>`. O motivo é direto — cada
-consulta que não vem do cache gasta cota da [The Odds API](https://the-odds-api.com), que é paga.
+A API é fechada por JWT: fora `POST /api/auth/login`, do healthcheck (`/actuator/health`,
+`/actuator/info`) e da documentação OpenAPI — esta última só fora de produção —, toda requisição
+precisa do header `Authorization: Bearer <accessToken>`. O motivo é direto: cada consulta que não
+vem do cache gasta cota da [The Odds API](https://the-odds-api.com), que é paga.
+
+Autenticar diz *quem* está chamando; a [matriz de acesso](#matriz-de-acesso-por-rota) abaixo diz
+*o que cada um pode fazer*.
 
 ### Administrador inicial
 
@@ -276,26 +279,86 @@ A `tokenVersion` é o que permite revogar tokens já emitidos sem manter sessão
 no token e é comparada com a do banco a cada requisição. Trocar a senha ou desativar o usuário
 incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 
-### Acesso atual por rota
+### Matriz de acesso por rota
 
 | Rota | Acesso |
 |---|---|
 | `POST /api/auth/login` | Público |
-| `/swagger-ui.html`, `/v3/api-docs/**` | Público |
-| `/actuator/**` | Público *(porta separada, exposta só em `127.0.0.1`)* |
+| `GET /actuator/health`, `/actuator/health/**`, `/actuator/info` | Público (healthcheck da plataforma) |
+| `GET /actuator/metrics`, `/actuator/prometheus` | `ADMIN` |
+| `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**` | Público fora de produção; **404 no perfil `prod`** |
 | Preflight `OPTIONS` das origens em `CORS_ALLOWED_ORIGINS` | Público (não carrega token) |
+| `GET /api/time`, `/api/time/comparar` | Autenticado |
+| `GET /api/ranking`, `/api/favoritos`, `/api/historico**` | Autenticado |
+| `GET /api/config` | Autenticado |
+| `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
+| `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
 | `GET /api/usuarios/me`, `PATCH /api/usuarios/me/senha` | Autenticado (qualquer perfil) |
 | Todo o resto de `/api/usuarios**` | `ADMIN` |
-| Todo o resto de `/api/**` | Autenticado |
+| Qualquer outra rota | Autenticado |
 
-As rotas de `/api/usuarios` são as únicas que hoje distinguem perfil, e essa regra está
-declarada em `@PreAuthorize` ao lado de cada endpoint, no `UsuarioController` — não em matcher de
-URL no `SecurityConfig`. O motivo é que elas misturam operações de administrador com as do próprio
-usuário (`/me`): duas fontes de verdade sobre quem acessa o quê só teriam a chance de divergir.
+A separação entre `USER` e `ADMIN` não é cosmética. `PATCH /api/config` e
+`POST /api/config/reset` mudam pesos do score, formação e `odd_limite` da instância inteira, e
+`DELETE /api/cache` força chamadas novas à The Odds API, cuja cota mensal é paga — deixar esse
+botão ao alcance de qualquer usuário logado é entregar o gasto a quem tiver um token.
 
-> A distinção entre `USER` e `ADMIN` no resto da API — restringir `PATCH /api/config` e
-> `DELETE /api/cache` a administradores e fechar Swagger e Actuator em produção — chega na
-> [issue #38](https://github.com/FabioCarlesso/cartolaoddsapi/issues/38), junto com o deploy.
+O que decide é o **primeiro matcher que casa**, então a ordem no `SecurityConfig` importa:
+`/api/usuarios/me` vem antes de `/api/usuarios/**`, e as regras de `ADMIN` por método vêm antes da
+regra final. Um matcher por método cobre só aquele método — **`HEAD` não herda a autorização de
+`GET`** —, e por isso as regras de `ADMIN` citam apenas os verbos que escrevem: leitura e `HEAD`
+caem na regra final e continuam exigindo apenas autenticação.
+
+Em `/api/usuarios` as duas camadas convivem de propósito: o matcher de URL é o **piso** (um
+endpoint novo criado sem `@PreAuthorize` já nasce fechado para quem não é `ADMIN`) e o
+`@PreAuthorize` ao lado de cada método é a regra fina, que sabe distinguir as operações de
+administrador das que o usuário faz sobre a própria conta.
+
+A matriz inteira é verificada em `PoliticaAcessoIntegrationTest`, rota a rota, nos três estados:
+sem token, autenticado como `USER` e autenticado como `ADMIN`.
+
+### Erros de autorização
+
+`401` e `403` nascem dentro do filter chain, antes do MVC, e não passam pelo
+`GlobalExceptionHandler`. Quem os escreve é o `ErroSegurancaHandler`, no mesmo contrato
+`ErrorResponse` dos demais erros da API:
+
+```json
+{
+  "status": 403,
+  "erro": "Acesso negado",
+  "mensagem": "Voce nao tem permissao para acessar este recurso.",
+  "timestamp": "2026-01-15T10:32:00.123"
+}
+```
+
+### Cabeçalhos de segurança
+
+Toda resposta sai com:
+
+| Cabeçalho | Valor | Por quê |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Impede o navegador de adivinhar o tipo do conteúdo e executar como script uma resposta que não é |
+| `X-Frame-Options` | `DENY` | Bloqueia a API dentro de um iframe de terceiro |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Evita que a URL completa vaze como referrer para outro site |
+| `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | Só quando a requisição chegou por TLS |
+
+O HSTS é condicional: atrás da borda da plataforma o TLS termina no proxy e o Tomcat vê HTTP puro,
+por isso a condição também lê `X-Forwarded-Proto: https`. E ele **não** sai em `http://localhost` —
+mandar HSTS ali travaria o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+
+### Perfil de produção
+
+Com `SPRING_PROFILES_ACTIVE=prod`, o `application-prod.properties` desliga o springdoc:
+
+- `GET /swagger-ui.html` e `GET /v3/api-docs` respondem **`404`**, não `401`. O contrato completo
+  da API é o mapa que um atacante levaria tempo montando na mão, e o *Try it out* do Swagger UI
+  deixa disparar as chamadas dali mesmo. `404` sequer confirma que a documentação existe atrás de
+  uma senha.
+- `logging.level.com.cartola` cai para `INFO`: em `DEBUG` o log imprime e-mail de quem autentica e
+  payload de requisição a cada chamada, o que em produção vira retenção de dado pessoal no log da
+  plataforma.
+
+No perfil default as duas rotas continuam abertas, para não atrapalhar o desenvolvimento.
 
 ---
 
@@ -429,11 +492,11 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/ranking?posicao=ATA` | Top 25 atacantes |
 | `GET` | `/api/ranking?posicao=MEI&limite=10` | Top 10 meias |
 | `GET` | `/api/ranking?posicao=MEI&limite=5&excluirDuvida=true` | Top 5 meias, sem jogadores em dúvida |
-| `DELETE` | `/api/cache` | Invalida todos os caches imediatamente |
-| `DELETE` | `/api/cache/{nome}` | Invalida um cache específico pelo nome |
+| `DELETE` | `/api/cache` | **`ADMIN`** — invalida todos os caches imediatamente |
+| `DELETE` | `/api/cache/{nome}` | **`ADMIN`** — invalida um cache específico pelo nome |
 | `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |
-| `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
-| `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
+| `PATCH` | `/api/config` | **`ADMIN`** — atualiza um ou mais parâmetros em runtime (sem restart) |
+| `POST` | `/api/config/reset` | **`ADMIN`** — restaura todos os parâmetros para os valores padrão |
 | `POST` | `/api/usuarios` | **`ADMIN`** — cria um usuário e devolve `201` com `Location` |
 | `GET` | `/api/usuarios` | **`ADMIN`** — lista paginada de usuários (`page`, `size`, `sort`) |
 | `GET` | `/api/usuarios/{id}` | **`ADMIN`** — detalhe de um usuário |
@@ -444,12 +507,13 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste |
-| `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI |
-| `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON |
-| `GET` | `:9090/actuator/health` | Saúde da aplicação |
-| `GET` | `:9090/actuator/metrics` | Lista de métricas disponíveis |
-| `GET` | `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
-| `GET` | `:9090/actuator/prometheus` | Métricas no formato Prometheus (scrape) |
+| `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
+| `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
+| `GET` | `/actuator/health` | Público — saúde da aplicação |
+| `GET` | `/actuator/info` | Público — informações da build |
+| `GET` | `/actuator/metrics` | **`ADMIN`** — lista de métricas disponíveis |
+| `GET` | `/actuator/metrics/{nome}` | **`ADMIN`** — detalhe de uma métrica específica |
+| `GET` | `/actuator/prometheus` | **`ADMIN`** — métricas no formato Prometheus (scrape) |
 
 ### Exemplo — `GET /api/favoritos`
 
@@ -872,6 +936,7 @@ cartola/
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
     │       ├── application.properties        # Lê variáveis de ambiente com fallback
+    │       ├── application-prod.properties   # Perfil prod: springdoc desligado, log em INFO
     │       └── db/migration/
     │           ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │           ├── V2__alter_configuracao_numeric_to_double.sql  # Converte colunas para DOUBLE PRECISION
@@ -894,24 +959,31 @@ cartola/
 
 A aplicação expõe endpoints de monitoramento via **Spring Boot Actuator** com métricas coletadas pelo **Micrometer** e exportadas no formato **Prometheus**.
 
-Por padrão, o Actuator roda em uma porta separada (`MANAGEMENT_SERVER_PORT`, padrão `9090`) e ligado ao endereço local (`MANAGEMENT_SERVER_ADDRESS`, padrão `127.0.0.1`). Isso mantém métricas fora da porta pública da API (`8080`) em execuções locais. No Docker Compose, a porta de gerenciamento fica disponível apenas na rede interna do compose para permitir scrape por Prometheus sem publicá-la no host.
+O Actuator responde na **mesma porta da aplicação** (`8080`). Antes ele vivia em `9090` com bind em `127.0.0.1`, e era o bind — não uma regra — que o protegia; numa plataforma que publica uma porta só, esse arranjo não sobrevive. Quem protege agora é a [matriz de acesso](#matriz-de-acesso-por-rota).
 
 ### Endpoints expostos
 
-| Endpoint | Descrição |
-|---|---|
-| `GET :9090/actuator/health` | Status de saúde (`UP` / `DOWN`) |
-| `GET :9090/actuator/metrics` | Lista todas as métricas disponíveis |
-| `GET :9090/actuator/metrics/{nome}` | Detalhe de uma métrica (ex: `http.server.requests`) |
-| `GET :9090/actuator/prometheus` | Métricas em formato Prometheus para scrape |
+| Endpoint | Acesso | Descrição |
+|---|---|---|
+| `GET /actuator/health` | Público | Status de saúde (`UP` / `DOWN`) |
+| `GET /actuator/info` | Público | Informações da build |
+| `GET /actuator/metrics` | `ADMIN` | Lista todas as métricas disponíveis |
+| `GET /actuator/metrics/{nome}` | `ADMIN` | Detalhe de uma métrica (ex: `http.server.requests`) |
+| `GET /actuator/prometheus` | `ADMIN` | Métricas em formato Prometheus para scrape |
 
-### Exemplo — `GET :9090/actuator/health`
+`health` e `info` ficam públicos porque o healthcheck da plataforma precisa consultá-los antes de qualquer token existir. Métricas e `prometheus` não: elas descrevem o interior da aplicação — uso de memória, latência por rota, contagem de erros — e ficam restritas a `ADMIN`.
+
+### Exemplo — `GET /actuator/health`
+
+Sem token, o corpo é só o status agregado. É o que `management.endpoint.health.show-details=when_authorized` garante: um anônimo não descobre o estado do banco e das dependências.
 
 ```json
 { "status": "UP" }
 ```
 
-### Exemplo — `GET :9090/actuator/prometheus` (trecho)
+Com um token de `ADMIN`, a mesma rota detalha os componentes (`db`, `diskSpace`, `ping`).
+
+### Exemplo — `GET /actuator/prometheus` (trecho)
 
 ```
 # HELP http_server_requests_seconds Duration of HTTP server request handling
@@ -928,8 +1000,13 @@ scrape_configs:
   - job_name: 'cartolaoddsapi'
     metrics_path: '/actuator/prometheus'
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['localhost:8080']
+    authorization:
+      type: Bearer
+      credentials: '<access token de um usuário ADMIN>'
 ```
+
+> O scrape precisa de um token de `ADMIN`. Como o access token expira (`JWT_EXPIRATION_MS`, padrão 24 h), um Prometheus de longa duração pede um `JWT_EXPIRATION_MS` maior para o usuário de scrape ou um mecanismo de renovação — nenhum dos dois existe ainda nesta API.
 
 > Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
@@ -973,7 +1050,9 @@ mvn test jacoco:report
 | `UsuarioServiceTest` | 26 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha, whitelist de ordenação e freio de força bruta |
 | `UsuarioControllerTest` | 23 — HTTP 201 com `Location`, 400 de validação/corpo ilegível, 403 para `USER`, 404, 409, 422 e 429; senha ausente das respostas |
 | `GestaoUsuariosIntegrationTest` | 21 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador; ordenação e payloads inválidos em 400; freio de força bruta na troca de senha |
-| `ActuatorEndpointsTest` | 10 — health, metrics, prometheus e bloqueio de endpoints sensíveis |
+| `PoliticaAcessoIntegrationTest` | 86 — matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS condicionado a `X-Forwarded-Proto` |
+| `SwaggerProdIntegrationTest` | 4 — Swagger UI e `/v3/api-docs` respondem 404 com `SPRING_PROFILES_ACTIVE=prod` |
+| `ActuatorEndpointsTest` | 14 — health e info públicos, health sem detalhes para anônimo e com detalhes para `ADMIN`, metrics/prometheus exigindo `ADMIN` (401 sem token, 403 para `USER`) e bloqueio de endpoints sensíveis |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 
 ---
