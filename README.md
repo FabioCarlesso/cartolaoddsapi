@@ -29,6 +29,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 | 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
 | 20 | **Excluir Dúvidas do Time** | `GET /api/time?excluirDuvida=true` monta o time só com prováveis — nenhum jogador em dúvida entre titulares e reservas. Padrão `false`, combinável com `orcamento` |
 | 21 | **Autenticação JWT** | A API é fechada: `POST /api/auth/login` emite o access token e todo o resto exige `Authorization: Bearer`. Admin inicial criado no primeiro boot |
+| 22 | **Gestão de Usuários** | `/api/usuarios` — administrador cria, lista, edita e desativa contas pela própria API; qualquer autenticado vê os próprios dados e troca a própria senha |
 
 
 ---
@@ -41,6 +42,7 @@ API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time co
 - [Início Rápido sem Docker](#início-rápido-sem-docker)
 - [Configuração](#configuração)
 - [Autenticação](#autenticação)
+- [Gestão de Usuários](#gestão-de-usuários)
 - [Endpoints](#endpoints)
 - [Regras de Negócio](#regras-de-negócio)
 - [Estrutura do Projeto](#estrutura-do-projeto)
@@ -249,6 +251,11 @@ Falhas seguidas de login para o **mesmo e-mail** passam a receber `429` até a j
 `APP_LOGIN_MAX_TENTATIVAS` (padrão 5) dentro de `APP_LOGIN_JANELA_MINUTOS` (padrão 5). Um login
 bem-sucedido zera a contagem, e o bloqueio de um e-mail não afeta os demais usuários.
 
+O mesmo contador protege a conferência da senha atual em `PATCH /api/usuarios/me/senha`. Os dois
+compartilham a contagem de propósito: conferem o mesmo segredo, e separá-los daria ao atacante duas
+janelas para adivinhar a mesma senha. Um token roubado tem validade limitada — sem esse freio,
+bastaria martelar `senhaAtual` para trocar a senha e tomar a conta em definitivo.
+
 A contagem é por e-mail, e não por IP: atrás do nginx e da borda da plataforma, `getRemoteAddr()`
 devolve o endereço do proxy — igual para todo mundo. Ler `X-Forwarded-For` com segurança exige
 saber quantos saltos confiar, o que é configuração de ambiente e chega com o deploy
@@ -277,11 +284,131 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `/swagger-ui.html`, `/v3/api-docs/**` | Público |
 | `/actuator/**` | Público *(porta separada, exposta só em `127.0.0.1`)* |
 | Preflight `OPTIONS` das origens em `CORS_ALLOWED_ORIGINS` | Público (não carrega token) |
+| `GET /api/usuarios/me`, `PATCH /api/usuarios/me/senha` | Autenticado (qualquer perfil) |
+| Todo o resto de `/api/usuarios**` | `ADMIN` |
 | Todo o resto de `/api/**` | Autenticado |
 
-> A distinção entre `USER` e `ADMIN` por rota — restringir `PATCH /api/config` e `DELETE /api/cache`
-> a administradores e fechar Swagger e Actuator em produção — chega na
+As rotas de `/api/usuarios` são as únicas que hoje distinguem perfil, e essa regra está
+declarada em `@PreAuthorize` ao lado de cada endpoint, no `UsuarioController` — não em matcher de
+URL no `SecurityConfig`. O motivo é que elas misturam operações de administrador com as do próprio
+usuário (`/me`): duas fontes de verdade sobre quem acessa o quê só teriam a chance de divergir.
+
+> A distinção entre `USER` e `ADMIN` no resto da API — restringir `PATCH /api/config` e
+> `DELETE /api/cache` a administradores e fechar Swagger e Actuator em produção — chega na
 > [issue #38](https://github.com/FabioCarlesso/cartolaoddsapi/issues/38), junto com o deploy.
+
+---
+
+## Gestão de Usuários
+
+O único usuário que existe numa instância nova é o administrador do bootstrap. Estes endpoints
+são o que permite liberar acesso a mais alguém sem `INSERT` manual no banco de produção com hash
+BCrypt gerado à mão.
+
+**Não há auto-cadastro público:** todo acesso à API nasce de um administrador. A API gasta cota
+paga da The Odds API — quem entra é decisão de quem administra a instância, não de quem descobre
+o endereço.
+
+### Fluxo típico
+
+```bash
+# 1. Autenticar como administrador
+TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@cartolaodds.local","senha":"sua-senha-aqui"}' | jq -r .accessToken)
+
+# 2. Criar o usuário — 201 com o header Location apontando para o recurso
+curl -X POST http://localhost:8080/api/usuarios \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"nome":"Amigo da Liga","email":"amigo@exemplo.com","senha":"senha-com-8-ou-mais","perfil":"USER"}'
+
+# 3. Listar (paginado) e detalhar
+curl -H "Authorization: Bearer $TOKEN" 'http://localhost:8080/api/usuarios?page=0&size=20'
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/usuarios/2
+
+# 4. Desativar — o registro continua no banco
+curl -X DELETE -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/usuarios/2
+```
+
+Já autenticado, qualquer usuário consulta e altera a própria conta:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/usuarios/me
+
+curl -X PATCH http://localhost:8080/api/usuarios/me/senha \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"senhaAtual":"senha-antiga","novaSenha":"senha-nova-com-8-ou-mais"}'
+```
+
+`perfil` é opcional na criação — sem ele, o usuário nasce como `USER`. A senha exige 8 caracteres
+no mínimo e é gravada em hash BCrypt; **nenhuma resposta de `/api/usuarios` traz o campo de senha,
+nem em hash**. O e-mail é normalizado para minúsculas e precisa ser único: repetido, responde `409`.
+
+### Desativação é lógica
+
+`DELETE /api/usuarios/{id}` marca `ativo = false` e mantém o registro no banco, para não apagar o
+histórico de quem o produziu. O usuário deixa de autenticar na hora, e os tokens já emitidos para
+ele param de valer na requisição seguinte. Repetir a chamada sobre alguém já inativo responde
+`204` sem alterar nada.
+
+### O que derruba os tokens já emitidos
+
+Três operações incrementam a `tokenVersion` do usuário e invalidam todo token anterior:
+
+| Operação | Efeito |
+|---|---|
+| `PATCH /api/usuarios/me/senha` | Derruba inclusive o token usado na própria troca — é preciso autenticar de novo |
+| `DELETE /api/usuarios/{id}` (ou `ativo: false`) | O desativado para de acessar a API na requisição seguinte |
+| Rebaixar `ADMIN` → `USER` | Sem isso, o rebaixado seguiria administrando a aplicação até o token expirar |
+
+Trocar o e-mail não precisa do contador: o e-mail é o `subject` do token, e o token antigo deixa
+de resolver um usuário sozinho.
+
+### Proteções contra ficar sem administrador
+
+| Situação | Resposta |
+|---|---|
+| Administrador desativa ou rebaixa a **própria** conta | `409` — perderia o acesso no ato, quase sempre por engano |
+| Desativar ou rebaixar o **último** `ADMIN` ativo | `409` — a instância só voltaria a ter administrador por acesso ao banco |
+
+Em ambos os casos o registro não é alterado.
+
+A checagem do último administrador trava as linhas dos `ADMIN` ativos (`SELECT ... FOR UPDATE`)
+em vez de apenas contá-las: uma contagem simples seria *check-then-act*, e duas requisições
+simultâneas leriam "há 2 administradores" e cada uma removeria o seu — exatamente o resultado que
+a regra existe para impedir.
+
+Trocar o **próprio e-mail** não é bloqueado, mas tem efeito semelhante: o e-mail é o `subject` do
+token, então o administrador precisa autenticar de novo logo em seguida.
+
+### Recuperação de senha
+
+Não existe nesta versão: sem envio de e-mail, quem esquece a senha depende do administrador da
+instância. Convite por e-mail e redefinição de senha ficaram fora do escopo da
+[issue #37](https://github.com/FabioCarlesso/cartolaoddsapi/issues/37).
+
+### Formato da paginação
+
+`GET /api/usuarios` é o primeiro endpoint paginado da API e fixa o envelope que os próximos devem
+reusar — em vez de serializar o `Page` do Spring Data, cujo JSON é detalhe interno do framework:
+
+```json
+{
+  "conteudo": [ { "id": 1, "nome": "Administrador", "email": "admin@cartolaodds.local",
+                  "perfil": "ADMIN", "ativo": true, "criadoEm": "2026-09-02T18:00:00" } ],
+  "pagina": 0,
+  "tamanho": 20,
+  "totalElementos": 1,
+  "totalPaginas": 1,
+  "ultima": true
+}
+```
+
+Sem parâmetros, devolve os 20 primeiros ordenados por nome. `page`, `size` e `sort` são os
+parâmetros padrão do Spring Data, mas `sort` aceita apenas `id`, `nome`, `email`, `perfil`,
+`ativo` e `criadoEm` — qualquer outro campo responde `400`. A lista fechada existe por dois
+motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do Spring Data, e
+`sort=senha` era aceito (ordenar pelo hash não o revela, mas nada na API deveria alcançá-lo).
 
 ---
 
@@ -307,6 +434,13 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `GET` | `/api/config` | Retorna a configuração atual (odd limite, pesos, formação e regras) |
 | `PATCH` | `/api/config` | Atualiza um ou mais parâmetros em runtime (sem restart) |
 | `POST` | `/api/config/reset` | Restaura todos os parâmetros para os valores padrão |
+| `POST` | `/api/usuarios` | **`ADMIN`** — cria um usuário e devolve `201` com `Location` |
+| `GET` | `/api/usuarios` | **`ADMIN`** — lista paginada de usuários (`page`, `size`, `sort`) |
+| `GET` | `/api/usuarios/{id}` | **`ADMIN`** — detalhe de um usuário |
+| `PATCH` | `/api/usuarios/{id}` | **`ADMIN`** — atualiza `nome`, `email`, `perfil` e `ativo` |
+| `DELETE` | `/api/usuarios/{id}` | **`ADMIN`** — desativação lógica (`ativo = false`), sem apagar o registro |
+| `GET` | `/api/usuarios/me` | Dados da própria conta (qualquer autenticado) |
+| `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha, exigindo a senha atual |
 | `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste |
@@ -591,10 +725,15 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | `400` | Parâmetro inválido (ex: posição inexistente, `oddLimite <= 1.0`, `orcamento <= 0`) |
 | `400` | Valor que não converte para o tipo esperado (ex: `?orcamento=abc`, `?excluirDuvida=abc`) |
 | `400` | Erro de validação no corpo do `PATCH /api/config` |
+| `400` | Corpo mal formatado ou valor fora de um enum (ex: `"perfil": "SUPERADMIN"`) |
+| `400` | `?sort=` com campo não suportado em endpoint paginado |
 | `401` | Credenciais inválidas no login, ou requisição sem token / com token inválido, expirado ou revogado |
 | `403` | Autenticado, mas sem permissão para o recurso; ou preflight CORS de origem não liberada |
-| `429` | Excesso de tentativas de login para o e-mail informado |
+| `404` | Recurso inexistente (ex: `GET /api/usuarios/{id}` de um id que não existe) |
+| `409` | E-mail já cadastrado, ou operação que deixaria a instância sem administrador ativo |
+| `429` | Excesso de tentativas de login, ou de senha atual errada em `PATCH /api/usuarios/me/senha` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
+| `422` | Senha atual incorreta em `PATCH /api/usuarios/me/senha` |
 | `502` | Falha de comunicação com API externa |
 | `500` | Erro interno inesperado |
 
@@ -717,15 +856,19 @@ cartola/
     │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository, UsuarioRepository)
     │   │   ├── service/         (OddsService, CartolaDataService, ScoreService,
     │   │   │                     DesempenhoService, MontadorTimeService, PipelineService,
-    │   │   │                     RankingService, ConfiguracaoService, EscalacaoService)
-    │   │   ├── controller/api/  (AuthApi, TimeApi, RankingApi, FavoritosApi, CacheApi,
-    │   │   │                     ConfiguracaoApi, HistoricoApi — Swagger docs)
-    │   │   ├── controller/      (AuthController, TimeController, RankingController,
-    │   │   │                     FavoritosController, CacheController, ConfiguracaoController,
-    │   │   │                     HistoricoController, GlobalExceptionHandler)
-    │   │   ├── exception/       (RecursoNaoEncontradoException, TentativasExcedidasException)
+    │   │   │                     RankingService, ConfiguracaoService, EscalacaoService,
+    │   │   │                     AuthService, JwtService, UsuarioService, UsuarioDetailsService)
+    │   │   ├── controller/api/  (AuthApi, UsuarioApi, TimeApi, RankingApi, FavoritosApi,
+    │   │   │                     CacheApi, ConfiguracaoApi, HistoricoApi — Swagger docs)
+    │   │   ├── controller/      (AuthController, UsuarioController, TimeController,
+    │   │   │                     RankingController, FavoritosController, CacheController,
+    │   │   │                     ConfiguracaoController, HistoricoController,
+    │   │   │                     GlobalExceptionHandler)
+    │   │   ├── exception/       (RecursoNaoEncontradoException, TentativasExcedidasException,
+    │   │   │                     ConflitoException, SenhaInvalidaException)
     │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, Usuario, enums/,
-    │   │   │                     request/ConfiguracaoRequest, request/LoginRequest, response/)
+    │   │   │                     request/ (Configuracao, Login, Usuario, UsuarioUpdate,
+    │   │   │                     AlterarSenha), response/ (UsuarioResponse, PaginaResponse, ...))
     │   │   └── util/            (NormalizadorUtil)
     │   └── resources/
     │       ├── application.properties        # Lê variáveis de ambiente com fallback
@@ -739,7 +882,7 @@ cartola/
     │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     │           └── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
     └── test/
-        ├── java/                            # 29 classes de teste — 490 cenários
+        ├── java/                            # 32 classes de teste — 560 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
@@ -827,6 +970,9 @@ mvn test jacoco:report
 | `AtletaTest` | 7 — domínio e imutabilidade |
 | `EnumsTest` | 8 — Posicao e StatusAtleta |
 | `NormalizadorUtilTest` | 42 — normalização e aliases de clubes |
+| `UsuarioServiceTest` | 26 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha, whitelist de ordenação e freio de força bruta |
+| `UsuarioControllerTest` | 23 — HTTP 201 com `Location`, 400 de validação/corpo ilegível, 403 para `USER`, 404, 409, 422 e 429; senha ausente das respostas |
+| `GestaoUsuariosIntegrationTest` | 21 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador; ordenação e payloads inválidos em 400; freio de força bruta na troca de senha |
 | `ActuatorEndpointsTest` | 10 — health, metrics, prometheus e bloqueio de endpoints sensíveis |
 | `CartolaOddsApplicationTests` | 1 — contexto Spring |
 

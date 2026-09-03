@@ -12,8 +12,12 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Freio de forca bruta no login: conta as falhas por e-mail e recusa novas tentativas
- * quando o limite da janela e atingido.
+ * Freio de forca bruta na conferencia de senha: conta as falhas por e-mail e recusa novas
+ * tentativas quando o limite da janela e atingido.
+ *
+ * <p>Serve ao login e a troca de senha, que compartilham o mesmo contador de proposito:
+ * as duas conferem o mesmo segredo, e separa-las daria ao atacante duas janelas para
+ * adivinhar a mesma senha.
  *
  * <p>A chave e o e-mail, e nao o IP, de proposito. Em producao a aplicacao fica atras do
  * nginx e da borda da plataforma, entao {@code getRemoteAddr()} devolve o endereco do
@@ -50,9 +54,9 @@ public class LoginThrottle {
     public void verificar(String email) {
         var falhas = falhasPorEmail.getIfPresent(chave(email));
         if (falhas != null && falhas.get() >= maxTentativas) {
-            log.warn("Login bloqueado por excesso de tentativas: {}", email);
+            log.warn("Conferencia de senha bloqueada por excesso de tentativas: {}", email);
             throw new TentativasExcedidasException(
-                    "Muitas tentativas de login. Tente novamente em ate %d minutos."
+                    "Muitas tentativas malsucedidas. Tente novamente em ate %d minutos."
                             .formatted(janelaMinutos));
         }
     }
@@ -61,7 +65,7 @@ public class LoginThrottle {
         falhasPorEmail.get(chave(email), chave -> new AtomicInteger()).incrementAndGet();
     }
 
-    /** Autenticacao bem-sucedida zera o contador do e-mail. */
+    /** Conferencia bem-sucedida zera o contador do e-mail. */
     public void registrarSucesso(String email) {
         falhasPorEmail.invalidate(chave(email));
     }

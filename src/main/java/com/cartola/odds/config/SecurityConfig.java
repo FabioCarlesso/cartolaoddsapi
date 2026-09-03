@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -30,9 +31,15 @@ import java.util.List;
  * autenticado para todo o resto. A matriz fina por rota (quem precisa ser ADMIN para
  * alterar configuracao ou invalidar cache) e o fechamento da documentacao em producao
  * vem na issue #38.
+ *
+ * <p>{@link EnableMethodSecurity} habilita o {@code @PreAuthorize} usado pelo
+ * {@code UsuarioController}: as rotas de {@code /api/usuarios} misturam operacoes de
+ * administrador com as do proprio usuario, e declarar isso ao lado do endpoint evita uma
+ * segunda fonte de verdade em matcher de URL aqui.
  */
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     private static final String[] ROTAS_PUBLICAS = {
