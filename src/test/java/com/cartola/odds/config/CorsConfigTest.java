@@ -3,6 +3,7 @@ package com.cartola.odds.config;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.web.cors.CorsConfiguration;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,7 +19,7 @@ class CorsConfigTest {
 
     private final SecurityConfig securityConfig = new SecurityConfig();
 
-    private org.springframework.web.cors.CorsConfiguration configuracaoPara(String origens) {
+    private CorsConfiguration configuracaoPara(String origens) {
         var request = new MockHttpServletRequest("GET", QUALQUER_ROTA);
         return securityConfig.corsConfigurationSource(origens).getCorsConfiguration(request);
     }

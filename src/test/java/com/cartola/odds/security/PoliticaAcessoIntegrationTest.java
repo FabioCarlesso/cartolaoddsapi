@@ -29,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -61,8 +60,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @DisplayName("Seguranca — matriz de acesso por rota")
 class PoliticaAcessoIntegrationTest {
 
-    /** Nenhum caso aqui confere senha; o campo so nao pode ser nulo na entidade. */
-    private static final String HASH_IRRELEVANTE = "$2a$10$naoUsadoPorNenhumCasoDesteTeste......";
+    /**
+     * Nenhum caso aqui confere senha; o campo so nao pode ser nulo na entidade. Ainda assim
+     * sao os 60 caracteres de um BCrypt de verdade — {@code $2a$}, custo, 22 de salt e 31 de
+     * digest, todos no alfabeto que o algoritmo aceita —, para que um caso futuro que resolva
+     * chamar {@code matches()} receba um "nao confere" em vez de um erro de parsing.
+     */
+    private static final String HASH_IRRELEVANTE = "$2a$10$naoUsadoPorNenhumCasoDesteTeste......................";
     private static final String EMAIL_ADMIN = "admin-matriz@cartolaodds.local";
     private static final String EMAIL_USER = "user-matriz@cartolaodds.local";
 
@@ -104,6 +108,9 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.GET, "/api/favoritos", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/historico", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/historico/1", Acesso.AUTENTICADO),
+                // So a escrita de /api/historico subiu para ADMIN; a leitura fica aberta a
+                // qualquer token, e esta linha e o que impede o matcher de vazar para ela.
+                new Caso(HttpMethod.GET, "/api/historico/1/atualizar-pontuacao", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/config", Acesso.AUTENTICADO),
                 // HEAD nao herda a autorizacao de GET no Spring Security: um matcher por
                 // metodo cobre so aquele metodo. Como as regras de ADMIN aqui citam apenas
@@ -119,6 +126,9 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.POST, "/api/config/reset", Acesso.ADMIN),
                 new Caso(HttpMethod.DELETE, "/api/cache", Acesso.ADMIN),
                 new Caso(HttpMethod.DELETE, "/api/cache/atletas", Acesso.ADMIN),
+                // Regrava a pontuacao real de todos os atletas da rodada: escrita na tabela
+                // da instancia, precedida de uma chamada a API do Cartola.
+                new Caso(HttpMethod.POST, "/api/historico/1/atualizar-pontuacao", Acesso.ADMIN),
                 new Caso(HttpMethod.GET, "/api/usuarios", Acesso.ADMIN),
                 new Caso(HttpMethod.POST, "/api/usuarios", Acesso.ADMIN),
                 new Caso(HttpMethod.GET, "/api/usuarios/1", Acesso.ADMIN),
@@ -241,21 +251,17 @@ class PoliticaAcessoIntegrationTest {
                 .andExpect(header().string("Referrer-Policy", "strict-origin-when-cross-origin"));
     }
 
+    /**
+     * O contraponto — o HSTS aparecendo quando o proxy confiavel diz que a requisicao veio
+     * por TLS — vive no {@link ProxyConfiavelIntegrationTest}, e nao aqui: quem le os
+     * {@code X-Forwarded-*} e o {@code RemoteIpValve}, um valve do Tomcat, que o MockMvc nao
+     * atravessa. Testar isso por aqui daria um verde que nao significa nada.
+     */
     @Test
     @DisplayName("nao deve mandar HSTS em requisicao HTTP — travaria o host do desenvolvedor em HTTPS")
     void naoDeveEnviarHstsEmHttp() throws Exception {
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(header().doesNotExist("Strict-Transport-Security"));
-    }
-
-    @Test
-    @DisplayName("deve mandar HSTS quando o ForwardedHeaderFilter le X-Forwarded-Proto: https do proxy")
-    void deveEnviarHstsAtrasDeProxyHttps() throws Exception {
-        mockMvc.perform(get("/actuator/health").header("X-Forwarded-Proto", "https"))
-                .andExpect(header().string("Strict-Transport-Security",
-                        containsString("max-age=31536000")))
-                .andExpect(header().string("Strict-Transport-Security",
-                        containsString("includeSubDomains")));
     }
 
     private int executar(Caso caso, String token) throws Exception {

@@ -153,6 +153,8 @@ app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
 
 # ── Servidor ──────────────────────────────────────────────────────────
 server.port=8080
+server.forward-headers-strategy=native
+server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES:<faixas privadas>}
 ```
 
 Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
@@ -417,13 +419,20 @@ no log: ela nomeia a classe Java e chega a listar os valores aceitos do enum.
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
+| `POST /api/historico/{rodadaId}/atualizar-pontuacao` | `ADMIN` |
 | `/api/usuarios/me`, `/api/usuarios/me/senha` | Autenticado |
 | `/api/usuarios/**` | `ADMIN` |
 | Qualquer outra | Autenticado |
 
-**Por que essas três rotas exigem `ADMIN`.** `PATCH /api/config` e `POST /api/config/reset` mudam
-pesos do score, formação e `odd_limite` da instância inteira; `DELETE /api/cache` força chamadas
-novas à The Odds API, cuja cota mensal é paga. São operações de dono, não de convidado.
+**Por que essas rotas exigem `ADMIN`.** O critério é um só — escreve na instância inteira ou gasta
+cota externa. `PATCH /api/config` e `POST /api/config/reset` mudam pesos do score, formação e
+`odd_limite` da instância inteira; `DELETE /api/cache` força chamadas novas à The Odds API, cuja
+cota mensal é paga; `POST /api/historico/{rodadaId}/atualizar-pontuacao` regrava a `pontuacaoReal`
+de todos os atletas da rodada — a tabela de escalação é da instância, não de quem chamou — depois de
+consultar a API do Cartola. São operações de dono, não de convidado.
+
+As demais rotas de `/api/historico` só leem e continuam abertas a qualquer autenticado: o matcher
+cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
 
 **A ordem dos matchers importa.** Vale o primeiro que casa: `/api/usuarios/me` vem antes de
 `/api/usuarios/**`, e as regras de `ADMIN` vêm antes do `anyRequest().authenticated()`. Um matcher
@@ -480,16 +489,23 @@ sem chegar a enviar a requisição real.
 
 O HSTS usa o matcher padrão do Spring Security, que só o emite quando `request.isSecure()`. Atrás da
 borda da plataforma o TLS termina no proxy e o Tomcat veria HTTP puro — quem corrige é o
-`ForwardedHeaderFilter`, ligado por `server.forward-headers-strategy=framework` no
-`application.properties`, que normaliza esquema, host e porta a partir dos `X-Forwarded-*` antes de a
-requisição chegar ao filter chain, e conserta também o `Location` das respostas `201`.
+`RemoteIpValve`, ligado por `server.forward-headers-strategy=native` no `application.properties`,
+que normaliza esquema, host e porta a partir dos `X-Forwarded-*` antes de a requisição chegar ao
+filter chain, e mantém o `Location` das respostas `201` apontando para o host público.
 
-Ler o `X-Forwarded-Proto` diretamente no `SecurityConfig` também funcionaria, mas colocaria a
-aplicação confiando em header de cliente em dois lugares com regras diferentes — o `LoginThrottle`
-recusa o `X-Forwarded-For` justamente por não saber quantos saltos confiar. Concentrar a normalização
-no filtro do framework deixa uma decisão só, no lugar onde a plataforma espera encontrá-la. A
-premissa continua sendo a de sempre: o proxy à frente sobrescreve os `X-Forwarded-*` que um cliente
-tente enviar por conta própria.
+**Por que `native` e não `framework`.** O `ForwardedHeaderFilter` do framework normaliza igual, mas
+sem nenhuma noção de quem está do outro lado: qualquer cliente reescreve esquema e host da própria
+requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma resposta `201`. O
+`RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado em
+`server.tomcat.remoteip.internal-proxies`, e ignora o resto. É a mesma dúvida que faz o
+`LoginThrottle` recusar o `X-Forwarded-For` — não saber quantos saltos confiar —, só que resolvida
+em vez de aceita: aqui a lista de saltos confiáveis existe e é configurável.
+
+O padrão de `internal-proxies` cobre as faixas privadas (`10/8`, `172.16-31/12`, `192.168/16`,
+`169.254/16`, `127/8`, `::1`), que é onde o proxy da plataforma normalmente fala com o container.
+Se a borda vier de um IP público, `TRUSTED_PROXIES` sobrescreve — o valor é uma **regex de
+endereços**, não um CIDR. O sintoma de faixa errada é observável: os `X-Forwarded-*` são
+descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security` some das respostas.
 
 A condição evita o outro extremo — mandar HSTS em `http://localhost` trava o navegador do
 desenvolvedor em HTTPS para todo o host por um ano.

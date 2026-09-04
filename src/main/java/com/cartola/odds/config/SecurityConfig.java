@@ -40,15 +40,20 @@ import java.util.List;
  * ADMIN         /actuator/** (metrics, prometheus)
  *               PATCH /api/config, POST /api/config/reset
  *               DELETE /api/cache, DELETE /api/cache/**
+ *               POST /api/historico/{rodada}/atualizar-pontuacao
  *               /api/usuarios/** fora de /me
  * autenticado   /api/usuarios/me, /api/usuarios/me/**
  *               qualquer outra rota
  * </pre>
  *
- * <p>A separacao ADMIN/autenticado nao e cosmetica: {@code PATCH /api/config} e
+ * <p>A separacao ADMIN/autenticado nao e cosmetica, e o criterio e um so: <em>escreve na
+ * instancia inteira ou gasta cota externa</em>. {@code PATCH /api/config} e
  * {@code POST /api/config/reset} mudam pesos do score, formacao e {@code odd_limite} de
- * toda a instancia, e {@code DELETE /api/cache} forca chamadas novas a The Odds API, cuja
- * cota mensal e paga. Sao operacoes de dono, nao de convidado.
+ * toda a instancia; {@code DELETE /api/cache} forca chamadas novas a The Odds API, cuja
+ * cota mensal e paga; e {@code POST /api/historico/{rodada}/atualizar-pontuacao} regrava a
+ * {@code pontuacaoReal} de todos os atletas da rodada — a tabela de escalacao e da
+ * instancia, nao de quem chamou — depois de consultar a API do Cartola. Sao operacoes de
+ * dono, nao de convidado.
  *
  * <p><strong>A ordem dos matchers importa:</strong> o primeiro que casa decide. Por isso
  * {@code /api/usuarios/me} vem antes de {@code /api/usuarios/**}, e as regras de ADMIN por
@@ -121,6 +126,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PATCH, "/api/config").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/config/reset").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.DELETE, "/api/cache", "/api/cache/**").hasRole(ADMIN)
+                        // Regrava a pontuacao real de todos os atletas da rodada numa tabela
+                        // que e da instancia, nao de quem chamou, e consulta a API do Cartola
+                        // antes disso. E a unica escrita global fora de /api/config: as demais
+                        // rotas de /api/historico so leem e seguem abertas a qualquer token.
+                        .requestMatchers(HttpMethod.POST, "/api/historico/*/atualizar-pontuacao").hasRole(ADMIN)
                         // Antes de /api/usuarios/**: sao as rotas que o usuario tem sobre a
                         // propria conta e valem para qualquer perfil.
                         .requestMatchers("/api/usuarios/me", "/api/usuarios/me/**").authenticated()
@@ -137,17 +147,19 @@ public class SecurityConfig {
      *
      * <p>O HSTS fica com o matcher padrao do Spring Security, que so o emite quando
      * {@code request.isSecure()}. Atras da borda da plataforma o TLS termina no proxy e o
-     * Tomcat veria HTTP puro — quem corrige isso e o {@code ForwardedHeaderFilter}, ligado
-     * por {@code server.forward-headers-strategy=framework} no
-     * {@code application.properties}: ele normaliza esquema, host e porta a partir dos
-     * {@code X-Forwarded-*} antes de a requisicao chegar aqui.
+     * Tomcat veria HTTP puro — quem corrige isso e o {@code RemoteIpValve}, ligado por
+     * {@code server.forward-headers-strategy=native} no {@code application.properties}: ele
+     * normaliza esquema, host e porta a partir dos {@code X-Forwarded-*} antes de a
+     * requisicao chegar aqui, <strong>mas so quando ela vem de um proxy confiavel</strong>
+     * ({@code server.tomcat.remoteip.internal-proxies}). De qualquer outra origem os
+     * {@code X-Forwarded-*} sao ignorados como o que sao: header que o cliente escreve.
      *
-     * <p>Ler o {@code X-Forwarded-Proto} na mao aqui tambem funcionaria, mas colocaria a
-     * aplicacao confiando num header de cliente em dois lugares diferentes e com regras
-     * diferentes — o {@code LoginThrottle} recusa o {@code X-Forwarded-For} exatamente por
-     * nao saber quantos saltos confiar. Concentrar a normalizacao no filtro do framework
-     * deixa uma decisao so, no lugar onde a plataforma espera encontra-la, e de quebra
-     * conserta o {@code Location} das respostas {@code 201}.
+     * <p>A alternativa {@code framework} ({@code ForwardedHeaderFilter}) normaliza igual, mas
+     * sem nocao de quem esta do outro lado: qualquer cliente reescreveria esquema e host da
+     * requisicao, e um {@code X-Forwarded-Host: evil.example} sairia no {@code Location} de
+     * uma resposta {@code 201}. E o mesmo motivo pelo qual o {@code LoginThrottle} recusa o
+     * {@code X-Forwarded-For} — nao saber quantos saltos confiar —, so que resolvido em vez
+     * de aceito: aqui a lista de saltos confiaveis existe e e configuravel.
      *
      * <p>A condicao evita o outro extremo: mandar HSTS em {@code http://localhost} travaria
      * o navegador do desenvolvedor em HTTPS para todo o host por um ano.

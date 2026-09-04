@@ -56,11 +56,17 @@ endereço.
 ### Política de acesso por rota e hardening do perfil `prod`
 
 Autenticar diz *quem* está chamando; a matriz de acesso do `SecurityConfig` diz *o que cada um pode
-fazer*. Três rotas justificam a distinção entre `USER` e `ADMIN`: `PATCH /api/config` e
-`POST /api/config/reset` mudam pesos do score, formação e `odd_limite` da instância inteira, e
-`DELETE /api/cache` força chamadas novas à The Odds API, cuja cota mensal é paga. Deixar essas
-três ao alcance de qualquer usuário logado é entregar o botão de gastar dinheiro e o de reconfigurar
-a aplicação a quem só deveria consultar.
+fazer*. O critério da distinção entre `USER` e `ADMIN` é um só — **escreve na instância inteira ou
+gasta cota externa** —, e quatro rotas o satisfazem: `PATCH /api/config` e `POST /api/config/reset`
+mudam pesos do score, formação e `odd_limite` da instância inteira; `DELETE /api/cache` força
+chamadas novas à The Odds API, cuja cota mensal é paga; e
+`POST /api/historico/{rodadaId}/atualizar-pontuacao` regrava a `pontuacaoReal` de todos os atletas
+da rodada — a tabela de escalação é da instância, não de quem chamou — depois de consultar a API do
+Cartola. Deixar essas quatro ao alcance de qualquer usuário logado é entregar o botão de gastar
+dinheiro e o de reconfigurar a aplicação a quem só deveria consultar.
+
+As demais rotas de `/api/historico` só leem e continuam abertas a qualquer autenticado: o matcher
+cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
 
 Quem decide é o primeiro matcher que casa, então a ordem importa: `/api/usuarios/me` antes de
 `/api/usuarios/**`, e as regras de `ADMIN` antes do `anyRequest().authenticated()` final. Um matcher
@@ -82,13 +88,18 @@ chamadas dali mesmo.
 
 O HSTS sai condicionado à requisição ter chegado por TLS. Atrás da borda da plataforma o TLS termina
 no proxy e o Tomcat veria HTTP puro, então o cabeçalho nunca apareceria em produção; quem resolve é
-`server.forward-headers-strategy=framework`, que põe o `ForwardedHeaderFilter` na frente da cadeia
-para normalizar esquema, host e porta a partir dos `X-Forwarded-*`. Ler o `X-Forwarded-Proto` na mão
-dentro do `SecurityConfig` também funcionaria, mas deixaria a aplicação confiando em header de
-cliente em dois lugares com regras diferentes — o `LoginThrottle` recusa o `X-Forwarded-For` por não
-saber quantos saltos confiar. Concentrar no filtro do framework deixa uma decisão só. A condição
-evita o outro extremo: mandar HSTS em `http://localhost` trava o navegador do desenvolvedor em HTTPS
-para todo o host por um ano.
+`server.forward-headers-strategy=native`, que põe o `RemoteIpValve` na frente da cadeia para
+normalizar esquema, host e porta a partir dos `X-Forwarded-*`.
+
+A escolha de `native` em vez de `framework` é o ponto. O `ForwardedHeaderFilter` do framework
+normaliza igual, mas sem nenhuma noção de quem está do outro lado: qualquer cliente reescreve
+esquema e host da própria requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma
+resposta `201`. O `RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado
+em `server.tomcat.remoteip.internal-proxies` (padrão: as faixas privadas; `TRUSTED_PROXIES`
+sobrescreve). É a mesma dúvida que faz o `LoginThrottle` recusar o `X-Forwarded-For` — não saber
+quantos saltos confiar —, só que resolvida em vez de aceita: aqui a lista de saltos confiáveis
+existe e é configurável. A condição de TLS evita o outro extremo: mandar HSTS em `http://localhost`
+trava o navegador do desenvolvedor em HTTPS para todo o host por um ano.
 
 ### Gestão de usuários pela API, restrita a administradores
 

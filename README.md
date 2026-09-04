@@ -290,6 +290,7 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | Preflight `OPTIONS` das origens em `CORS_ALLOWED_ORIGINS` | Público (não carrega token) |
 | `GET /api/time`, `/api/time/comparar` | Autenticado |
 | `GET /api/ranking`, `/api/favoritos`, `/api/historico**` | Autenticado |
+| `POST /api/historico/{rodadaId}/atualizar-pontuacao` | `ADMIN` |
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
@@ -297,10 +298,16 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | Todo o resto de `/api/usuarios**` | `ADMIN` |
 | Qualquer outra rota | Autenticado |
 
-A separação entre `USER` e `ADMIN` não é cosmética. `PATCH /api/config` e
-`POST /api/config/reset` mudam pesos do score, formação e `odd_limite` da instância inteira, e
-`DELETE /api/cache` força chamadas novas à The Odds API, cuja cota mensal é paga — deixar esse
-botão ao alcance de qualquer usuário logado é entregar o gasto a quem tiver um token.
+A separação entre `USER` e `ADMIN` não é cosmética, e o critério é um só: **escreve na instância
+inteira ou gasta cota externa**. `PATCH /api/config` e `POST /api/config/reset` mudam pesos do
+score, formação e `odd_limite` da instância inteira; `DELETE /api/cache` força chamadas novas à The
+Odds API, cuja cota mensal é paga; e `POST /api/historico/{rodadaId}/atualizar-pontuacao` regrava a
+`pontuacaoReal` de todos os atletas da rodada — a tabela de escalação é da instância, não de quem
+chamou — depois de consultar a API do Cartola. Deixar esses botões ao alcance de qualquer usuário
+logado é entregar o gasto e a reconfiguração a quem tiver um token.
+
+As demais rotas de `/api/historico` só leem, e continuam abertas a qualquer autenticado: o matcher
+cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
 
 O que decide é o **primeiro matcher que casa**, então a ordem no `SecurityConfig` importa:
 `/api/usuarios/me` vem antes de `/api/usuarios/**`, e as regras de `ADMIN` por método vêm antes da
@@ -343,12 +350,31 @@ Toda resposta sai com:
 | `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | Só quando a requisição chegou por TLS |
 
 O HSTS é condicional: só sai quando a requisição chegou por TLS. Atrás da borda da plataforma o TLS
-termina no proxy e o Tomcat veria HTTP puro — quem corrige isso é o `ForwardedHeaderFilter`, ligado
-por `server.forward-headers-strategy=framework`, que normaliza esquema, host e porta a partir dos
-`X-Forwarded-*` antes de a requisição chegar ao filter chain (e de quebra conserta o `Location` das
-respostas `201`). Isso confia no proxy à frente para sobrescrever `X-Forwarded-*` enviados pelo
-cliente — premissa das plataformas de deploy usadas aqui. E o HSTS **não** sai em `http://localhost`:
-mandar HSTS ali travaria o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+termina no proxy e o Tomcat veria HTTP puro — quem corrige isso é o `RemoteIpValve`, ligado por
+`server.forward-headers-strategy=native`, que normaliza esquema, host e porta a partir dos
+`X-Forwarded-*` antes de a requisição chegar ao filter chain (e mantém o `Location` das respostas
+`201` apontando para o host público). E o HSTS **não** sai em `http://localhost`: mandar HSTS ali
+travaria o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+
+**`native` e não `framework`.** O `ForwardedHeaderFilter` do framework acredita nos `X-Forwarded-*`
+venham eles de onde vierem, então qualquer cliente reescreve esquema e host da própria requisição:
+um `X-Forwarded-Host: evil.example` sai no `Location` de um `201`. O `RemoteIpValve` só aplica os
+headers quando a conexão vem de um endereço listado em `server.tomcat.remoteip.internal-proxies`, e
+ignora o resto.
+
+### Proxy confiável (`TRUSTED_PROXIES`)
+
+O padrão cobre as faixas privadas (`10/8`, `172.16-31/12`, `192.168/16`, `169.254/16`, `127/8`,
+`::1`), que é onde o proxy da plataforma normalmente fala com o container — na maioria dos deploys
+não é preciso configurar nada. Se a borda chegar de um IP público, liste-o em `TRUSTED_PROXIES`:
+
+```bash
+TRUSTED_PROXIES=203\.0\.113\.\d{1,3}
+```
+
+O valor é uma **regex de endereços**, não um CIDR. O sintoma de faixa errada é observável: os
+`X-Forwarded-*` são descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security`
+some das respostas. Se o HSTS não aparecer em produção, é aqui que se olha.
 
 ### Perfil de produção
 
