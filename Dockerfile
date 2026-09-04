@@ -35,13 +35,15 @@ RUN chown cartola:cartola app.jar
 
 USER cartola
 
-# Portas padrao da aplicacao e do Actuator
+# Porta unica: aplicacao e Actuator compartilham a mesma, como exige a
+# plataforma de deploy. Quem protege /actuator/metrics e /actuator/prometheus
+# e a regra de ADMIN no SecurityConfig, nao a separacao de portas.
 EXPOSE 8080
-EXPOSE 9090
 
-# Healthcheck — verifica o endpoint de saude do Actuator
+# Healthcheck — /actuator/health e publico de proposito, para a plataforma
+# poder consultar sem token
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget -qO- http://localhost:9090/actuator/health 2>/dev/null || exit 1
+  CMD wget -qO- http://localhost:8080/actuator/health 2>/dev/null || exit 1
 
 # Configuracoes recomendadas de JVM para containers:
 #   -XX:+UseContainerSupport     respeita os limites de CPU/memória do container

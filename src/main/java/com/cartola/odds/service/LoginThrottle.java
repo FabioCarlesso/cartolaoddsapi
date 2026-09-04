@@ -19,13 +19,17 @@ import java.util.concurrent.atomic.AtomicInteger;
  * as duas conferem o mesmo segredo, e separa-las daria ao atacante duas janelas para
  * adivinhar a mesma senha.
  *
- * <p>A chave e o e-mail, e nao o IP, de proposito. Em producao a aplicacao fica atras do
- * nginx e da borda da plataforma, entao {@code getRemoteAddr()} devolve o endereco do
- * proxy — igual para todo mundo. Contar por ali ou nao limitaria nada, ou limitaria todos
- * juntos. Ler {@code X-Forwarded-For} com seguranca exige saber quantos saltos confiar, o
- * que e configuracao do ambiente e chega com o deploy (#39). O e-mail, por outro lado,
- * descreve exatamente o alvo do ataque: quem tenta adivinhar a senha do administrador
- * martela sempre o mesmo endereco.
+ * <p>A chave e o e-mail, e nao o IP, de proposito — e nao por falta de IP confiavel. Com
+ * {@code server.forward-headers-strategy=native} o {@code RemoteIpValve} reescreve
+ * {@code getRemoteAddr()} a partir do {@code X-Forwarded-For} quando a conexao vem de um
+ * proxy confiavel ({@code server.tomcat.remoteip.internal-proxies}), entao a aplicacao
+ * enxerga o endereco real de quem chamou e contar por IP seria viavel.
+ *
+ * <p>Continua nao sendo o que se quer contar. O e-mail descreve o alvo do ataque; o IP
+ * descreve so o caminho, e caminho e o que um atacante distribuido troca de graca — quem
+ * martela a senha do administrador martela sempre o mesmo endereco, de onde quer que venha.
+ * Contar por IP tambem faria o freio depender de uma faixa de proxies bem configurada para
+ * nao punir todo mundo junto atras de um NAT.
  *
  * <p>A janela conta a partir da primeira falha e o contador some inteiro ao expirar, sem
  * deslizar. O tamanho e limitado para que uma enumeracao de e-mails nao vire consumo de

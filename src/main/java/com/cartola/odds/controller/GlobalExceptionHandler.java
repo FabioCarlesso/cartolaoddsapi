@@ -9,12 +9,14 @@ import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.mapping.PropertyReferenceException;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -214,6 +216,31 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ErrorResponse.of(404, "Recurso nao encontrado", ex.getResourcePath()));
+    }
+
+    /**
+     * Verbo errado numa rota que existe. Sem este handler a excecao caia no
+     * {@link #handleGeneric(Exception)} e virava {@code 500}: um {@code GET} em
+     * {@code /api/config/reset} respondia "Erro interno" para um erro que e do cliente, e a
+     * cada chamada dessas o log ganhava um stacktrace de erro inesperado.
+     *
+     * <p>O {@code Allow} vai junto porque a RFC 9110 o exige no {@code 405} — e porque e a
+     * resposta a pergunta que o cliente acabou de fazer errado.
+     */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMetodoNaoSuportado(HttpRequestMethodNotSupportedException ex) {
+        var suportados = ex.getSupportedHttpMethods();
+        log.warn("Metodo nao suportado: {} (aceitos: {})", ex.getMethod(), suportados);
+
+        var resposta = ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED);
+        // Nulo quando nem o Spring sabe dizer quais verbos a rota aceita; mandar um Allow
+        // vazio seria pior que nao mandar nenhum.
+        if (suportados != null && !suportados.isEmpty()) {
+            resposta.allow(suportados.toArray(HttpMethod[]::new));
+        }
+
+        return resposta.body(ErrorResponse.of(405, "Metodo nao permitido",
+                "O metodo %s nao e aceito nesta rota.".formatted(ex.getMethod())));
     }
 
     /**

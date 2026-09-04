@@ -142,8 +142,32 @@ springdoc.swagger-ui.path=/swagger-ui.html
 springdoc.swagger-ui.try-it-out-enabled=true
 springdoc.api-docs.path=/v3/api-docs
 
+# ── Actuator ──────────────────────────────────────────────────────────
+# Mesma porta da aplicação; quem separa acesso é a matriz do SecurityConfig
+management.endpoints.web.exposure.include=health,info,metrics,prometheus
+management.endpoint.health.show-details=when_authorized
+management.endpoint.health.roles=ADMIN
+
+# ── CORS ──────────────────────────────────────────────────────────────
+app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
+
 # ── Servidor ──────────────────────────────────────────────────────────
 server.port=8080
+server.forward-headers-strategy=native
+server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES:<faixas privadas>}
+```
+
+Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
+(`SPRING_PROFILES_ACTIVE=prod`):
+
+```properties
+# Swagger e OpenAPI desligados: as rotas passam a responder 404 (ver 3.6)
+springdoc.api-docs.enabled=false
+springdoc.swagger-ui.enabled=false
+
+# DEBUG imprime o e-mail do dono de um token recusado e a URI de cada 401/403.
+# As linhas de operação já identificam o usuário por id — ver 3.6.
+logging.level.com.cartola=INFO
 ```
 
 ### 3.2 Parâmetros de Negócio via Banco de Dados
@@ -241,12 +265,17 @@ CREATE TABLE configuracao (
 | `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
 | `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens liberadas para CORS, separadas por vírgula |
+| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot; `prod` desliga Swagger/`api-docs` (`404`) e baixa o log de `com.cartola` para `INFO` |
 
 ### 3.4 Autenticação (JWT)
 
 Todos os endpoints exigem `Authorization: Bearer <accessToken>`, exceto `POST /api/auth/login`,
-a documentação OpenAPI e o Actuator. A API consome cota paga da The Odds API a cada chamada
-que não vem do cache — o acesso aberto era o que impedia publicá-la.
+o healthcheck (`/actuator/health`, `/actuator/info`) e a documentação OpenAPI — esta última só fora
+de produção. A API consome cota paga da The Odds API a cada chamada que não vem do cache — o acesso
+aberto era o que impedia publicá-la.
+
+Autenticar diz *quem* está chamando; a política de acesso da seção 3.6 diz *o que cada um pode
+fazer*.
 
 **Componentes:**
 
@@ -280,12 +309,14 @@ em UTC e um horário sem fuso seria lido como local pelo cliente, que acharia a 
 que o token é. Mesma escolha do `expires_in` do OAuth 2.
 
 **Freio de força bruta por e-mail.** `LoginThrottle` conta falhas por e-mail normalizado e responde
-`429` ao atingir o limite da janela. A chave é o e-mail, e não o IP, porque atrás do nginx e da
-borda da plataforma `getRemoteAddr()` é o endereço do proxy — igual para todos. O e-mail descreve o
-alvo real do ataque.
+`429` ao atingir o limite da janela. A chave é o e-mail, e não o IP — e não por falta de IP: com
+`server.forward-headers-strategy=native` (ver 3.6) a aplicação lê o endereço real do cliente atrás
+de um proxy confiável. Contar por IP seria viável; continua não sendo o que se quer contar. O e-mail
+descreve o alvo do ataque, o IP descreve só o caminho, e caminho é o que um atacante distribuído
+troca de graça — além de o IP fazer o freio punir todos juntos atrás de um NAT.
 
-> A distinção `USER` × `ADMIN` nas demais rotas e o fechamento de Swagger/Actuator em produção
-> ficam para a issue #38. As rotas de `/api/usuarios` já distinguem perfil — ver 3.5.
+> A matriz completa de acesso por rota, o fechamento de Swagger no perfil `prod` e os cabeçalhos de
+> segurança estão em 3.6.
 
 ### 3.5 Gestão de usuários
 
@@ -314,11 +345,12 @@ nasce de um administrador.
 | `GET` | `/api/usuarios/me` | Qualquer autenticado |
 | `PATCH` | `/api/usuarios/me/senha` | Qualquer autenticado, exige a senha atual |
 
-**Autorização em `@PreAuthorize`, não em matcher de URL.** As rotas de `/api/usuarios` misturam
-operações de administrador com as do próprio usuário (`/me`). Declarar quem acessa o quê ao lado
-do endpoint mantém uma fonte de verdade só; repetir a regra em `SecurityConfig` criaria uma
-segunda, com a chance de divergirem. O `@EnableMethodSecurity` que liga isso está no
-`SecurityConfig`, junto do restante da política de acesso.
+**Regra fina em `@PreAuthorize`, piso em matcher de URL.** As rotas de `/api/usuarios` misturam
+operações de administrador com as do próprio usuário (`/me`), e é ao lado do endpoint que essa
+distinção fica legível — daí o `@PreAuthorize`, ligado pelo `@EnableMethodSecurity` do
+`SecurityConfig`. O `SecurityConfig` declara sobre elas apenas um piso (`/api/usuarios/me` para
+qualquer autenticado, o resto de `/api/usuarios/**` para `ADMIN`): ele não repete a regra de cada
+método, e cobre o caso de um endpoint novo nascer sem `@PreAuthorize`.
 
 Como consequência, a recusa nasce **dentro** do MVC, e não no filter chain: sem um
 `@ExceptionHandler(AccessDeniedException.class)` no `GlobalExceptionHandler`, ela seria capturada
@@ -373,7 +405,140 @@ chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
 `PropertyReferenceException` (ordenação desconhecida). Nos dois casos a mensagem original fica só
 no log: ela nomeia a classe Java e chega a listar os valores aceitos do enum.
 
+**Verbo errado é `405`, também não `500`.** Pelo mesmo motivo, o handler trata
+`HttpRequestMethodNotSupportedException`: um `GET` em `/api/config/reset` — rota que existe, mas só
+aceita `POST` — respondia `500 Erro interno` e enchia o log de stacktrace de "erro inesperado" a
+cada chamada, quando o erro é do cliente. A resposta traz o cabeçalho `Allow` com os verbos aceitos,
+como a RFC 9110 exige.
+
 **Fora de escopo (issue #37):** auto-cadastro público, convite por e-mail e recuperação de senha.
+
+### 3.6 Política de acesso por rota e hardening do perfil `prod`
+
+**Matriz de acesso** (declarada no `SecurityConfig`):
+
+| Rota | Acesso |
+|---|---|
+| `POST /api/auth/login` | Público |
+| `/actuator/health`, `/actuator/health/**`, `/actuator/info` | Público — healthcheck da plataforma |
+| `/actuator/**` (`metrics`, `prometheus`) | `ADMIN` |
+| `/swagger-ui.html`, `/swagger-ui/**`, `/v3/api-docs/**` | Público fora de produção; `404` no perfil `prod` |
+| `GET /api/time`, `/api/time/comparar`, `/api/ranking`, `/api/favoritos`, `/api/historico**` | Autenticado |
+| `GET /api/config` | Autenticado |
+| `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
+| `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
+| `POST /api/historico/{rodadaId}/atualizar-pontuacao` | `ADMIN` |
+| `/api/usuarios/me`, `/api/usuarios/me/senha` | Autenticado |
+| `/api/usuarios/**` | `ADMIN` |
+| Qualquer outra | Autenticado |
+
+**Por que essas rotas exigem `ADMIN`.** O critério é um só — escreve na instância inteira ou gasta
+cota externa. `PATCH /api/config` e `POST /api/config/reset` mudam pesos do score, formação e
+`odd_limite` da instância inteira; `DELETE /api/cache` força chamadas novas à The Odds API, cuja
+cota mensal é paga; `POST /api/historico/{rodadaId}/atualizar-pontuacao` regrava a `pontuacaoReal`
+de todos os atletas da rodada — a tabela de escalação é da instância, não de quem chamou — depois de
+consultar a API do Cartola. São operações de dono, não de convidado.
+
+As demais rotas de `/api/historico` só leem e continuam abertas a qualquer autenticado: o matcher
+cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
+
+**A ordem dos matchers importa.** Vale o primeiro que casa: `/api/usuarios/me` vem antes de
+`/api/usuarios/**`, e as regras de `ADMIN` vêm antes do `anyRequest().authenticated()`. Um matcher
+por método cobre só aquele método — **`HEAD` não herda a autorização de `GET`** —, e por isso as
+regras de `ADMIN` citam apenas os verbos que escrevem: leitura e `HEAD` caem na regra final, que já
+é fechada. Essa regra final ser `authenticated()` é o que faz uma rota nova nascer fechada.
+
+**401 e 403 no contrato `ErrorResponse`.** Os dois nascem no filter chain, antes do MVC, e não
+passariam pelo `GlobalExceptionHandler` — sem o `authenticationEntryPoint` e o `accessDeniedHandler`
+apontando para o `ErroSegurancaHandler`, o cliente receberia a página de erro do container em vez de
+JSON. O `403` que nasce de um `@PreAuthorize` é tratado dentro do MVC (ver 3.5) com o mesmo texto,
+para que o corpo seja um só.
+
+**Actuator na porta única.** Antes ele vivia em `management.server.port=9090` com bind em
+`127.0.0.1`, e era o bind — não uma regra — que o protegia; uma plataforma que publica uma porta só
+não sustenta esse arranjo. Na porta única quem protege é a matriz acima:
+
+- `health` e `info` públicos, para o healthcheck consultar antes de qualquer token existir;
+- `metrics` e `prometheus` restritos a `ADMIN` — descrevem uso de memória, latência por rota e
+  contagem de erros;
+- `management.endpoint.health.show-details=when_authorized` com
+  `management.endpoint.health.roles=ADMIN`: o corpo anônimo é só `{"status":"UP"}`, sem estado de
+  banco, disco e dependências.
+
+**Perfil `prod` (`application-prod.properties`).** `springdoc.api-docs.enabled=false` e
+`springdoc.swagger-ui.enabled=false`. Desligar em vez de proteger é proposital: com o springdoc
+desligado as rotas não existem e respondem `404`, enquanto um `401` confirmaria que a documentação
+está lá, atrás de uma senha. O contrato completo da API é o mapa que um atacante levaria tempo
+montando na mão, e o *Try it out* do Swagger UI deixa disparar as chamadas dali mesmo. No mesmo
+arquivo, `logging.level.com.cartola=INFO`: em `DEBUG` o log imprime, a cada requisição, o e-mail do
+dono de um token recusado (`JwtAuthenticationFilter`) e a URI de cada `401`/`403`
+(`ErroSegurancaHandler`).
+
+**E-mail fora do log não depende do nível.** As linhas de operação — login, criação de usuário,
+desativação, troca de senha — identificam o usuário por `id`. Amarrar isso ao `logging.level` seria
+frágil: bastaria alguém subir o nível para depurar um incidente e o log voltaria a acumular dado
+pessoal. A única exceção é `AdminInicialBootstrap`, que cita o e-mail uma vez por instância ao criar
+o administrador inicial, repetindo o valor de `APP_ADMIN_INICIAL_EMAIL`.
+
+**CORS parametrizado, nunca `*`.** `app.cors.allowed-origins` lê `CORS_ALLOWED_ORIGINS` (padrão
+`http://localhost:4200`); métodos e headers são listados um a um. O token viaja em header, e uma
+origem curinga deixaria qualquer site chamar a API com o token da vítima. O preflight `OPTIONS`
+passa antes da autorização — ele não carrega `Authorization`, e sem isso o navegador levaria `401`
+sem chegar a enviar a requisição real.
+
+**Cabeçalhos de segurança na resposta:**
+
+| Cabeçalho | Valor | Origem |
+|---|---|---|
+| `X-Content-Type-Options` | `nosniff` | Padrão do Spring Security |
+| `X-Frame-Options` | `DENY` | Padrão do Spring Security |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | `SecurityConfig` |
+| `Strict-Transport-Security` | `max-age=31536000 ; includeSubDomains` | `SecurityConfig`, só em requisição por TLS |
+
+O HSTS usa o matcher padrão do Spring Security, que só o emite quando `request.isSecure()`. Atrás da
+borda da plataforma o TLS termina no proxy e o Tomcat veria HTTP puro — quem corrige é o
+`RemoteIpValve`, ligado por `server.forward-headers-strategy=native` no `application.properties`,
+que normaliza esquema, host e porta a partir dos `X-Forwarded-*` antes de a requisição chegar ao
+filter chain, e mantém o `Location` das respostas `201` apontando para o host público.
+
+**Por que `native` e não `framework`.** O `ForwardedHeaderFilter` do framework normaliza igual, mas
+sem nenhuma noção de quem está do outro lado: qualquer cliente reescreve esquema e host da própria
+requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma resposta `201`. O
+`RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado em
+`server.tomcat.remoteip.internal-proxies`, e ignora o resto. A dúvida de sempre — quantos saltos
+confiar — deixa de ser aceita e passa a ser configurada: a lista de saltos confiáveis existe e tem
+nome. De quebra o `getRemoteAddr()` passa a valer atrás do proxy; o `LoginThrottle` continua
+contando por e-mail, mas por escolher o alvo do ataque em vez do caminho, não por falta de IP
+confiável (ver 3.4).
+
+O padrão de `internal-proxies` cobre as faixas privadas (`10/8`, `172.16-31/12`, `192.168/16`,
+`169.254/16`, `127/8`, `::1`), que é onde o proxy da plataforma normalmente fala com o container.
+Se a borda vier de um IP público, `TRUSTED_PROXIES` sobrescreve — o valor é uma **regex de
+endereços**, não um CIDR. O sintoma de faixa errada é observável: os `X-Forwarded-*` são
+descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security` some das respostas.
+
+O padrão confia em qualquer origem de faixa privada — correto numa plataforma em que só a borda
+alcança o container, mas é premissa sobre a topologia, não garantia da aplicação. Fixar
+`TRUSTED_PROXIES` na faixa real da borda é tarefa do deploy
+([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39)).
+
+A condição evita o outro extremo — mandar HSTS em `http://localhost` trava o navegador do
+desenvolvedor em HTTPS para todo o host por um ano.
+
+**Pendência conhecida.** Com `/actuator/prometheus` restrito a `ADMIN`, o scrape passa a depender de um access token que expira em 24 h sem renovação — a coleta contínua não tem caminho sustentável hoje. Tratado na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44).
+
+**Verificação.** `PoliticaAcessoIntegrationTest` percorre a matriz rota a rota nos três estados
+(sem token, `USER`, `ADMIN`) e afirma apenas o veredito da autorização, não o status de negócio do
+endpoint — amarrar ao status exato faria a matriz quebrar a cada mudança de validação.
+`SwaggerProdIntegrationTest` confirma os `404` com `@ActiveProfiles("prod")`, e
+`ActuatorEndpointsTest` cobre o Actuator por HTTP real.
+
+O `RemoteIpValve` é do Tomcat, e o MockMvc não o atravessa: um caso de `X-Forwarded-*` escrito com
+MockMvc passaria verde sem exercitar nada. Por isso essa parte vive em dois testes de HTTP real —
+`ProxyConfiavelIntegrationTest`, com a faixa padrão que confia em `127.0.0.1`, e
+`ProxyNaoConfiavelIntegrationTest`, que inverte `internal-proxies` para provar que os headers de um
+cliente não confiável são ignorados. A inversão é o que torna o caso possível: em `localhost` toda
+requisição chega de uma faixa confiável.
 
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
 
@@ -703,9 +868,9 @@ CREATE TABLE escalacao_rodada (
 |---|---|---|
 | `GET` | `/api/historico` | Lista as rodadas registradas com resumo (score sugerido vs. pontuação real) |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada — `404` se não registrada |
-| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Preenche a `pontuacao_real` da rodada — `404` se não registrada |
+| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Preenche a `pontuacao_real` da rodada — `404` se não registrada; exige `ADMIN` |
 
-Rodadas sem escalação registrada resultam em `RecursoNaoEncontradoException`, mapeada para `404 Not Found` pelo `GlobalExceptionHandler`.
+Rodadas sem escalação registrada resultam em `RecursoNaoEncontradoException`, mapeada para `404 Not Found` pelo `GlobalExceptionHandler`. Um `GET` na rota de atualização — que só aceita `POST` — responde `405 Method Not Allowed` com `Allow: POST`.
 
 ---
 
@@ -821,6 +986,7 @@ cartola/
     │       └── NormalizadorUtil.java
     ├── main/resources/
     │   ├── application.properties
+    │   ├── application-prod.properties
     │   └── db/migration/
     │       ├── V1__create_configuracao.sql  # Cria tabela e insere valores padrão
     │       ├── V2__alter_configuracao_numeric_to_double.sql  # Converte NUMERIC → DOUBLE PRECISION
@@ -1006,6 +1172,12 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência e aliases |
+| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança |
+| `ProxyConfiavelIntegrationTest` | Integração (HTTP real) | HSTS sai com `X-Forwarded-Proto: https` vindo de proxy confiável, e não sai sem o header |
+| `ProxyNaoConfiavelIntegrationTest` | Integração (HTTP real) | `X-Forwarded-*` de cliente fora de `internal-proxies` são ignorados |
+| `CorsConfigTest` | Unitário | Origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
+| `SwaggerProdIntegrationTest` | Integração (`@ActiveProfiles("prod")`) | Swagger UI e `/v3/api-docs` respondem 404 em produção |
+| `ActuatorEndpointsTest` | Integração (HTTP real) | `health`/`info` públicos, `health` sem detalhes para anônimo e com detalhes para `ADMIN`, `metrics`/`prometheus` exigindo `ADMIN`, endpoints sensíveis não expostos |
 
 Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
 
@@ -1039,6 +1211,9 @@ mvn test jacoco:report
 |---|---|
 | `http://localhost:8080/swagger-ui.html` | Interface gráfica — Try it out habilitado |
 | `http://localhost:8080/v3/api-docs` | JSON OpenAPI 3 (importar no Postman/Insomnia) |
+
+> Ambas respondem **`404`** com `SPRING_PROFILES_ACTIVE=prod`: o `application-prod.properties`
+> desliga o springdoc. Ver 3.6.
 
 **Endpoints disponíveis:**
 

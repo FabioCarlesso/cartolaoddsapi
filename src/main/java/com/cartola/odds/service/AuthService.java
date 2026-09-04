@@ -41,7 +41,10 @@ public class AuthService {
         }
 
         loginThrottle.registrarSucesso(request.getEmail());
-        log.info("Login efetuado: {} ({})", usuario.getEmail(), usuario.getPerfil());
+        // Identifica por id, nunca por e-mail: esta linha sai a cada login e o log da
+        // plataforma e retido por semanas — o id resolve o mesmo suporte sem virar um
+        // deposito de dado pessoal.
+        log.info("Login efetuado: id={} ({})", usuario.getId(), usuario.getPerfil());
 
         return LoginResponse.builder()
                 .accessToken(jwtService.gerarToken(usuario))

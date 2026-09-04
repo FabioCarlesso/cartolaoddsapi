@@ -47,11 +47,60 @@ assim mesmo, produzia uma API no ar que ninguém conseguia autenticar, com o avi
 despercebido. A exigência cai quando já existe um ADMIN ativo, para que produção não precise
 manter para sempre a senha do primeiro acesso depois de trocada.
 
-O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP: atrás do nginx e da
-borda da plataforma, `getRemoteAddr()` devolve o endereço do proxy, igual para todo mundo, e ler
-`X-Forwarded-For` com segurança depende de configuração de ambiente que só chega com o deploy. O
-e-mail descreve exatamente o alvo — adivinhar a senha do administrador é martelar sempre o mesmo
-endereço.
+O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP. Não é falta de IP: com
+`server.forward-headers-strategy=native` a aplicação lê o endereço real do cliente atrás de um proxy
+confiável, e contar por IP seria viável. Continua não sendo o que se quer contar — o e-mail descreve
+o alvo do ataque e o IP descreve só o caminho, e caminho é o que um atacante distribuído troca de
+graça, enquanto adivinhar a senha do administrador é martelar sempre o mesmo endereço.
+
+### Política de acesso por rota e hardening do perfil `prod`
+
+Autenticar diz *quem* está chamando; a matriz de acesso do `SecurityConfig` diz *o que cada um pode
+fazer*. O critério da distinção entre `USER` e `ADMIN` é um só — **escreve na instância inteira ou
+gasta cota externa** —, e quatro rotas o satisfazem: `PATCH /api/config` e `POST /api/config/reset`
+mudam pesos do score, formação e `odd_limite` da instância inteira; `DELETE /api/cache` força
+chamadas novas à The Odds API, cuja cota mensal é paga; e
+`POST /api/historico/{rodadaId}/atualizar-pontuacao` regrava a `pontuacaoReal` de todos os atletas
+da rodada — a tabela de escalação é da instância, não de quem chamou — depois de consultar a API do
+Cartola. Deixar essas quatro ao alcance de qualquer usuário logado é entregar o botão de gastar
+dinheiro e o de reconfigurar a aplicação a quem só deveria consultar.
+
+As demais rotas de `/api/historico` só leem e continuam abertas a qualquer autenticado: o matcher
+cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
+
+Quem decide é o primeiro matcher que casa, então a ordem importa: `/api/usuarios/me` antes de
+`/api/usuarios/**`, e as regras de `ADMIN` antes do `anyRequest().authenticated()` final. Um matcher
+por método cobre só aquele método — `HEAD` não herda a autorização de `GET` —, e por isso as regras
+de `ADMIN` citam apenas os verbos que escrevem: leitura e `HEAD` caem na regra final, que é fechada.
+A regra final ser `authenticated()` é o que faz uma rota nova nascer fechada em vez de aberta.
+
+O Actuator saiu da porta separada e foi para a porta única da aplicação. O `bind` em `127.0.0.1`
+protegia por acidente de topologia, não por regra, e some numa plataforma que publica uma porta só;
+`health` e `info` ficam públicos para o healthcheck da plataforma consultar sem token, e `metrics` e
+`prometheus` passam a exigir `ADMIN`. O `show-details=when_authorized` é o que mantém o `health`
+público sem vazar estado de banco e dependências.
+
+No perfil `prod` o springdoc é desligado por completo, e a diferença entre desligar e proteger é
+proposital: com ele desligado as rotas não existem e respondem `404`. Um `401` confirmaria que a
+documentação está lá, atrás de uma senha; o `404` não confirma nada. O contrato completo da API é o
+mapa que um atacante levaria tempo montando na mão, e o *Try it out* do Swagger UI deixa disparar as
+chamadas dali mesmo.
+
+O HSTS sai condicionado à requisição ter chegado por TLS. Atrás da borda da plataforma o TLS termina
+no proxy e o Tomcat veria HTTP puro, então o cabeçalho nunca apareceria em produção; quem resolve é
+`server.forward-headers-strategy=native`, que põe o `RemoteIpValve` na frente da cadeia para
+normalizar esquema, host e porta a partir dos `X-Forwarded-*`.
+
+A escolha de `native` em vez de `framework` é o ponto. O `ForwardedHeaderFilter` do framework
+normaliza igual, mas sem nenhuma noção de quem está do outro lado: qualquer cliente reescreve
+esquema e host da própria requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma
+resposta `201`. O `RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado
+em `server.tomcat.remoteip.internal-proxies` (padrão: as faixas privadas; `TRUSTED_PROXIES`
+sobrescreve). A dúvida de sempre — quantos saltos confiar — deixa de ser aceita e passa a ser
+configurada: a lista de saltos confiáveis existe e tem nome. De quebra o `getRemoteAddr()` passa a
+valer atrás do proxy, embora o `LoginThrottle` siga contando por e-mail por outro motivo. A condição
+de TLS evita o outro extremo: mandar HSTS em `http://localhost` trava o navegador do desenvolvedor
+em HTTPS para todo o host por um ano.
 
 ### Gestão de usuários pela API, restrita a administradores
 
@@ -62,12 +111,14 @@ mão — `/api/usuarios` existe para tirar essa operação do banco e colocá-la
 Não há auto-cadastro público, e a escolha é a mesma que fechou a API: cada consulta fora do cache
 gasta cota paga da The Odds API. Quem entra é decisão de quem administra a instância.
 
-A autorização das rotas de usuários vive em `@PreAuthorize`, ao lado de cada endpoint, e não em
-matcher de URL no `SecurityConfig`. Elas misturam operações de administrador com as do próprio
-usuário (`/me`), e uma segunda declaração da mesma regra só teria a chance de divergir da primeira.
-O efeito colateral é que a recusa nasce dentro do MVC: o `GlobalExceptionHandler` precisa tratar
-`AccessDeniedException` explicitamente, ou o handler genérico a transformaria em 500 antes de ela
-chegar ao `ErroSegurancaHandler`.
+A regra fina das rotas de usuários vive em `@PreAuthorize`, ao lado de cada endpoint: elas misturam
+operações de administrador com as do próprio usuário (`/me`), e é ali que a distinção fica legível.
+O `SecurityConfig` declara sobre elas apenas um piso — `/api/usuarios/me` para qualquer autenticado,
+o resto de `/api/usuarios/**` para `ADMIN` —, que não repete a regra de cada método e cobre o caso
+de um endpoint novo nascer sem `@PreAuthorize`. O efeito colateral do `@PreAuthorize` é que a recusa
+nasce dentro do MVC: o `GlobalExceptionHandler` precisa tratar `AccessDeniedException`
+explicitamente, ou o handler genérico a transformaria em 500 antes de ela chegar ao
+`ErroSegurancaHandler`.
 
 A exclusão é lógica (`ativo = false`), nunca física: o registro sustenta o histórico de escalações
 que aquele usuário produziu. E o rebaixamento de perfil entrou na lista do que incrementa a
@@ -186,22 +237,25 @@ Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome
 
 O projeto inclui **Spring Boot Actuator** com **Micrometer** e o registry **Prometheus** para coleta de métricas.
 
-O Actuator roda em porta separada via `management.server.port` (padrão `9090`) e ligado a `management.server.address` (padrão `127.0.0.1`) para não expor métricas na porta pública da API. No Docker Compose, `MANAGEMENT_SERVER_ADDRESS=0.0.0.0` deixa a porta acessível apenas na rede interna do compose para scrape por Prometheus.
+O Actuator responde na **mesma porta da aplicação**. Antes ele vivia em `management.server.port=9090` com bind em `127.0.0.1`, e era o bind — não uma regra — que o protegia; uma plataforma que publica uma porta só não sustenta esse arranjo, e a proteção sumiria junto com ele. Na porta única quem protege é a matriz de acesso do `SecurityConfig`.
 
-Endpoints expostos na porta de gerenciamento via `management.endpoints.web.exposure.include=health,info,metrics,prometheus`:
+Endpoints expostos via `management.endpoints.web.exposure.include=health,info,metrics,prometheus`:
 
-| Endpoint | Descrição |
-|---|---|
-| `:9090/actuator/health` | Saúde da aplicação |
-| `:9090/actuator/metrics` | Lista de métricas coletadas |
-| `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
-| `:9090/actuator/prometheus` | Métricas em formato Prometheus (scrape) |
+| Endpoint | Acesso | Descrição |
+|---|---|---|
+| `/actuator/health` | Público | Saúde da aplicação |
+| `/actuator/info` | Público | Informações da build |
+| `/actuator/metrics` | `ADMIN` | Lista de métricas coletadas |
+| `/actuator/metrics/{nome}` | `ADMIN` | Detalhe de uma métrica específica |
+| `/actuator/prometheus` | `ADMIN` | Métricas em formato Prometheus (scrape) |
 
-Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos.
+`health` e `info` são públicos porque o healthcheck da plataforma precisa consultá-los antes de qualquer token existir. Com `management.endpoint.health.show-details=when_authorized` e `management.endpoint.health.roles=ADMIN`, o corpo anônimo é só `{"status":"UP"}` — o estado de banco, disco e dependências só aparece para `ADMIN`.
+
+Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos, nem para `ADMIN`.
 
 A tag `application=cartolaoddsapi` é adicionada a todas as métricas via `management.metrics.tags.application`.
 
-Para scrape com Prometheus, aponte o job para `GET :9090/actuator/prometheus`.
+Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus` com um access token de `ADMIN` no header `Authorization`. Esse token expira em 24 h e não há renovação — a coleta contínua depende de um credencial de conta de máquina, tratado na issue #44.
 
 ### Filtro de Atletas
 
@@ -282,11 +336,12 @@ com.cartola.odds/
 | `DELETE` | `/api/usuarios/{id}` | Desativação lógica (`ADMIN`) |
 | `GET` | `/api/usuarios/me` | Dados da própria conta (autenticado) |
 | `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha (autenticado) |
-| `GET` | `/swagger-ui.html` | Documentação interativa |
-| `GET` | `:9090/actuator/health` | Status de saúde da aplicação |
-| `GET` | `:9090/actuator/metrics` | Lista de métricas disponíveis |
-| `GET` | `:9090/actuator/metrics/{nome}` | Detalhe de uma métrica específica |
-| `GET` | `:9090/actuator/prometheus` | Métricas no formato Prometheus |
+| `GET` | `/swagger-ui.html` | Documentação interativa (público fora de produção, `404` no perfil `prod`) |
+| `GET` | `/actuator/health` | Status de saúde da aplicação (público) |
+| `GET` | `/actuator/info` | Informações da build (público) |
+| `GET` | `/actuator/metrics` | Lista de métricas disponíveis (`ADMIN`) |
+| `GET` | `/actuator/metrics/{nome}` | Detalhe de uma métrica específica (`ADMIN`) |
+| `GET` | `/actuator/prometheus` | Métricas no formato Prometheus (`ADMIN`) |
 
 ---
 
@@ -299,8 +354,8 @@ com.cartola.odds/
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
 | `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
 | `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
-| `MANAGEMENT_SERVER_PORT` | `9090` | Porta dos endpoints Actuator |
-| `MANAGEMENT_SERVER_ADDRESS` | `127.0.0.1` | Interface onde o Actuator escuta |
+| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot; `prod` desliga Swagger/`api-docs` e baixa o log para `INFO` |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas, separadas por vírgula — nunca `*` |
 
 Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via banco de dados — não precisam de variáveis de ambiente.
 

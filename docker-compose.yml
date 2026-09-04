@@ -51,11 +51,17 @@ services:
       APP_LOGIN_JANELA_MINUTOS: "${APP_LOGIN_JANELA_MINUTOS:-5}"
       CORS_ALLOWED_ORIGINS:     "${CORS_ALLOWED_ORIGINS:-http://localhost:4200}"
 
+      # ── Proxy confiavel ───────────────────────────────────────────
+      # Sem valor de propósito: a variável só chega ao container se estiver
+      # definida no ambiente. Passar "" aqui zeraria a lista de proxies
+      # confiáveis — nenhum X-Forwarded-* seria aceito e o HSTS sumiria —,
+      # enquanto não passar nada deixa valer o padrão do application.properties
+      # (faixas privadas), que já cobre a rede do compose.
+      TRUSTED_PROXIES:
+
       # ── JVM / Spring ──────────────────────────────────────────────
       SPRING_PROFILES_ACTIVE: "${SPRING_PROFILES_ACTIVE:-default}"
       SERVER_PORT: "8080"
-      MANAGEMENT_SERVER_PORT: "9090"
-      MANAGEMENT_SERVER_ADDRESS: "0.0.0.0"
       JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
 
     deploy:
@@ -70,7 +76,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/actuator/health > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health > /dev/null || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 60s
