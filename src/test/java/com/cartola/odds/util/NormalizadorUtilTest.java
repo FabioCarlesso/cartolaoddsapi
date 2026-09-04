@@ -18,6 +18,7 @@ class NormalizadorUtilTest {
         "Sao Paulo FC,       sao paulo",
         "Gremio,             gremio",
         "Athletico Paranaense, athletico pr",
+        "Atletico-PR,         athletico pr",
         "Flamengo,           flamengo",
         "BOTAFOGO,           botafogo",
         "Vasco da Gama,      vasco",

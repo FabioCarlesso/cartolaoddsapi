@@ -86,17 +86,38 @@ public class CartolaDataService {
         if (partidas == null || partidas.getPartidas() == null || clubes == null) return Set.of();
         return partidas.getPartidas().stream()
                 .map(p -> NormalizadorUtil.chaveConfronto(
-                        nomeClube(clubes.get(String.valueOf(p.getClubeCasaId()))),
-                        nomeClube(clubes.get(String.valueOf(p.getClubeVisitanteId())))
+                        nomeClubeParaChave(clubes.get(String.valueOf(p.getClubeCasaId()))),
+                        nomeClubeParaChave(clubes.get(String.valueOf(p.getClubeVisitanteId())))
                 ))
                 .filter(chave -> !chave.isBlank())
                 .collect(Collectors.toUnmodifiableSet());
     }
 
+    /** Nome de exibicao do clube — e o que sai em {@code nomeClube} no ranking e no time. */
     private String nomeClube(ClubeResponse clube) {
         if (clube == null) return "";
         if (clube.getNomeFantasia() != null && !clube.getNomeFantasia().isBlank()) return clube.getNomeFantasia();
         return clube.getNome() != null ? clube.getNome() : "";
+    }
+
+    /**
+     * Nome usado para cruzar o clube com a The Odds API — na chave de confronto da rodada e
+     * no {@code nomeClubeNorm} do atleta.
+     *
+     * <p>Separado do {@link #nomeClube(ClubeResponse)} de proposito: os dois partiam do mesmo
+     * campo ate o {@code /partidas} do Cartola passar a devolver sigla em {@code nome} e
+     * {@code nome_fantasia}. Com "MIR" dos dois lados, a chave virava {@code bah|rbb} enquanto
+     * a da Odds API era {@code bahia|bragantino}, e nenhum jogo casava. O {@code slug} e o unico
+     * campo que ainda traz o nome por extenso.
+     *
+     * <p>Unificar os dois de novo custaria a exibicao: o slug apareceria como "athletico-pr" na
+     * tela, onde hoje sai "CAP". O fallback para os campos antigos fica para o caso de a API
+     * voltar ao formato anterior.
+     */
+    private String nomeClubeParaChave(ClubeResponse clube) {
+        if (clube == null) return "";
+        if (clube.getSlug() != null && !clube.getSlug().isBlank()) return clube.getSlug();
+        return nomeClube(clube);
     }
 
     private Atleta mapearAtleta(AtletaResponse.AtletaItem item,
@@ -119,7 +140,7 @@ public class CartolaDataService {
         String siglaClube     = clube != null && clube.getAbreviacao() != null
                 ? clube.getAbreviacao()
                 : nomeClube.length() >= 3 ? nomeClube.substring(0, 3).toUpperCase() : "???";
-        String nomeClubeNorm  = NormalizadorUtil.normalizar(nomeClube);
+        String nomeClubeNorm  = NormalizadorUtil.normalizar(nomeClubeParaChave(clube));
 
         if (!favoritos.isEmpty() && !favoritos.contains(nomeClubeNorm)) return null;
 
