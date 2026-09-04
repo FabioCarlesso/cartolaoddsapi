@@ -541,7 +541,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha, exigindo a senha atual |
 | `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
-| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste |
+| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -829,6 +829,7 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 | `401` | Credenciais inválidas no login, ou requisição sem token / com token inválido, expirado ou revogado |
 | `403` | Autenticado, mas sem permissão para o recurso; ou preflight CORS de origem não liberada |
 | `404` | Recurso inexistente (ex: `GET /api/usuarios/{id}` de um id que não existe) |
+| `405` | Verbo errado numa rota que existe (ex: `GET /api/config/reset`); a resposta traz `Allow` com os verbos aceitos |
 | `409` | E-mail já cadastrado, ou operação que deixaria a instância sem administrador ativo |
 | `429` | Excesso de tentativas de login, ou de senha atual errada em `PATCH /api/usuarios/me/senha` |
 | `422` | Nenhum atleta disponível após filtragem (ODD_LIMITE muito restritivo) |
@@ -1074,7 +1075,7 @@ mvn test jacoco:report
 | `ConfiguracaoControllerTest` | 10 — GET config, PATCH (válido/inválido/regra), POST reset |
 | `ConfiguracaoServiceTest` | 2 — atualização/reset da regra de defesa |
 | `EscalacaoServiceTest` | 10 — salvar (idempotência), atualizar pontuação real, rodada não corrente, resumo do histórico, 404 |
-| `HistoricoControllerTest` | 8 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação, path variable de tipo inválido → 400 |
+| `HistoricoControllerTest` | 9 — GET histórico vazio/preenchido, detalhe, 404, atualizar pontuação, verbo errado → 405 com `Allow`, path variable de tipo inválido → 400 |
 | `RankingServiceTest` | 15 — ordenação, limite, filtro posição |
 | `RankingControllerTest` | 12 — HTTP completo |
 | `TimeControllerTest` | 33 — HTTP completo, persistência (com orçamento sim, com `excluirDuvida` não), comportamento não bloqueante, orçamento, `excluirDuvida`, aviso, validação (tipo inválido → 400, truncamento de valor longo) e comparação de formações |
@@ -1085,7 +1086,9 @@ mvn test jacoco:report
 | `UsuarioServiceTest` | 26 — criação, e-mail duplicado/normalizado, desativação lógica e idempotente, incremento de `tokenVersion`, autodesativação/auto-rebaixamento e último administrador ativo, troca de senha, whitelist de ordenação e freio de força bruta |
 | `UsuarioControllerTest` | 23 — HTTP 201 com `Location`, 400 de validação/corpo ilegível, 403 para `USER`, 404, 409, 422 e 429; senha ausente das respostas |
 | `GestaoUsuariosIntegrationTest` | 21 — admin cria → novo usuário autentica; 401 sem token; desativação derruba login e token; troca de senha invalida o token anterior; proteções do último administrador; ordenação e payloads inválidos em 400; freio de força bruta na troca de senha |
-| `PoliticaAcessoIntegrationTest` | 92 — matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS atrás de proxy |
+| `PoliticaAcessoIntegrationTest` | 97 — matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança |
+| `ProxyConfiavelIntegrationTest` | 2 — HTTP real: HSTS sai com `X-Forwarded-Proto: https` de proxy confiável, e não sai sem o header |
+| `ProxyNaoConfiavelIntegrationTest` | 1 — HTTP real: `X-Forwarded-*` de cliente fora da lista de proxies confiáveis são ignorados |
 | `CorsConfigTest` | 6 — origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
 | `SwaggerProdIntegrationTest` | 4 — Swagger UI e `/v3/api-docs` respondem 404 com `SPRING_PROFILES_ACTIVE=prod` |
 | `ActuatorEndpointsTest` | 14 — health e info públicos, health sem detalhes para anônimo e com detalhes para `ADMIN`, metrics/prometheus exigindo `ADMIN` (401 sem token, 403 para `USER`) e bloqueio de endpoints sensíveis |

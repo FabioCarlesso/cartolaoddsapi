@@ -108,8 +108,9 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.GET, "/api/favoritos", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/historico", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/historico/1", Acesso.AUTENTICADO),
-                // So a escrita de /api/historico subiu para ADMIN; a leitura fica aberta a
-                // qualquer token, e esta linha e o que impede o matcher de vazar para ela.
+                // So a escrita de /api/historico subiu para ADMIN: o matcher cita o verbo
+                // POST, e esta linha e o que impede que ele vaze para o GET da mesma rota.
+                // O 405 que o MVC devolve aqui ja significa "a politica deixou entrar".
                 new Caso(HttpMethod.GET, "/api/historico/1/atualizar-pontuacao", Acesso.AUTENTICADO),
                 new Caso(HttpMethod.GET, "/api/config", Acesso.AUTENTICADO),
                 // HEAD nao herda a autorizacao de GET no Spring Security: um matcher por

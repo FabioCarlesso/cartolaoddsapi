@@ -23,6 +23,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -143,6 +144,25 @@ class HistoricoControllerTest {
             mockMvc.perform(post("/api/historico/99/atualizar-pontuacao"))
                     .andExpect(status().isNotFound())
                     .andExpect(jsonPath("$.status").value(404));
+        }
+
+        /**
+         * Verbo errado numa rota que existe e erro do cliente, nao da aplicacao. Sem o
+         * handler proprio no {@code GlobalExceptionHandler} a excecao caia no generico e
+         * virava 405 nenhum: respondia 500 "Erro interno" e ainda logava um stacktrace de
+         * erro inesperado a cada chamada.
+         */
+        @Test
+        @DisplayName("deve retornar 405 com Allow no verbo errado, e nao 500")
+        void deveRetornar405NoVerboErrado() throws Exception {
+            mockMvc.perform(get("/api/historico/14/atualizar-pontuacao"))
+                    .andExpect(status().isMethodNotAllowed())
+                    .andExpect(header().string("Allow", containsString("POST")))
+                    .andExpect(jsonPath("$.status").value(405))
+                    .andExpect(jsonPath("$.erro").value("Metodo nao permitido"))
+                    .andExpect(jsonPath("$.mensagem").value(containsString("GET")));
+
+            verify(escalacaoService, never()).atualizarPontuacaoReal(any());
         }
     }
 

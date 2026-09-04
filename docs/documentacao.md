@@ -403,6 +403,12 @@ chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
 `PropertyReferenceException` (ordenação desconhecida). Nos dois casos a mensagem original fica só
 no log: ela nomeia a classe Java e chega a listar os valores aceitos do enum.
 
+**Verbo errado é `405`, também não `500`.** Pelo mesmo motivo, o handler trata
+`HttpRequestMethodNotSupportedException`: um `GET` em `/api/config/reset` — rota que existe, mas só
+aceita `POST` — respondia `500 Erro interno` e enchia o log de stacktrace de "erro inesperado" a
+cada chamada, quando o erro é do cliente. A resposta traz o cabeçalho `Allow` com os verbos aceitos,
+como a RFC 9110 exige.
+
 **Fora de escopo (issue #37):** auto-cadastro público, convite por e-mail e recuperação de senha.
 
 ### 3.6 Política de acesso por rota e hardening do perfil `prod`
@@ -517,6 +523,13 @@ desenvolvedor em HTTPS para todo o host por um ano.
 endpoint — amarrar ao status exato faria a matriz quebrar a cada mudança de validação.
 `SwaggerProdIntegrationTest` confirma os `404` com `@ActiveProfiles("prod")`, e
 `ActuatorEndpointsTest` cobre o Actuator por HTTP real.
+
+O `RemoteIpValve` é do Tomcat, e o MockMvc não o atravessa: um caso de `X-Forwarded-*` escrito com
+MockMvc passaria verde sem exercitar nada. Por isso essa parte vive em dois testes de HTTP real —
+`ProxyConfiavelIntegrationTest`, com a faixa padrão que confia em `127.0.0.1`, e
+`ProxyNaoConfiavelIntegrationTest`, que inverte `internal-proxies` para provar que os headers de um
+cliente não confiável são ignorados. A inversão é o que torna o caso possível: em `localhost` toda
+requisição chega de uma faixa confiável.
 
 > ⚠️ **Atenção — `@Qualifier` com Lombok:** `@Qualifier` em campos `final` com `@RequiredArgsConstructor` **não funciona** — o Lombok ignora a anotação. `OddsClient` e `CartolaClient` usam construtores explícitos com `@Qualifier` no parâmetro do construtor.
 
@@ -846,9 +859,9 @@ CREATE TABLE escalacao_rodada (
 |---|---|---|
 | `GET` | `/api/historico` | Lista as rodadas registradas com resumo (score sugerido vs. pontuação real) |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada — `404` se não registrada |
-| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Preenche a `pontuacao_real` da rodada — `404` se não registrada |
+| `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Preenche a `pontuacao_real` da rodada — `404` se não registrada; exige `ADMIN` |
 
-Rodadas sem escalação registrada resultam em `RecursoNaoEncontradoException`, mapeada para `404 Not Found` pelo `GlobalExceptionHandler`.
+Rodadas sem escalação registrada resultam em `RecursoNaoEncontradoException`, mapeada para `404 Not Found` pelo `GlobalExceptionHandler`. Um `GET` na rota de atualização — que só aceita `POST` — responde `405 Method Not Allowed` com `Allow: POST`.
 
 ---
 
@@ -1150,7 +1163,9 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `RankingServiceTest` | Unitário (Mockito) | Ordenação, limite, filtro posição |
 | `PipelineServiceTest` | Unitário (Mockito) | Pipeline completo, cada etapa chamada 1x, pool vazio lança exceção |
 | `NormalizadorUtilTest` | Unitário | Acentos, hifens, maiúsculas, nulo, branco, idempotência e aliases |
-| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança e HSTS atrás de proxy |
+| `PoliticaAcessoIntegrationTest` | Integração (MockMvc) | Matriz de acesso rota a rota nos três estados (sem token, `USER`, `ADMIN`); status exato das rotas públicas; contrato `ErrorResponse` em 401/403; cabeçalhos de segurança |
+| `ProxyConfiavelIntegrationTest` | Integração (HTTP real) | HSTS sai com `X-Forwarded-Proto: https` vindo de proxy confiável, e não sai sem o header |
+| `ProxyNaoConfiavelIntegrationTest` | Integração (HTTP real) | `X-Forwarded-*` de cliente fora de `internal-proxies` são ignorados |
 | `CorsConfigTest` | Unitário | Origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
 | `SwaggerProdIntegrationTest` | Integração (`@ActiveProfiles("prod")`) | Swagger UI e `/v3/api-docs` respondem 404 em produção |
 | `ActuatorEndpointsTest` | Integração (HTTP real) | `health`/`info` públicos, `health` sem detalhes para anônimo e com detalhes para `ADMIN`, `metrics`/`prometheus` exigindo `ADMIN`, endpoints sensíveis não expostos |
