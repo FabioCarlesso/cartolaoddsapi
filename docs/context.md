@@ -47,11 +47,11 @@ assim mesmo, produzia uma API no ar que ninguém conseguia autenticar, com o avi
 despercebido. A exigência cai quando já existe um ADMIN ativo, para que produção não precise
 manter para sempre a senha do primeiro acesso depois de trocada.
 
-O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP: atrás do nginx e da
-borda da plataforma, `getRemoteAddr()` devolve o endereço do proxy, igual para todo mundo, e ler
-`X-Forwarded-For` com segurança depende de configuração de ambiente que só chega com o deploy. O
-e-mail descreve exatamente o alvo — adivinhar a senha do administrador é martelar sempre o mesmo
-endereço.
+O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP. Não é falta de IP: com
+`server.forward-headers-strategy=native` a aplicação lê o endereço real do cliente atrás de um proxy
+confiável, e contar por IP seria viável. Continua não sendo o que se quer contar — o e-mail descreve
+o alvo do ataque e o IP descreve só o caminho, e caminho é o que um atacante distribuído troca de
+graça, enquanto adivinhar a senha do administrador é martelar sempre o mesmo endereço.
 
 ### Política de acesso por rota e hardening do perfil `prod`
 
@@ -96,10 +96,11 @@ normaliza igual, mas sem nenhuma noção de quem está do outro lado: qualquer c
 esquema e host da própria requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma
 resposta `201`. O `RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado
 em `server.tomcat.remoteip.internal-proxies` (padrão: as faixas privadas; `TRUSTED_PROXIES`
-sobrescreve). É a mesma dúvida que faz o `LoginThrottle` recusar o `X-Forwarded-For` — não saber
-quantos saltos confiar —, só que resolvida em vez de aceita: aqui a lista de saltos confiáveis
-existe e é configurável. A condição de TLS evita o outro extremo: mandar HSTS em `http://localhost`
-trava o navegador do desenvolvedor em HTTPS para todo o host por um ano.
+sobrescreve). A dúvida de sempre — quantos saltos confiar — deixa de ser aceita e passa a ser
+configurada: a lista de saltos confiáveis existe e tem nome. De quebra o `getRemoteAddr()` passa a
+valer atrás do proxy, embora o `LoginThrottle` siga contando por e-mail por outro motivo. A condição
+de TLS evita o outro extremo: mandar HSTS em `http://localhost` trava o navegador do desenvolvedor
+em HTTPS para todo o host por um ano.
 
 ### Gestão de usuários pela API, restrita a administradores
 

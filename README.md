@@ -259,12 +259,13 @@ compartilham a contagem de propósito: conferem o mesmo segredo, e separá-los d
 janelas para adivinhar a mesma senha. Um token roubado tem validade limitada — sem esse freio,
 bastaria martelar `senhaAtual` para trocar a senha e tomar a conta em definitivo.
 
-A contagem é por e-mail, e não por IP: atrás do nginx e da borda da plataforma, `getRemoteAddr()`
-devolve o endereço do proxy — igual para todo mundo. Ler `X-Forwarded-For` com segurança exige
-saber quantos saltos confiar, o que é configuração de ambiente e chega com o deploy
-([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39)). O e-mail, por outro lado,
-descreve exatamente o alvo: quem tenta adivinhar a senha do administrador martela sempre o mesmo
-endereço.
+A contagem é por e-mail, e não por IP — e não por falta de IP. Com
+`server.forward-headers-strategy=native` a aplicação lê o endereço real do cliente, porque o
+`RemoteIpValve` reescreve `getRemoteAddr()` a partir do `X-Forwarded-For` quando a conexão vem de um
+proxy confiável. Contar por IP seria viável hoje; continua não sendo o que se quer contar. O e-mail
+descreve o alvo do ataque, o IP descreve só o caminho — e caminho é o que um atacante distribuído
+troca de graça, enquanto quem tenta adivinhar a senha do administrador martela sempre o mesmo
+endereço. Contar por IP ainda faria o freio punir todos juntos atrás de um NAT.
 
 ### O que o token carrega
 
@@ -375,6 +376,11 @@ TRUSTED_PROXIES=203\.0\.113\.\d{1,3}
 O valor é uma **regex de endereços**, não um CIDR. O sintoma de faixa errada é observável: os
 `X-Forwarded-*` são descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security`
 some das respostas. Se o HSTS não aparecer em produção, é aqui que se olha.
+
+O padrão confia em qualquer origem de faixa privada, o que está certo numa plataforma em que só a
+borda alcança o container — mas é uma premissa sobre a topologia, não uma garantia da aplicação.
+Fixar `TRUSTED_PROXIES` na faixa real da borda é tarefa do deploy
+([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39)).
 
 ### Perfil de produção
 

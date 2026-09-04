@@ -157,9 +157,10 @@ public class SecurityConfig {
      * <p>A alternativa {@code framework} ({@code ForwardedHeaderFilter}) normaliza igual, mas
      * sem nocao de quem esta do outro lado: qualquer cliente reescreveria esquema e host da
      * requisicao, e um {@code X-Forwarded-Host: evil.example} sairia no {@code Location} de
-     * uma resposta {@code 201}. E o mesmo motivo pelo qual o {@code LoginThrottle} recusa o
-     * {@code X-Forwarded-For} — nao saber quantos saltos confiar —, so que resolvido em vez
-     * de aceito: aqui a lista de saltos confiaveis existe e e configuravel.
+     * uma resposta {@code 201}. A duvida de sempre — quantos saltos confiar — deixa de ser
+     * aceita e passa a ser configurada: a lista de saltos confiaveis existe aqui e tem nome.
+     * De quebra, o {@code getRemoteAddr()} passa a valer atras do proxy; o
+     * {@code LoginThrottle} segue contando por e-mail por outro motivo, explicado la.
      *
      * <p>A condicao evita o outro extremo: mandar HSTS em {@code http://localhost} travaria
      * o navegador do desenvolvedor em HTTPS para todo o host por um ano.

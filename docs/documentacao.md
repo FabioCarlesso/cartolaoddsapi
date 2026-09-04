@@ -309,9 +309,11 @@ em UTC e um horário sem fuso seria lido como local pelo cliente, que acharia a 
 que o token é. Mesma escolha do `expires_in` do OAuth 2.
 
 **Freio de força bruta por e-mail.** `LoginThrottle` conta falhas por e-mail normalizado e responde
-`429` ao atingir o limite da janela. A chave é o e-mail, e não o IP, porque atrás do nginx e da
-borda da plataforma `getRemoteAddr()` é o endereço do proxy — igual para todos. O e-mail descreve o
-alvo real do ataque.
+`429` ao atingir o limite da janela. A chave é o e-mail, e não o IP — e não por falta de IP: com
+`server.forward-headers-strategy=native` (ver 3.6) a aplicação lê o endereço real do cliente atrás
+de um proxy confiável. Contar por IP seria viável; continua não sendo o que se quer contar. O e-mail
+descreve o alvo do ataque, o IP descreve só o caminho, e caminho é o que um atacante distribuído
+troca de graça — além de o IP fazer o freio punir todos juntos atrás de um NAT.
 
 > A matriz completa de acesso por rota, o fechamento de Swagger no perfil `prod` e os cabeçalhos de
 > segurança estão em 3.6.
@@ -503,15 +505,22 @@ filter chain, e mantém o `Location` das respostas `201` apontando para o host p
 sem nenhuma noção de quem está do outro lado: qualquer cliente reescreve esquema e host da própria
 requisição, e um `X-Forwarded-Host: evil.example` sai no `Location` de uma resposta `201`. O
 `RemoteIpValve` só aplica os headers quando a conexão vem de um endereço listado em
-`server.tomcat.remoteip.internal-proxies`, e ignora o resto. É a mesma dúvida que faz o
-`LoginThrottle` recusar o `X-Forwarded-For` — não saber quantos saltos confiar —, só que resolvida
-em vez de aceita: aqui a lista de saltos confiáveis existe e é configurável.
+`server.tomcat.remoteip.internal-proxies`, e ignora o resto. A dúvida de sempre — quantos saltos
+confiar — deixa de ser aceita e passa a ser configurada: a lista de saltos confiáveis existe e tem
+nome. De quebra o `getRemoteAddr()` passa a valer atrás do proxy; o `LoginThrottle` continua
+contando por e-mail, mas por escolher o alvo do ataque em vez do caminho, não por falta de IP
+confiável (ver 3.4).
 
 O padrão de `internal-proxies` cobre as faixas privadas (`10/8`, `172.16-31/12`, `192.168/16`,
 `169.254/16`, `127/8`, `::1`), que é onde o proxy da plataforma normalmente fala com o container.
 Se a borda vier de um IP público, `TRUSTED_PROXIES` sobrescreve — o valor é uma **regex de
 endereços**, não um CIDR. O sintoma de faixa errada é observável: os `X-Forwarded-*` são
 descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security` some das respostas.
+
+O padrão confia em qualquer origem de faixa privada — correto numa plataforma em que só a borda
+alcança o container, mas é premissa sobre a topologia, não garantia da aplicação. Fixar
+`TRUSTED_PROXIES` na faixa real da borda é tarefa do deploy
+([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39)).
 
 A condição evita o outro extremo — mandar HSTS em `http://localhost` trava o navegador do
 desenvolvedor em HTTPS para todo o host por um ano.
