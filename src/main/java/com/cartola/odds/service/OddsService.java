@@ -117,6 +117,19 @@ public class OddsService {
                 .toList();
 
         log.info("Odds filtradas pela rodada atual: {} de {} jogos", filtradas.size(), odds.size());
+
+        // Descartar tudo nao e filtragem normal: significa que os dois lados nao se reconhecem
+        // mais. E uma falha silenciosa — nao lanca, so devolve lista vazia —, e foi assim que a
+        // mudanca de contrato do Cartola (#45) rodou despercebida. O par de chaves no log e o que
+        // torna o diagnostico imediato, sem precisar reproduzir as duas chamadas na mao.
+        if (filtradas.isEmpty() && !odds.isEmpty()) {
+            log.warn("Nenhuma das {} odds casou com os {} confrontos da rodada — provavel divergencia "
+                            + "de nomes entre as fontes. Exemplo: odds={} | confrontos={}",
+                    odds.size(), confrontosRodadaAtual.size(),
+                    NormalizadorUtil.chaveConfronto(odds.get(0).getHomeTeam(), odds.get(0).getAwayTeam()),
+                    confrontosRodadaAtual.iterator().next());
+        }
+
         return filtradas;
     }
 

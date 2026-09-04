@@ -116,6 +116,22 @@ class OddsServiceTest {
         }
 
         @Test
+        @DisplayName("deve devolver vazio sem estourar quando nenhuma odd casa com a rodada")
+        void deveDevolverVazioQuandoNadaCasa() {
+            when(oddsClient.buscarOdds()).thenReturn(List.of(
+                jogo("Flamengo", 2.10, "Botafogo", 3.50),
+                jogo("Palmeiras", 1.85, "Santos", 4.20)
+            ));
+            // Formato que quebrou na #45: siglas de um lado, nomes por extenso do outro.
+            when(cartolaDataService.buscarConfrontosRodadaAtual())
+                    .thenReturn(Set.of("bot|fla", "pal|san"));
+
+            var favoritos = oddsService.buscarFavoritos();
+
+            assertThat(favoritos).isEmpty();
+        }
+
+        @Test
         @DisplayName("deve retornar set imutavel")
         void deveRetornarSetImutavel() {
             when(oddsClient.buscarOdds())

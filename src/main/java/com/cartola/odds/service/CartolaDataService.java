@@ -134,9 +134,7 @@ public class CartolaDataService {
         if (preco <= 0) return null;
 
         ClubeResponse clube   = clubes.get(String.valueOf(item.getClubeId()));
-        String nomeClube      = clube != null && clube.getNomeFantasia() != null
-                ? clube.getNomeFantasia()
-                : (clube != null ? clube.getNome() : "");
+        String nomeClube      = nomeClube(clube);
         String siglaClube     = clube != null && clube.getAbreviacao() != null
                 ? clube.getAbreviacao()
                 : nomeClube.length() >= 3 ? nomeClube.substring(0, 3).toUpperCase() : "???";

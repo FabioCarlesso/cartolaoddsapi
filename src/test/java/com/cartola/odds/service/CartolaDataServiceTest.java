@@ -156,6 +156,31 @@ class CartolaDataServiceTest {
         }
 
         @Test
+        @DisplayName("deve exibir o nome quando nome_fantasia vier em branco")
+        void deveExibirNomeComNomeFantasiaEmBranco() {
+            var clube = new ClubeResponse();
+            clube.setNome("Flamengo");
+            clube.setNomeFantasia("");   // em branco, nao nulo
+            clube.setAbreviacao("FLA");
+
+            var atletaResp = new AtletaResponse();
+            atletaResp.setAtletas(List.of(atletaItem(1, 5, 7, 10.0, 8.0, 15.0)));
+            var partidaResp = new PartidaResponse();
+            var partida = new PartidaResponse.PartidaItem();
+            partida.setClubeCasaId(1);
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of("1", clube));
+            when(cartolaClient.buscarAtletas()).thenReturn(atletaResp);
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            var resultado = service.buscarAtletasFiltrados(Set.of());
+
+            assertThat(resultado).hasSize(1);
+            assertThat(resultado.get(0).getNomeClube()).isEqualTo("Flamengo");
+        }
+
+        @Test
         @DisplayName("deve usar primeiras 3 letras do nome do clube como sigla quando abreviacao ausente")
         void deveUsarFallbackDeSigla() {
             configurarMocksComClubeSemAbreviacao(atletaItem(1, 5, 7, 10.0, 8.0, 15.0));
@@ -282,6 +307,23 @@ class CartolaDataServiceTest {
 
             assertThat(service.buscarConfrontosRodadaAtual())
                     .containsExactlyInAnyOrder(NormalizadorUtil.chaveConfronto("Cruzeiro", "Athletico Paranaense"));
+        }
+
+        @Test
+        @DisplayName("deve cair para nome_fantasia quando o slug estiver ausente")
+        void deveCairParaNomeFantasiaSemSlug() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida(1, 2)));
+
+            // Formato antigo da API: sem slug, nome por extenso. O fallback e a rede de seguranca
+            // caso o contrato do Cartola volte atras.
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clube("Flamengo", "FLA"),
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactlyInAnyOrder("botafogo|flamengo");
         }
 
         @Test
