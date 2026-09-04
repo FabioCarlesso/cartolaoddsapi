@@ -14,6 +14,7 @@ public final class NormalizadorUtil {
             Map.entry("america mineiro", "america mg"),
             Map.entry("athletico paranaense", "athletico pr"),
             Map.entry("atletico paranaense", "athletico pr"),
+            Map.entry("atletico pr", "athletico pr"),
             Map.entry("atletico goianiense", "atletico go"),
             Map.entry("atletico mineiro", "atletico mg"),
             Map.entry("atletico mineiro mg", "atletico mg"),

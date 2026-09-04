@@ -937,6 +937,8 @@ Antes de cruzar Odds API e Cartola FC, nomes são convertidos para lowercase, se
 
 O dicionário central fica em `NormalizadorUtil`. Para adicionar um alias, normalize mentalmente a grafia de entrada (sem acento, minúscula, hífen como espaço) e inclua uma entrada no mapa `ALIASES` apontando para o nome canônico já usado no cruzamento.
 
+**De onde vem cada nome.** Pelo lado da Odds API, do `home_team`/`away_team`. Pelo lado do Cartola, do **`slug`** do clube (`"atletico-pr"`), e não de `nome`/`nome_fantasia`: desde 2026 o `/partidas` devolve a sigla nesses dois campos (ambos `"MIR"`), e `apelido` traz o apelido de torcida (`"Colorado"`, `"Furacão"`). O `slug` é o único campo que ainda carrega o nome por extenso. Quem exibe o clube continua usando `nome_fantasia`/`nome` — `CartolaDataService` separa os dois papéis em `nomeClube` (exibição) e `nomeClubeParaChave` (cruzamento).
+
 ---
 
 ## Estrutura do Projeto

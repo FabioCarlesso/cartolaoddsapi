@@ -268,6 +268,8 @@ Quando odds não estão disponíveis, o filtro por time favorito é desativado e
 
 O `NormalizadorUtil` remove acentos, converte para lowercase, troca hífens por espaços, colapsa espaços duplicados e aplica um dicionário central de aliases para alinhar nomes vindos da The Odds API com os nomes do Cartola FC. Isso cobre variações como `Atlético-MG`, `Atlético Mineiro`, `Atlético Mineiro MG`, `Athletico Paranaense`, `Atlético Paranaense`, `São Paulo FC`, `Inter`, `Fluminense FC` e `Vasco da Gama`.
 
+O nome do lado do Cartola sai do `slug` do clube, não de `nome`/`nome_fantasia` — o `/partidas` passou a devolver a sigla nesses campos (`"MIR"`), e `apelido` é o apelido de torcida. `CartolaDataService.nomeClubeParaChave` isola essa escolha; `nomeClube` segue servindo à exibição.
+
 ### Regra de Defesa
 
 Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime. Quando não há candidatos suficientes sem repetição, o montador completa a posição com os melhores atletas restantes (respeitando ainda o limite por clube), garantindo que a formação nunca fique incompleta.

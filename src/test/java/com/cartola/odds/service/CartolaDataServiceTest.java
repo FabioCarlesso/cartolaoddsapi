@@ -5,6 +5,7 @@ import com.cartola.odds.model.enums.Posicao;
 import com.cartola.odds.model.enums.StatusAtleta;
 import com.cartola.odds.model.response.AtletaResponse;
 import com.cartola.odds.model.response.ClubeResponse;
+import com.cartola.odds.util.NormalizadorUtil;
 import com.cartola.odds.model.response.MercadoStatusResponse;
 import com.cartola.odds.model.response.PartidaResponse;
 import org.junit.jupiter.api.DisplayName;
@@ -143,6 +144,43 @@ class CartolaDataServiceTest {
         }
 
         @Test
+        @DisplayName("deve normalizar o clube pelo slug e preservar a sigla na exibicao")
+        void deveNormalizarPeloSlugPreservandoExibicao() {
+            configurarMocksComSlug(atletaItem(1, 5, 7, 10.0, 8.0, 15.0), "CAP", "atletico-pr");
+
+            var resultado = service.buscarAtletasFiltrados(Set.of("athletico pr"));
+
+            assertThat(resultado).hasSize(1);
+            assertThat(resultado.get(0).getNomeClubeNorm()).isEqualTo("athletico pr");
+            assertThat(resultado.get(0).getNomeClube()).isEqualTo("CAP");
+        }
+
+        @Test
+        @DisplayName("deve exibir o nome quando nome_fantasia vier em branco")
+        void deveExibirNomeComNomeFantasiaEmBranco() {
+            var clube = new ClubeResponse();
+            clube.setNome("Flamengo");
+            clube.setNomeFantasia("");   // em branco, nao nulo
+            clube.setAbreviacao("FLA");
+
+            var atletaResp = new AtletaResponse();
+            atletaResp.setAtletas(List.of(atletaItem(1, 5, 7, 10.0, 8.0, 15.0)));
+            var partidaResp = new PartidaResponse();
+            var partida = new PartidaResponse.PartidaItem();
+            partida.setClubeCasaId(1);
+            partidaResp.setPartidas(List.of(partida));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of("1", clube));
+            when(cartolaClient.buscarAtletas()).thenReturn(atletaResp);
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            var resultado = service.buscarAtletasFiltrados(Set.of());
+
+            assertThat(resultado).hasSize(1);
+            assertThat(resultado.get(0).getNomeClube()).isEqualTo("Flamengo");
+        }
+
+        @Test
         @DisplayName("deve usar primeiras 3 letras do nome do clube como sigla quando abreviacao ausente")
         void deveUsarFallbackDeSigla() {
             configurarMocksComClubeSemAbreviacao(atletaItem(1, 5, 7, 10.0, 8.0, 15.0));
@@ -231,6 +269,54 @@ class CartolaDataServiceTest {
             var partidaResp = new PartidaResponse();
             partidaResp.setPartidas(List.of(partida));
 
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clube("Flamengo", "FLA"),
+                    "2", clube("Botafogo FR", "BOT")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactlyInAnyOrder("botafogo|flamengo");
+        }
+
+        @Test
+        @DisplayName("deve montar a chave pelo slug quando nome e nome_fantasia vierem como sigla")
+        void deveMontarChavePeloSlug() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida(1, 2)));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clubeComSlug("RBB", "RBB", "bragantino"),
+                    "2", clubeComSlug("BAH", "BAH", "bahia")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual()).containsExactlyInAnyOrder("bahia|bragantino");
+        }
+
+        @Test
+        @DisplayName("deve casar o slug atletico-pr com a grafia Athletico da Odds API")
+        void deveCasarGrafiaAthletico() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida(1, 2)));
+
+            when(cartolaClient.buscarClubes()).thenReturn(Map.of(
+                    "1", clubeComSlug("CRU", "CRU", "cruzeiro"),
+                    "2", clubeComSlug("CAP", "CAP", "atletico-pr")
+            ));
+            when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+
+            assertThat(service.buscarConfrontosRodadaAtual())
+                    .containsExactlyInAnyOrder(NormalizadorUtil.chaveConfronto("Cruzeiro", "Athletico Paranaense"));
+        }
+
+        @Test
+        @DisplayName("deve cair para nome_fantasia quando o slug estiver ausente")
+        void deveCairParaNomeFantasiaSemSlug() {
+            var partidaResp = new PartidaResponse();
+            partidaResp.setPartidas(List.of(partida(1, 2)));
+
+            // Formato antigo da API: sem slug, nome por extenso. O fallback e a rede de seguranca
+            // caso o contrato do Cartola volte atras.
             when(cartolaClient.buscarClubes()).thenReturn(Map.of(
                     "1", clube("Flamengo", "FLA"),
                     "2", clube("Botafogo FR", "BOT")
@@ -351,6 +437,32 @@ class CartolaDataServiceTest {
         partida.setClubeCasaId(clubeCasaId);
         partida.setClubeVisitanteId(clubeVisitanteId);
         return partida;
+    }
+
+    private void configurarMocksComSlug(AtletaResponse.AtletaItem item, String sigla, String slug) {
+        var clube = clubeComSlug(sigla, sigla, slug);
+
+        var atletaResp = new AtletaResponse();
+        atletaResp.setAtletas(List.of(item));
+
+        var partida = new PartidaResponse.PartidaItem();
+        partida.setClubeCasaId(1);
+        var partidaResp = new PartidaResponse();
+        partidaResp.setPartidas(List.of(partida));
+
+        when(cartolaClient.buscarClubes()).thenReturn(Map.of("1", clube));
+        when(cartolaClient.buscarAtletas()).thenReturn(atletaResp);
+        when(cartolaClient.buscarPartidas()).thenReturn(partidaResp);
+    }
+
+    /** Formato atual do /partidas: sigla em nome e nome_fantasia, nome por extenso so no slug. */
+    private ClubeResponse clubeComSlug(String nome, String abreviacao, String slug) {
+        var clube = new ClubeResponse();
+        clube.setNome(nome);
+        clube.setNomeFantasia(nome);
+        clube.setAbreviacao(abreviacao);
+        clube.setSlug(slug);
+        return clube;
     }
 
     private ClubeResponse clube(String nome, String abreviacao) {
