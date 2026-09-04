@@ -15,12 +15,25 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OddsService {
+
+    /**
+     * Ultima chave-exemplo ja avisada, para o alerta de divergencia nao repetir a cada
+     * requisicao. O pipeline passa por {@code filtrarOddsRodadaAtual} em /api/time, /api/ranking
+     * e /api/favoritos, e as odds vem de cache — sem freio, uma falha constante produziria a
+     * mesma linha em todo request, encarecendo a ingestao e soterrando outros sinais justo
+     * durante o diagnostico.
+     *
+     * <p>Volta a {@code null} assim que o cruzamento funciona, para uma reincidencia avisar de
+     * novo em vez de ficar silenciada pelo aviso anterior.
+     */
+    private final AtomicReference<String> ultimaDivergenciaAvisada = new AtomicReference<>();
 
     private final OddsClient           oddsClient;
     private final ConfiguracaoService  configuracaoService;
@@ -123,11 +136,17 @@ public class OddsService {
         // mudanca de contrato do Cartola (#45) rodou despercebida. O par de chaves no log e o que
         // torna o diagnostico imediato, sem precisar reproduzir as duas chamadas na mao.
         if (filtradas.isEmpty() && !odds.isEmpty()) {
-            log.warn("Nenhuma das {} odds casou com os {} confrontos da rodada — provavel divergencia "
-                            + "de nomes entre as fontes. Exemplo: odds={} | confrontos={}",
-                    odds.size(), confrontosRodadaAtual.size(),
-                    NormalizadorUtil.chaveConfronto(odds.get(0).getHomeTeam(), odds.get(0).getAwayTeam()),
-                    confrontosRodadaAtual.iterator().next());
+            var exemploOdds = NormalizadorUtil.chaveConfronto(
+                    odds.get(0).getHomeTeam(), odds.get(0).getAwayTeam());
+
+            if (!exemploOdds.equals(ultimaDivergenciaAvisada.getAndSet(exemploOdds))) {
+                log.warn("Nenhuma das {} odds casou com os {} confrontos da rodada — provavel divergencia "
+                                + "de nomes entre as fontes. Exemplo: odds={} | confrontos={}",
+                        odds.size(), confrontosRodadaAtual.size(),
+                        exemploOdds, confrontosRodadaAtual.iterator().next());
+            }
+        } else {
+            ultimaDivergenciaAvisada.set(null);
         }
 
         return filtradas;

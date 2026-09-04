@@ -1,5 +1,9 @@
 package com.cartola.odds.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.cartola.odds.client.OddsClient;
 import com.cartola.odds.model.Configuracao;
 import com.cartola.odds.model.response.FavoritosResponse;
@@ -12,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Set;
@@ -129,6 +134,71 @@ class OddsServiceTest {
             var favoritos = oddsService.buscarFavoritos();
 
             assertThat(favoritos).isEmpty();
+        }
+
+        @Test
+        @DisplayName("deve avisar com as chaves dos dois lados quando nenhuma odd casa")
+        void deveAvisarComAsChavesDosDoisLados() {
+            var appender = capturarAvisos();
+            try {
+                when(oddsClient.buscarOdds())
+                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                when(cartolaDataService.buscarConfrontosRodadaAtual()).thenReturn(Set.of("bah|rbb"));
+
+                oddsService.buscarFavoritos();
+
+                var avisos = avisos(appender);
+                assertThat(avisos).hasSize(1);
+                // getFormattedMessage resolve os {}: e o que pega placeholder sobrando ou faltando,
+                // que o SLF4J nao reclama, so imprime errado.
+                assertThat(avisos.get(0))
+                        .contains("odds=bahia|bragantino")
+                        .contains("confrontos=bah|rbb")
+                        .doesNotContain("{}");
+            } finally {
+                pararCaptura(appender);
+            }
+        }
+
+        @Test
+        @DisplayName("deve avisar uma unica vez enquanto a divergencia persistir")
+        void deveAvisarUmaUnicaVezNaDivergenciaPersistente() {
+            var appender = capturarAvisos();
+            try {
+                when(oddsClient.buscarOdds())
+                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                when(cartolaDataService.buscarConfrontosRodadaAtual()).thenReturn(Set.of("bah|rbb"));
+
+                oddsService.buscarFavoritos();
+                oddsService.buscarFavoritos();
+                oddsService.buscarFavoritos();
+
+                assertThat(avisos(appender)).hasSize(1);
+            } finally {
+                pararCaptura(appender);
+            }
+        }
+
+        @Test
+        @DisplayName("deve voltar a avisar quando a divergencia reaparece depois de normalizar")
+        void deveVoltarAAvisarAposRecuperacao() {
+            var appender = capturarAvisos();
+            try {
+                when(oddsClient.buscarOdds())
+                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                when(cartolaDataService.buscarConfrontosRodadaAtual())
+                        .thenReturn(Set.of("bah|rbb"))             // divergente
+                        .thenReturn(Set.of("bahia|bragantino"))    // normalizou
+                        .thenReturn(Set.of("bah|rbb"));            // divergiu de novo
+
+                oddsService.buscarFavoritos();
+                oddsService.buscarFavoritos();
+                oddsService.buscarFavoritos();
+
+                assertThat(avisos(appender)).hasSize(2);
+            } finally {
+                pararCaptura(appender);
+            }
         }
 
         @Test
@@ -353,6 +423,24 @@ class OddsServiceTest {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    private ListAppender<ILoggingEvent> capturarAvisos() {
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(OddsService.class)).addAppender(appender);
+        return appender;
+    }
+
+    private void pararCaptura(ListAppender<ILoggingEvent> appender) {
+        ((Logger) LoggerFactory.getLogger(OddsService.class)).detachAppender(appender);
+    }
+
+    private List<String> avisos(ListAppender<ILoggingEvent> appender) {
+        return appender.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .toList();
+    }
 
     private OddsResponse jogo(String homeName, double oddHome,
                                String awayName, double oddAway) {
