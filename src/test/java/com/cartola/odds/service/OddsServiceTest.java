@@ -6,6 +6,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.cartola.odds.client.OddsClient;
 import com.cartola.odds.model.Configuracao;
+import com.cartola.odds.model.OddsComOrigem;
 import com.cartola.odds.model.response.FavoritosResponse;
 import com.cartola.odds.model.response.OddsResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +52,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve retornar set vazio quando API nao retorna odds")
         void deveRetornarVazioSemOdds() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of());
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo());
             assertThat(oddsService.buscarFavoritos()).isEmpty();
         }
 
@@ -59,7 +60,7 @@ class OddsServiceTest {
         @DisplayName("deve incluir nome normalizado do time favorito")
         void deveIncluirNomeNormalizado() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
 
             assertThat(oddsService.buscarFavoritos()).contains("flamengo");
         }
@@ -68,7 +69,7 @@ class OddsServiceTest {
         @DisplayName("deve excluir time com odd acima do limite")
         void deveExcluirAcimaDoLimite() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Fortaleza", 3.20, "Bahia", 3.40)));
+                    .thenReturn(aoVivo(jogo("Fortaleza", 3.20, "Bahia", 3.40)));
 
             assertThat(oddsService.buscarFavoritos()).isEmpty();
         }
@@ -77,7 +78,7 @@ class OddsServiceTest {
         @DisplayName("deve normalizar nome com acento e hifen")
         void deveNormalizarNome() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Atletico-MG", 1.95, "Santos FC", 4.20)));
+                    .thenReturn(aoVivo(jogo("Atletico-MG", 1.95, "Santos FC", 4.20)));
 
             assertThat(oddsService.buscarFavoritos()).contains("atletico mg");
         }
@@ -86,7 +87,7 @@ class OddsServiceTest {
         @DisplayName("deve aplicar alias no nome do favorito")
         void deveAplicarAliasNoFavorito() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Inter", 1.95, "Fluminense FC", 4.20)));
+                    .thenReturn(aoVivo(jogo("Inter", 1.95, "Fluminense FC", 4.20)));
 
             assertThat(oddsService.buscarFavoritos()).containsExactly("internacional");
         }
@@ -94,7 +95,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve processar multiplos jogos retornando todos os favoritos validos")
         void deveProcessarMultiplosJogos() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of(
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(
                 jogo("Flamengo",  2.10, "Botafogo", 3.50),
                 jogo("Palmeiras", 1.85, "Santos",   4.20),
                 jogo("Fortaleza", 3.30, "Bahia",    3.40)
@@ -108,7 +109,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve considerar somente favoritos dos confrontos da rodada atual")
         void deveConsiderarSomenteConfrontosDaRodadaAtual() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of(
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(
                 jogo("Flamengo", 2.10, "Botafogo", 3.50),
                 jogo("Palmeiras", 1.85, "Santos", 4.20)
             ));
@@ -123,7 +124,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve devolver vazio sem estourar quando nenhuma odd casa com a rodada")
         void deveDevolverVazioQuandoNadaCasa() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of(
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(
                 jogo("Flamengo", 2.10, "Botafogo", 3.50),
                 jogo("Palmeiras", 1.85, "Santos", 4.20)
             ));
@@ -142,7 +143,7 @@ class OddsServiceTest {
             var appender = capturarAvisos();
             try {
                 when(oddsClient.buscarOdds())
-                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                        .thenReturn(aoVivo(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
                 when(cartolaDataService.buscarConfrontosRodadaAtual()).thenReturn(Set.of("bah|rbb"));
 
                 oddsService.buscarFavoritos();
@@ -166,7 +167,7 @@ class OddsServiceTest {
             var appender = capturarAvisos();
             try {
                 when(oddsClient.buscarOdds())
-                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                        .thenReturn(aoVivo(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
                 when(cartolaDataService.buscarConfrontosRodadaAtual()).thenReturn(Set.of("bah|rbb"));
 
                 oddsService.buscarFavoritos();
@@ -185,7 +186,7 @@ class OddsServiceTest {
             var appender = capturarAvisos();
             try {
                 when(oddsClient.buscarOdds())
-                        .thenReturn(List.of(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
+                        .thenReturn(aoVivo(jogo("Bragantino SP", 2.05, "Bahia", 3.50)));
                 when(cartolaDataService.buscarConfrontosRodadaAtual())
                         .thenReturn(Set.of("bah|rbb"))             // divergente
                         .thenReturn(Set.of("bahia|bragantino"))    // normalizou
@@ -205,7 +206,7 @@ class OddsServiceTest {
         @DisplayName("deve retornar set imutavel")
         void deveRetornarSetImutavel() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
 
             var favoritos = oddsService.buscarFavoritos();
 
@@ -220,7 +221,7 @@ class OddsServiceTest {
         void deveIgnorarJogoSemBookmakers() {
             var jogoSemBookmaker = new OddsResponse();
             jogoSemBookmaker.setBookmakers(List.of());
-            when(oddsClient.buscarOdds()).thenReturn(List.of(jogoSemBookmaker));
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(jogoSemBookmaker));
 
             assertThat(oddsService.buscarFavoritos()).isEmpty();
         }
@@ -229,7 +230,7 @@ class OddsServiceTest {
         @DisplayName("deve manter processamento quando confrontos da rodada nao puderem ser buscados")
         void deveManterProcessamentoQuandoConfrontosIndisponiveis() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
             doThrow(new IllegalStateException("Cartola indisponivel"))
                     .when(cartolaDataService).buscarConfrontosRodadaAtual();
 
@@ -248,7 +249,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve retornar response com totalJogos=0 quando API nao retorna odds")
         void deveRetornarVazioQuandoSemOdds() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of());
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo());
 
             var resultado = oddsService.buscarFavoritosDetalhado(3.0);
 
@@ -258,10 +259,38 @@ class OddsServiceTest {
         }
 
         @Test
+        @DisplayName("deve marcar oddsDeSnapshot=true quando o cliente serviu o snapshot persistido")
+        void deveMarcarOddsDeSnapshot() {
+            when(oddsClient.buscarOdds()).thenReturn(
+                    OddsComOrigem.deSnapshot(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50))));
+
+            assertThat(oddsService.buscarFavoritosDetalhado(3.0).isOddsDeSnapshot()).isTrue();
+        }
+
+        @Test
+        @DisplayName("deve marcar oddsDeSnapshot=true tambem quando o snapshot nao tem nenhum jogo")
+        void deveMarcarOddsDeSnapshotQuandoVazio() {
+            // Sem este caso, a degradacao mais grave — snapshot corrompido ou provedor fora do ar —
+            // seria justamente a que sairia do payload marcada como consulta ao vivo.
+            when(oddsClient.buscarOdds()).thenReturn(OddsComOrigem.deSnapshot(List.of()));
+
+            assertThat(oddsService.buscarFavoritosDetalhado(3.0).isOddsDeSnapshot()).isTrue();
+        }
+
+        @Test
+        @DisplayName("deve marcar oddsDeSnapshot=false em consulta ao vivo")
+        void deveMarcarConsultaAoVivo() {
+            when(oddsClient.buscarOdds())
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+
+            assertThat(oddsService.buscarFavoritosDetalhado(3.0).isOddsDeSnapshot()).isFalse();
+        }
+
+        @Test
         @DisplayName("deve classificar jogo com odd <= limite como favorito")
         void deveClassificarComoFavoritoAbaixoDoLimite() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
 
             var resultado = oddsService.buscarFavoritosDetalhado(3.0);
 
@@ -274,7 +303,7 @@ class OddsServiceTest {
         @DisplayName("deve classificar jogo com odd > limite como descartado")
         void deveClassificarComoDescartadoAcimaDoLimite() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Fortaleza", 3.20, "Bahia", 3.40)));
+                    .thenReturn(aoVivo(jogo("Fortaleza", 3.20, "Bahia", 3.40)));
 
             var resultado = oddsService.buscarFavoritosDetalhado(3.0);
 
@@ -288,7 +317,7 @@ class OddsServiceTest {
         @DisplayName("deve identificar corretamente o time adversario")
         void deveIdentificarAdversario() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.10, "Palmeiras", 3.50)));
 
             var jogo = oddsService.buscarFavoritosDetalhado(3.0).getFavoritos().get(0);
 
@@ -302,7 +331,7 @@ class OddsServiceTest {
         void deveMarcaFavoritoEmCasa() {
             // Flamengo = homeTeam, tem menor odd
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 1.90, "Botafogo", 4.00)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 1.90, "Botafogo", 4.00)));
 
             var jogo = oddsService.buscarFavoritosDetalhado(3.0).getFavoritos().get(0);
 
@@ -314,7 +343,7 @@ class OddsServiceTest {
         void deveMarcaFavoritoForaDeCasa() {
             // Botafogo = awayTeam, tem menor odd
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 3.80, "Botafogo", 2.10)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 3.80, "Botafogo", 2.10)));
 
             var jogo = oddsService.buscarFavoritosDetalhado(3.0).getFavoritos().get(0);
 
@@ -326,7 +355,7 @@ class OddsServiceTest {
         @DisplayName("deve incluir odd do empate no resultado")
         void deveIncluirOddEmpate() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogoComEmpate("Flamengo", 1.90, "Botafogo", 4.00, 3.30)));
+                    .thenReturn(aoVivo(jogoComEmpate("Flamengo", 1.90, "Botafogo", 4.00, 3.30)));
 
             var jogo = oddsService.buscarFavoritosDetalhado(3.0).getFavoritos().get(0);
 
@@ -336,7 +365,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve separar corretamente favoritos e descartados em multiplos jogos")
         void deveSepararFavoritosEDescartados() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of(
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(
                 jogo("Flamengo",  2.10, "Botafogo", 3.50),   // favorito
                 jogo("Palmeiras", 1.85, "Santos",   4.20),   // favorito
                 jogo("Fortaleza", 3.30, "Bahia",    3.40),   // descartado
@@ -355,7 +384,7 @@ class OddsServiceTest {
         @Test
         @DisplayName("deve listar somente jogos da rodada atual no response detalhado")
         void deveListarSomenteJogosDaRodadaAtualNoDetalhado() {
-            when(oddsClient.buscarOdds()).thenReturn(List.of(
+            when(oddsClient.buscarOdds()).thenReturn(aoVivo(
                 jogo("Flamengo", 2.10, "Botafogo", 3.50),
                 jogo("Palmeiras", 1.85, "Santos", 4.20),
                 jogo("Fortaleza", 3.30, "Bahia", 3.40)
@@ -380,7 +409,7 @@ class OddsServiceTest {
         @DisplayName("deve refletir o oddLimite informado no response")
         void deveRefletirOddLimiteInformado() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Flamengo", 2.50, "Palmeiras", 3.50)));
+                    .thenReturn(aoVivo(jogo("Flamengo", 2.50, "Palmeiras", 3.50)));
 
             var comLimite25 = oddsService.buscarFavoritosDetalhado(2.5);
             var comLimite30 = oddsService.buscarFavoritosDetalhado(3.0);
@@ -397,7 +426,7 @@ class OddsServiceTest {
         @DisplayName("deve incluir motivo legivel no jogo descartado")
         void deveIncluirMotivoNoDescarte() {
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogo("Fortaleza", 3.10, "Bahia", 3.50)));
+                    .thenReturn(aoVivo(jogo("Fortaleza", 3.10, "Bahia", 3.50)));
 
             var descartado = oddsService.buscarFavoritosDetalhado(3.0)
                     .getDescartados().get(0);
@@ -413,7 +442,7 @@ class OddsServiceTest {
             var jogoSemBookmaker = new OddsResponse();
             jogoSemBookmaker.setBookmakers(List.of());
             when(oddsClient.buscarOdds())
-                    .thenReturn(List.of(jogoSemBookmaker, jogo("Flamengo", 1.90, "Vasco", 4.0)));
+                    .thenReturn(aoVivo(jogoSemBookmaker, jogo("Flamengo", 1.90, "Vasco", 4.0)));
 
             var resultado = oddsService.buscarFavoritosDetalhado(3.0);
 
@@ -423,6 +452,11 @@ class OddsServiceTest {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    /** Odds vindas de consulta ao vivo — o caso normal na maioria dos cenarios daqui. */
+    private OddsComOrigem aoVivo(OddsResponse... jogos) {
+        return OddsComOrigem.aoVivo(List.of(jogos));
+    }
 
     private ListAppender<ILoggingEvent> capturarAvisos() {
         var appender = new ListAppender<ILoggingEvent>();

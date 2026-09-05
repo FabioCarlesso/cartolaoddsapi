@@ -256,20 +256,51 @@ guardrail `odds.api.min-requests-remaining` (padrão 50), o cliente para de cham
 sem essa parada, a aplicação continuaria gastando cota até o provedor recusar as chamadas.
 
 O fallback é a última resposta bem-sucedida, persistida na tabela `odds_snapshot` (linha única,
-sobrescrita a cada chamada bem-sucedida) em vez de só o cache Caffeine: o cache é apagado a cada
-restart e redeploy, e sem persistência o guardrail ficaria sem nada para servir logo depois de
-subir — justamente o cenário mais comum em produção. Pelo mesmo motivo, antes de decidir se
-chama o provedor, o `OddsClient` primeiro confere se o snapshot persistido ainda está dentro do
-TTL do cache: um restart com cache Caffeine vazio não precisa gastar uma chamada nova se já
-existe uma resposta recente guardada no banco.
+sobrescrita a cada resposta **com jogos**) em vez de só o cache Caffeine: o cache é apagado a
+cada restart e redeploy, e sem persistência o guardrail ficaria sem nada para servir logo depois
+de subir — justamente o cenário mais comum em produção. Uma resposta vazia não sobrescreve nada:
+a The Odds API responde `200 []` fora de temporada, e gravar isso por cima apagaria o único
+fallback que o guardrail tem para o momento em que ele acionar.
+
+Pelo mesmo motivo, na **primeira busca após o boot** o `OddsClient` confere se o snapshot
+persistido ainda está dentro do TTL do cache e, se estiver, dispensa a chamada — um restart com
+cache Caffeine vazio não precisa gastar crédito para redescobrir a mesma resposta. O atalho é
+consumido uma única vez por instância, e essa é a parte que importa: depois dele, todo miss
+significa TTL vencido ou cache limpo à mão, e servir o snapshot de novo transformaria
+`DELETE /api/cache` num comando sem efeito, quando ele é justamente o gatilho manual de gasto
+(agora sujeito ao mesmo guardrail).
+
+O guardrail tem uma válvula: `odds.api.sonda-intervalo-horas` (padrão 24) libera uma chamada por
+intervalo mesmo com o saldo abaixo do mínimo. Sem ela o mecanismo se auto-alimentaria — o saldo
+só é reavaliado quando uma chamada acontece, então barrar todas as chamadas congelaria o último
+saldo conhecido para sempre, e a virada de mês que renova a cota nunca seria percebida sem um
+restart. O intervalo conta a partir da tentativa, não da leitura bem-sucedida, para que um
+provedor fora do ar não transforme cada requisição numa sondagem nova.
+
+O TTL do cache de odds também é decidido por resultado: resposta com jogos vale o TTL cheio,
+resposta vazia vale `odds.api.cache-ttl-degradado-minutos` (padrão 10). Guardar uma lista vazia
+pelos 60 minutos do TTL normal desligaria o filtro de favoritos por uma hora por causa de uma
+falha momentânea; não guardar nada faria cada requisição repetir a chamada, e uma resposta
+legitimamente vazia custa crédito igual. O `@Cacheable` usa `sync = true` pelo mesmo motivo de
+custo: sem ele, N misses simultâneos viram N chamadas pagas para produzir o mesmo valor.
+
+A origem (ao vivo ou snapshot) viaja no próprio valor retornado, `OddsComOrigem`, e não num
+campo do cliente: o resultado é cacheado, e num acerto de cache o método nem chega a executar —
+uma flag de instância descreveria a última *execução* em vez do que aquele chamador recebeu.
 
 Quando uma resposta usa o snapshot — por guardrail ativo, falha do provedor, ou snapshot ainda
 válido logo após um restart —, isso fica explícito no campo `oddsDeSnapshot` de
 `GET /api/favoritos`, e não só no log: a degradação silenciosa era exatamente o problema que
-motivou a issue. Os alertas em log seguem a mesma lógica dos scores desta API: `WARN` ao cruzar
-100 e 50 requisições restantes (aviso cedo, sem virar ruído), `ERROR` quando o guardrail
-efetivamente entra em ação ou quando o provedor falha sem snapshot disponível para cobrir a
-falta.
+motivou a issue. Os alertas em log avisam ao cruzar o **dobro do mínimo configurado** e o
+próprio mínimo — derivados da configuração, e não fixos em 100/50, senão um
+`min-requests-remaining` maior acionaria o guardrail sem nenhum aviso prévio; com o padrão de
+50, os limiares continuam sendo 100 e 50. `ERROR` fica para quando o guardrail efetivamente
+entra em ação ou o provedor falha sem snapshot disponível para cobrir a falta.
+
+A métrica `odds_api_requests_remaining` exporta `NaN` enquanto não houve nenhuma leitura, e não
+o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mínimo" disparar a
+cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
+fica silenciosa até existir dado de verdade.
 
 ### Observabilidade (Spring Actuator + Micrometer)
 
@@ -393,6 +424,8 @@ com.cartola.odds/
 | `ODDS_API_KEY` | — | Chave da The Odds API (obrigatória para filtro por odds) |
 | `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, para de chamar o provedor e serve o último snapshot |
 | `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds`, em minutos |
+| `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` | `10` | TTL de uma resposta de odds sem nenhum jogo |
+| `ODDS_API_SONDA_INTERVALO_HORAS` | `24` | Intervalo mínimo entre sondagens de saldo com o guardrail ativo |
 | `APP_PORT` | `8080` | Porta exposta no host |
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
 | `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
@@ -406,7 +439,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-702 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
+718 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

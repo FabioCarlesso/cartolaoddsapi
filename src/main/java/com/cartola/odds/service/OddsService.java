@@ -54,8 +54,8 @@ public class OddsService {
     }
 
     public Set<String> buscarFavoritos(double oddLimite, Set<String> confrontos) {
-        List<OddsResponse> odds = oddsClient.buscarOdds();
-        var response = processarOdds(odds, oddLimite, confrontos, oddsClient.isVindoDeSnapshot());
+        var resultado = oddsClient.buscarOdds();
+        var response  = processarOdds(resultado.odds(), oddLimite, confrontos, resultado.deSnapshot());
         return response.getFavoritos().stream()
                 .map(j -> NormalizadorUtil.normalizar(j.getTimeFavorito()))
                 .collect(Collectors.toUnmodifiableSet());
@@ -65,8 +65,9 @@ public class OddsService {
 
     public FavoritosResponse buscarFavoritosDetalhado(double oddLimite) {
         log.info("Buscando favoritos detalhado | oddLimite={}", oddLimite);
-        List<OddsResponse> odds = oddsClient.buscarOdds();
-        boolean oddsDeSnapshot = oddsClient.isVindoDeSnapshot();
+        var resultado = oddsClient.buscarOdds();
+        List<OddsResponse> odds = resultado.odds();
+        boolean oddsDeSnapshot  = resultado.deSnapshot();
 
         if (odds.isEmpty()) {
             log.warn("Nenhuma odd disponivel da API.");

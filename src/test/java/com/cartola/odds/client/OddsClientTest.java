@@ -1,8 +1,11 @@
 package com.cartola.odds.client;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.cartola.odds.config.OddsProperties;
 import com.cartola.odds.model.OddsSnapshot;
-import com.cartola.odds.model.response.OddsResponse;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -13,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -22,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -31,9 +37,11 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
- * Guardrail de cota (#40): leitura dos headers de saldo, contagem de chamadas/erros,
- * queda para o snapshot persistido quando o guardrail entra em acao ou o provedor falha,
- * e uso do snapshot sem chamar o provedor quando ele ainda esta dentro do TTL do cache.
+ * Guardrail de cota (#40).
+ *
+ * <p>Onde um caso <strong>nao</strong> registra expectativa no {@link MockRestServiceServer},
+ * a ausencia e a propria assercao: uma chamada inesperada ao provedor faz o mock falhar na
+ * hora. E o que prova "nao gastou cota" sem depender de um contador.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("OddsClient")
@@ -48,6 +56,7 @@ class OddsClientTest {
     private MockRestServiceServer server;
     private OddsClient            oddsClient;
     private OddsProperties        props;
+    private SimpleMeterRegistry   meterRegistry;
 
     @BeforeEach
     void setUp() {
@@ -59,12 +68,15 @@ class OddsClientTest {
         props.setMarkets("h2h");
         props.setMinRequestsRemaining(50);
         props.setCacheTtlMinutos(60);
+        props.setCacheTtlDegradadoMinutos(10);
+        props.setSondaIntervaloHoras(24);
 
         var builder = RestClient.builder().baseUrl(props.getBaseUrl());
         server = MockRestServiceServer.bindTo(builder).build();
-        var restClient = builder.build();
+        meterRegistry = new SimpleMeterRegistry();
 
-        oddsClient = new OddsClient(restClient, props, snapshotRepository, new ObjectMapper(), new SimpleMeterRegistry());
+        oddsClient = new OddsClient(builder.build(), props, snapshotRepository,
+                new ObjectMapper(), meterRegistry);
     }
 
     @Nested
@@ -79,9 +91,7 @@ class OddsClientTest {
         @Test
         @DisplayName("deve expor saldo e consumo lidos dos headers x-requests-remaining/x-requests-used")
         void deveExporSaldoEConsumo() {
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/sports/soccer_brazil_campeonato/odds")))
-                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON)
-                            .headers(headers("412", "88")));
+            responderComCota("412", "88");
 
             oddsClient.buscarOdds();
 
@@ -94,13 +104,69 @@ class OddsClientTest {
         @Test
         @DisplayName("deve manter saldo nulo quando a resposta nao traz os headers de cota")
         void deveManterNuloSemHeaders() {
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/odds")))
+            server.expect(requestTo(containsString("/odds")))
                     .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON));
 
             oddsClient.buscarOdds();
 
             assertThat(oddsClient.getRequestsRemaining()).isNull();
             assertThat(oddsClient.getRequestsUsed()).isNull();
+        }
+
+        @Test
+        @DisplayName("deve ignorar header de cota com valor nao numerico, sem quebrar a busca")
+        void deveIgnorarHeaderInvalido() {
+            responderComCota("nao-e-numero", "88");
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).hasSize(1);
+            assertThat(oddsClient.getRequestsRemaining()).isNull();
+            assertThat(oddsClient.getRequestsUsed()).isEqualTo(88L);
+        }
+    }
+
+    @Nested
+    @DisplayName("atalho de snapshot no boot")
+    class AtalhoDeBoot {
+
+        @Test
+        @DisplayName("deve servir o snapshot dentro do TTL na primeira busca, sem chamar o provedor")
+        void deveServirSnapshotNaPrimeiraBusca() {
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusMinutes(5));
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).hasSize(1);
+            assertThat(resultado.deSnapshot()).isTrue();
+        }
+
+        @Test
+        @DisplayName("deve chamar o provedor na busca seguinte, mesmo com snapshot fresco — e o DELETE /api/cache")
+        void deveChamarProvedorNaSegundaBusca() {
+            // O atalho existe para o cache frio de um restart. Uma segunda busca so acontece
+            // quando o TTL venceu ou quando alguem limpou o cache de proposito, e nos dois
+            // casos servir o snapshot de novo tornaria DELETE /api/cache um comando sem efeito.
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusMinutes(5));
+            oddsClient.buscarOdds();
+
+            responderComCota("412", "88");
+            var resultado = oddsClient.buscarOdds();
+
+            server.verify();
+            assertThat(resultado.deSnapshot()).isFalse();
+        }
+
+        @Test
+        @DisplayName("deve chamar o provedor ja na primeira busca quando o snapshot esta alem do TTL")
+        void deveChamarProvedorComSnapshotVencido() {
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusMinutes(120));
+            responderComCota("300", "200");
+
+            var resultado = oddsClient.buscarOdds();
+
+            server.verify();
+            assertThat(resultado.deSnapshot()).isFalse();
         }
     }
 
@@ -110,47 +176,71 @@ class OddsClientTest {
 
         @Test
         @DisplayName("nao deve chamar o provedor quando o saldo conhecido esta abaixo do minimo")
-        void naoDeveChamarProvedorComSaldoBaixo() throws Exception {
-            simularSaldoConhecido(30);
-            var snapshot = snapshotDe("[]", LocalDateTime.now().minusDays(1));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
+        void naoDeveChamarProvedorComSaldoBaixo() {
+            comSaldoConhecido(30);
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
 
-            oddsClient.buscarOdds();
+            var resultado = oddsClient.buscarOdds();
 
-            server.verify();
             assertThat(oddsClient.isGuardrailAtivo()).isTrue();
+            assertThat(resultado.deSnapshot()).isTrue();
+            assertThat(resultado.odds()).hasSize(1);
         }
 
         @Test
-        @DisplayName("deve servir o snapshot persistido quando o guardrail esta ativo")
-        void deveServirSnapshotComGuardrailAtivo() throws Exception {
-            simularSaldoConhecido(10);
-            var snapshot = snapshotDe(JOGO_JSON, LocalDateTime.now().minusDays(1));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
+        @DisplayName("deve barrar tambem a busca disparada por limpeza manual do cache")
+        void deveBarrarAposLimpezaDeCache() {
+            // DELETE /api/cache passa a respeitar o mesmo limite: sem isto, o gatilho manual
+            // seria uma porta lateral para furar o guardrail.
+            comSaldoConhecido(30);
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
 
-            List<OddsResponse> odds = oddsClient.buscarOdds();
+            oddsClient.buscarOdds();
+            var segunda = oddsClient.buscarOdds();
 
-            assertThat(odds).hasSize(1);
-            assertThat(oddsClient.isVindoDeSnapshot()).isTrue();
+            assertThat(segunda.deSnapshot()).isTrue();
         }
 
         @Test
         @DisplayName("deve devolver lista vazia quando o guardrail esta ativo e nao ha snapshot")
         void deveDevolverVazioSemSnapshot() {
-            simularSaldoConhecido(10);
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            comSaldoConhecido(10);
 
-            assertThat(oddsClient.buscarOdds()).isEmpty();
-            server.verify();
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).isEmpty();
+            assertThat(resultado.deSnapshot()).isFalse();
         }
 
-        private void simularSaldoConhecido(long remanescente) {
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/odds")))
-                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON)
-                            .headers(headers(String.valueOf(remanescente), "10")));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
-            oddsClient.buscarOdds();
-            server.reset();
+        @Test
+        @DisplayName("deve liberar uma sondagem quando a ultima leitura de cota ja esta velha")
+        void deveLiberarSondagem() {
+            // Sem sondagem o guardrail se auto-alimenta: barra, o saldo nunca e reavaliado,
+            // continua barrando — e a virada de mes que renova a cota so apareceria num restart.
+            props.setSondaIntervaloHoras(0);
+            comSaldoConhecido(30);
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
+
+            responderComCota("500", "0");
+            var resultado = oddsClient.buscarOdds();
+
+            server.verify();
+            assertThat(resultado.deSnapshot()).isFalse();
+            assertThat(oddsClient.getRequestsRemaining()).isEqualTo(500L);
+            assertThat(oddsClient.isGuardrailAtivo()).isFalse();
+        }
+
+        @Test
+        @DisplayName("nao deve sondar enquanto a leitura de cota ainda esta dentro do intervalo")
+        void naoDeveSondarDentroDoIntervalo() {
+            // A sondagem e a valvula do guardrail, nao um furo nele: com o saldo lido ha
+            // instantes, nenhuma chamada nova se justifica.
+            comSaldoConhecido(30);
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.deSnapshot()).isTrue();
         }
     }
 
@@ -160,77 +250,190 @@ class OddsClientTest {
 
         @Test
         @DisplayName("deve servir o snapshot persistido quando o provedor responde erro")
-        void deveServirSnapshotAposErro() throws Exception {
-            var snapshot = snapshotDe(JOGO_JSON, LocalDateTime.now().minusDays(1));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
+        void deveServirSnapshotAposErro() {
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusMinutes(120));
+            server.expect(requestTo(containsString("/odds"))).andRespond(withServerError());
 
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/odds")))
-                    .andRespond(withServerError());
+            var resultado = oddsClient.buscarOdds();
 
-            List<OddsResponse> odds = oddsClient.buscarOdds();
-
-            assertThat(odds).hasSize(1);
-            assertThat(oddsClient.isVindoDeSnapshot()).isTrue();
+            assertThat(resultado.odds()).hasSize(1);
+            assertThat(resultado.deSnapshot()).isTrue();
         }
 
         @Test
         @DisplayName("deve devolver lista vazia quando o provedor falha e nao ha snapshot")
         void deveDevolverVazioSemSnapshotAposErro() {
             when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            server.expect(requestTo(containsString("/odds"))).andRespond(withServerError());
 
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/odds")))
-                    .andRespond(withServerError());
+            assertThat(oddsClient.buscarOdds().odds()).isEmpty();
+        }
 
-            assertThat(oddsClient.buscarOdds()).isEmpty();
+        @Test
+        @DisplayName("deve devolver lista vazia quando o snapshot persistido esta corrompido")
+        void deveDevolverVazioComSnapshotCorrompido() {
+            comSnapshot("{ isto nao e uma lista de odds", LocalDateTime.now().minusMinutes(5));
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).isEmpty();
+            assertThat(resultado.deSnapshot()).isTrue();
         }
     }
 
     @Nested
-    @DisplayName("snapshot dentro do TTL")
-    class SnapshotDentroDoTtl {
+    @DisplayName("persistencia do snapshot")
+    class PersistenciaDoSnapshot {
 
         @Test
-        @DisplayName("nao deve chamar o provedor quando o snapshot ainda esta dentro do TTL do cache")
-        void naoDeveChamarProvedorComSnapshotFresco() throws Exception {
-            var snapshot = snapshotDe(JOGO_JSON, LocalDateTime.now().minusMinutes(5));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
-
-            List<OddsResponse> odds = oddsClient.buscarOdds();
-
-            server.verify();
-            assertThat(odds).hasSize(1);
-            assertThat(oddsClient.isVindoDeSnapshot()).isTrue();
-        }
-
-        @Test
-        @DisplayName("deve chamar o provedor quando o snapshot esta alem do TTL do cache")
-        void deveChamarProvedorComSnapshotVencido() throws Exception {
-            var snapshot = snapshotDe(JOGO_JSON, LocalDateTime.now().minusMinutes(120));
-            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
-
-            server.expect(requestTo(org.hamcrest.Matchers.containsString("/odds")))
-                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON)
-                            .headers(headers("300", "200")));
+        @DisplayName("deve persistir o snapshot quando o provedor responde com jogos")
+        void devePersistirComJogos() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            responderComCota("412", "88");
 
             oddsClient.buscarOdds();
 
-            server.verify();
-            assertThat(oddsClient.isVindoDeSnapshot()).isFalse();
+            verify(snapshotRepository).save(any(OddsSnapshot.class));
+        }
+
+        @Test
+        @DisplayName("nao deve sobrescrever o snapshot quando o provedor responde sem nenhum jogo")
+        void naoDeveSobrescreverComRespostaVazia() {
+            // Uma lista vazia gravada por cima destruiria o unico fallback que o guardrail tem
+            // para servir depois — e a The Odds API responde 200 com [] fora de temporada.
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusMinutes(120));
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON).headers(cota("412", "88")));
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).isEmpty();
+            verify(snapshotRepository, never()).save(any(OddsSnapshot.class));
         }
     }
 
-    private OddsSnapshot snapshotDe(String json, LocalDateTime criadoEm) {
+    @Nested
+    @DisplayName("metricas")
+    class Metricas {
+
+        @Test
+        @DisplayName("gauge de saldo deve ficar NaN enquanto nao houve leitura, para nao disparar alerta no deploy")
+        void gaugeDeveSerNaNSemLeitura() {
+            assertThat(saldoNoGauge()).isNaN();
+        }
+
+        @Test
+        @DisplayName("gauge de saldo deve refletir o valor lido do provedor")
+        void gaugeDeveRefletirSaldo() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            responderComCota("412", "88");
+
+            oddsClient.buscarOdds();
+
+            assertThat(saldoNoGauge()).isEqualTo(412.0);
+        }
+
+        @Test
+        @DisplayName("deve contar chamadas feitas e erros do provedor")
+        void deveContarChamadasEErros() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            responderComCota("412", "88");
+            oddsClient.buscarOdds();
+
+            server.reset();
+            server.expect(requestTo(containsString("/odds"))).andRespond(withServerError());
+            oddsClient.buscarOdds();
+
+            assertThat(meterRegistry.counter("odds_api_requests_total").count()).isEqualTo(1.0);
+            assertThat(meterRegistry.counter("odds_api_errors_total").count()).isEqualTo(1.0);
+        }
+
+        private double saldoNoGauge() {
+            return meterRegistry.get("odds_api_requests_remaining").gauge().value();
+        }
+    }
+
+    @Nested
+    @DisplayName("limiares de aviso")
+    class LimiaresDeAviso {
+
+        @Test
+        @DisplayName("deve avisar ao cruzar o dobro do minimo e depois o proprio minimo configurado")
+        void deveAvisarNosLimiaresDerivadosDoMinimo() {
+            // Limiares fixos em 100/50 deixariam um min-requests-remaining=100 acionar o
+            // guardrail sem nenhum aviso previo.
+            props.setMinRequestsRemaining(100);
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+
+            var appender = capturarAvisos();
+            try {
+                responderComCota("250", "250");
+                oddsClient.buscarOdds();
+                assertThat(avisos(appender)).isEmpty();
+
+                server.reset();
+                responderComCota("150", "350");
+                oddsClient.buscarOdds();
+                assertThat(avisos(appender)).hasSize(1);
+                assertThat(avisos(appender).get(0)).contains("cruzou 200");
+
+                server.reset();
+                responderComCota("90", "410");
+                oddsClient.buscarOdds();
+                assertThat(avisos(appender)).hasSize(2);
+                assertThat(avisos(appender).get(1)).contains("cruzou 100");
+            } finally {
+                pararCaptura(appender);
+            }
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    /** Deixa um saldo abaixo do minimo ja conhecido, como se uma chamada anterior o tivesse lido. */
+    private void comSaldoConhecido(long remanescente) {
+        when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+        responderComCota(String.valueOf(remanescente), "10");
+        oddsClient.buscarOdds();
+        server.reset();
+    }
+
+    private void comSnapshot(String json, LocalDateTime criadoEm) {
         var snapshot = new OddsSnapshot();
         snapshot.setId(OddsSnapshot.ID_UNICO);
         snapshot.setOddsJson(json);
         snapshot.setCriadoEm(criadoEm);
-        return snapshot;
+        when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.of(snapshot));
     }
 
-    private org.springframework.http.HttpHeaders headers(String remaining, String used) {
-        var headers = new org.springframework.http.HttpHeaders();
+    private void responderComCota(String remaining, String used) {
+        server.expect(requestTo(containsString("/sports/soccer_brazil_campeonato/odds")))
+                .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON).headers(cota(remaining, used)));
+    }
+
+    private HttpHeaders cota(String remaining, String used) {
+        var headers = new HttpHeaders();
         headers.add("x-requests-remaining", remaining);
         headers.add("x-requests-used", used);
         return headers;
+    }
+
+    private ListAppender<ILoggingEvent> capturarAvisos() {
+        var appender = new ListAppender<ILoggingEvent>();
+        appender.start();
+        ((Logger) LoggerFactory.getLogger(OddsClient.class)).addAppender(appender);
+        return appender;
+    }
+
+    private void pararCaptura(ListAppender<ILoggingEvent> appender) {
+        ((Logger) LoggerFactory.getLogger(OddsClient.class)).detachAppender(appender);
+    }
+
+    private List<String> avisos(ListAppender<ILoggingEvent> appender) {
+        return appender.list.stream()
+                .filter(e -> e.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage)
+                .filter(m -> m.contains("cruzou"))
+                .toList();
     }
 }

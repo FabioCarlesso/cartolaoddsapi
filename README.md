@@ -191,6 +191,8 @@ odds.api.key=SUA_API_KEY_AQUI
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas para CORS, separadas por vírgula |
 | `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, o cliente para de chamar a The Odds API e serve o último snapshot conhecido |
 | `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds` em minutos |
+| `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` | `10` | TTL de uma resposta de odds **sem nenhum jogo** (provedor fora do ar, fora de temporada) |
+| `ODDS_API_SONDA_INTERVALO_HORAS` | `24` | Com o guardrail ativo, intervalo mínimo entre chamadas de sondagem que reavaliam o saldo |
 
 > **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
@@ -217,11 +219,25 @@ devolve o saldo restante em todo response, nos headers `x-requests-remaining` e
   `OddsClient` para de chamar o provedor e passa a servir a **última resposta conhecida**,
   persistida na tabela `odds_snapshot` — o que faz o fallback sobreviver a restart e redeploy,
   em vez de depender só do cache Caffeine em memória (zerado a cada boot).
-- Log em `WARN` quando o saldo cruza os limiares de 100 e 50 requisições restantes, e em
-  `ERROR` quando o guardrail entra em ação ou quando o provedor falha sem snapshot disponível.
+- **Sondagem** `odds.api.sonda-intervalo-horas` (padrão `24`): com o guardrail ativo, uma
+  chamada por intervalo é liberada para reavaliar o saldo. Sem ela o guardrail se auto-alimenta
+  — barra, o saldo nunca é relido, continua barrando — e a virada de mês que renova a cota só
+  apareceria num restart.
+- Log em `WARN` quando o saldo cruza o **dobro do mínimo** e o próprio mínimo configurado (com
+  o padrão de `50`, os limiares são 100 e 50), e em `ERROR` quando o guardrail entra em ação ou
+  quando o provedor falha sem snapshot disponível.
 - Quando uma resposta usa o snapshot em vez de uma consulta ao vivo — por guardrail ativo, falha
-  no provedor, ou snapshot ainda dentro do TTL logo após um restart —, isso fica explícito no
-  campo `oddsDeSnapshot` de `GET /api/favoritos`.
+  no provedor, ou snapshot ainda dentro do TTL na primeira busca após um restart —, isso fica
+  explícito no campo `oddsDeSnapshot` de `GET /api/favoritos`.
+
+O atalho de snapshot vale **apenas na primeira busca após o boot**, que é o caso que ele existe
+para cobrir (cache Caffeine frio depois de um redeploy). Depois disso, todo miss de cache — TTL
+vencido ou `DELETE /api/cache` — chega ao provedor, sujeito ao guardrail: o endpoint de
+invalidação continua sendo o gatilho manual de gasto que sempre foi, agora respeitando o limite.
+
+Uma resposta **sem nenhum jogo** nunca sobrescreve o snapshot (isso destruiria o único fallback)
+e fica no cache só por `odds.api.cache-ttl-degradado-minutos` (padrão `10`), para que uma falha
+momentânea do provedor não desligue o filtro de favoritos pela hora inteira do TTL normal.
 
 > **Custo por chamada:** a The Odds API cobra por requisição **por região e por mercado**. Com
 > `odds.api.regions=us` e `odds.api.markets=h2h` (um valor em cada), cada chamada custa 1

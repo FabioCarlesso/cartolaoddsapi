@@ -30,4 +30,20 @@ public class OddsProperties {
      * minutos, e um TTL curto multiplica o consumo de cota sem ganho real.
      */
     private int cacheTtlMinutos = 60;
+
+    /**
+     * TTL, em minutos, de uma resposta <em>degradada</em> (sem nenhum jogo) no cache
+     * {@code odds}. Existe separado do TTL normal porque os dois erram para lados opostos:
+     * guardar uma lista vazia pelo TTL cheio desliga o filtro de favoritos por uma hora por
+     * causa de uma falha momentanea, e nao guardar nada faria cada requisicao repetir a
+     * chamada — e uma resposta legitimamente vazia (fora de temporada) custa credito igual.
+     */
+    private int cacheTtlDegradadoMinutos = 10;
+
+    /**
+     * Intervalo minimo, em horas, entre chamadas de sondagem com o guardrail ativo. O saldo
+     * so e reavaliado quando uma chamada acontece, entao sem sondagem o guardrail nunca
+     * perceberia a virada de mes que renova a cota — ficaria travado ate um restart.
+     */
+    private int sondaIntervaloHoras = 24;
 }
