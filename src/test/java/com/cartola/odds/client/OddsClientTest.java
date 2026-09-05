@@ -251,8 +251,10 @@ class OddsClientTest {
         void deveLiberarSondagem() {
             // Sem sondagem o guardrail se auto-alimenta: barra, o saldo nunca e reavaliado,
             // continua barrando — e a virada de mes que renova a cota so apareceria num restart.
-            props.setSondaIntervaloHoras(0);
-            comSaldoConhecido(30);
+            // O saldo velho chega pelo estado persistido, e nao por um intervalo zerado: zero
+            // nao e configuracao valida (OddsPropertiesValidacaoTest), e uma leitura de ontem
+            // com o intervalo padrao de 24h e exatamente o cenario da virada de mes.
+            comSaldoLidoHa(30, LocalDateTime.now().minusHours(25));
             comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
 
             responderComCota("500", "0");
@@ -262,6 +264,26 @@ class OddsClientTest {
             assertThat(resultado.deSnapshot()).isFalse();
             assertThat(oddsClient.getRequestsRemaining()).isEqualTo(500L);
             assertThat(oddsClient.isGuardrailAtivo()).isFalse();
+        }
+
+        @Test
+        @DisplayName("deve informar quando a proxima sondagem libera uma chamada")
+        void deveInformarProximaSondagem() {
+            // E o que /api/odds/cota devolve em proximaSondagem: com o guardrail armado, quando
+            // ele se destrava sozinho. Sem isso, so o log sabia.
+            var leitura = LocalDateTime.now().minusHours(2);
+            comSaldoLidoHa(30, leitura);
+
+            assertThat(oddsClient.getProximaSondagem())
+                    .isEqualTo(leitura.plusHours(props.getSondaIntervaloHoras()));
+        }
+
+        @Test
+        @DisplayName("proxima sondagem deve ser nula quando nao ha leitura nem sondagem anterior")
+        void proximaSondagemNulaSemReferencia() {
+            // Sem referencia nenhuma nao ha janela a esperar: a proxima busca ja sonda.
+            assertThat(oddsClient.getProximaSondagem()).isNull();
+            assertThat(oddsClient.getUltimaSondagem()).isNull();
         }
 
         @Test
@@ -436,8 +458,12 @@ class OddsClientTest {
         }
 
         @Test
-        @DisplayName("deve contar chamadas feitas e erros do provedor")
+        @DisplayName("deve contar toda chamada feita ao provedor, inclusive a que terminou em erro")
         void deveContarChamadasEErros() {
+            // O contador mede tentativas, nao sucessos: o provedor cobra pela chamada, e a
+            // recusa por cota estourada — o evento que este guardrail existe para tornar
+            // visivel — so acontece no caminho de erro. Contando so o sucesso, ela ficaria de
+            // fora justamente do contador de consumo, e errors/requests deixaria de ser taxa.
             when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
             responderComCota("412", "88");
             oddsClient.buscarOdds();
@@ -446,12 +472,29 @@ class OddsClientTest {
             server.expect(requestTo(containsString("/odds"))).andRespond(withServerError());
             oddsClient.buscarOdds();
 
-            assertThat(meterRegistry.counter("odds_api_requests_total").count()).isEqualTo(1.0);
-            assertThat(meterRegistry.counter("odds_api_errors_total").count()).isEqualTo(1.0);
+            assertThat(contador(OddsClient.METRICA_REQUESTS)).isEqualTo(2.0);
+            assertThat(contador(OddsClient.METRICA_ERRORS)).isEqualTo(1.0);
+        }
+
+        @Test
+        @DisplayName("nao deve contar chamada quando o guardrail barrou antes de sair da aplicacao")
+        void naoDeveContarChamadaBarradaPeloGuardrail() {
+            // A contrapartida de contar na tentativa: so conta o que de fato virou requisicao.
+            comSaldoConhecido(10);
+            comSnapshot(JOGO_JSON, LocalDateTime.now());
+            double antes = contador(OddsClient.METRICA_REQUESTS);
+
+            oddsClient.buscarOdds();
+
+            assertThat(contador(OddsClient.METRICA_REQUESTS)).isEqualTo(antes);
         }
 
         private double saldoNoGauge() {
-            return meterRegistry.get("odds_api_requests_remaining").gauge().value();
+            return meterRegistry.get(OddsClient.METRICA_REMAINING).gauge().value();
+        }
+
+        private double contador(String nome) {
+            return meterRegistry.get(nome).counter().count();
         }
     }
 
@@ -491,6 +534,20 @@ class OddsClientTest {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Deixa um saldo conhecido lido num instante especifico, pela via do estado persistido —
+     * o unico jeito de datar a leitura sem esperar o relogio andar.
+     */
+    private void comSaldoLidoHa(long remanescente, LocalDateTime leitura) {
+        var cota = new OddsCota();
+        cota.setId(OddsCota.ID_UNICO);
+        cota.setRequestsRemaining(remanescente);
+        cota.setRequestsUsed(500L - remanescente);
+        cota.setUltimaLeitura(leitura);
+        when(cotaRepository.findById(OddsCota.ID_UNICO)).thenReturn(Optional.of(cota));
+        oddsClient.carregarCotaPersistida();
+    }
 
     /** Deixa um saldo abaixo do minimo ja conhecido, como se uma chamada anterior o tivesse lido. */
     private void comSaldoConhecido(long remanescente) {

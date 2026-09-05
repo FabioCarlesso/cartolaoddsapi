@@ -29,7 +29,10 @@ public interface OddsCotaApi {
             o guardrail de cota (odds.api.min-requests-remaining) esta ativo.
 
             Com o guardrail ativo, o OddsClient para de chamar o provedor e passa a servir a
-            ultima resposta conhecida, persistida em odds_snapshot.
+            ultima resposta conhecida, persistida em odds_snapshot. Nesse estado,
+            proximaSondagem diz quando uma chamada volta a ser liberada para reavaliar o saldo
+            (odds.api.sonda-intervalo-horas) — ou seja, quando o guardrail pode se destravar
+            sozinho, sem intervencao.
             """
     )
     @ApiResponses({

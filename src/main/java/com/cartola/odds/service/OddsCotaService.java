@@ -20,6 +20,8 @@ public class OddsCotaService {
                 .ultimaLeitura(oddsClient.getUltimaLeitura())
                 .minRequestsRemaining(oddsProperties.getMinRequestsRemaining())
                 .guardrailAtivo(oddsClient.isGuardrailAtivo())
+                .ultimaSondagem(oddsClient.getUltimaSondagem())
+                .proximaSondagem(oddsClient.getProximaSondagem())
                 .build();
     }
 }

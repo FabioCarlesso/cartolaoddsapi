@@ -255,7 +255,12 @@ onde o saldo real aparece quando a cota estoura: lendo só no caminho de sucesso
 congelado no último valor saudável e o guardrail nunca armaria justamente no caso em que ele
 existe para agir. O último valor conhecido é exposto por `GET /api/odds/cota` (restrito a
 `ADMIN`) e pelas métricas Micrometer `odds_api_requests_total`, `odds_api_requests_remaining` e
-`odds_api_errors_total`. Abaixo do guardrail `odds.api.min-requests-remaining` (padrão 50), o
+`odds_api_errors_total`. Os contadores medem **tentativas**, não sucessos: o provedor cobra pela
+chamada, e a recusa por cota estourada só existe no caminho de erro — contá-la fora do total
+deixaria justo esse evento de fora do contador de consumo, e `errors/requests` deixaria de ser
+uma taxa. Os nomes são declarados na convenção pontuada do Micrometer (`odds.api.requests`), com
+a tradução para o formato do Prometheus fixada por teste, porque é por `odds_api_requests_total`
+que dashboard e alerta perguntam. Abaixo do guardrail `odds.api.min-requests-remaining` (padrão 50), o
 cliente para de chamar o provedor — sem essa parada, a aplicação continuaria gastando cota até
 o provedor recusar as chamadas.
 
@@ -286,7 +291,18 @@ intervalo mesmo com o saldo abaixo do mínimo. Sem ela o mecanismo se auto-alime
 só é reavaliado quando uma chamada acontece, então barrar todas as chamadas congelaria o último
 saldo conhecido para sempre, e a virada de mês que renova a cota nunca seria percebida sem um
 restart. O intervalo conta a partir da tentativa, não da leitura bem-sucedida, para que um
-provedor fora do ar não transforme cada requisição numa sondagem nova.
+provedor fora do ar não transforme cada requisição numa sondagem nova. `GET /api/odds/cota`
+devolve essa janela em `proximaSondagem`: com o guardrail armado, é a única pergunta que sobra
+para quem está olhando — quando isso volta sozinho —, e antes disso a resposta só existia no log.
+
+As propriedades do guardrail são recusadas no boot quando não descrevem configuração válida:
+mínimo `1` em todas (`sonda-intervalo-horas=0` faria de toda requisição uma sondagem, gastando
+exatamente a cota que o mecanismo preserva) e `cache-ttl-degradado-minutos` menor ou igual a
+`cache-ttl-minutos`, já que o degradado é um piso dentro do cheio. Invertidos, o cálculo de
+validade do cache receberia um intervalo de cabeça para baixo — e esse cálculo roda dentro da
+escrita no cache, sob `@Cacheable`: o erro viraria `500` em `/api/favoritos`, `/api/time` e
+`/api/ranking`, a cada requisição e depois de o crédito já ter sido gasto. Recusar no boot custa
+um restart e diz qual propriedade está errada.
 
 O TTL do cache de odds também é decidido por resultado: resposta com jogos vale **o que resta**
 do TTL cheio, contado do instante em que o provedor produziu aquelas odds (`obtidoEm`, carregado
@@ -454,7 +470,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-726 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
+739 cenários distribuídos em 42 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

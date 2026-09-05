@@ -56,6 +56,16 @@ public class OddsClient {
     /** Sentinela de "nenhuma leitura de cota ainda" — nao pode ser um saldo real. */
     private static final long SEM_LEITURA = -1L;
 
+    /**
+     * Nomes das metricas na convencao pontuada do Micrometer. No Prometheus eles saem como
+     * {@code odds_api_requests_total}, {@code odds_api_errors_total} e
+     * {@code odds_api_requests_remaining} — os nomes documentados no README e usados em
+     * alerta, fixados por teste para que a traducao nunca mude sem alguem notar.
+     */
+    static final String METRICA_REQUESTS  = "odds.api.requests";
+    static final String METRICA_ERRORS    = "odds.api.errors";
+    static final String METRICA_REMAINING = "odds.api.requests.remaining";
+
     private final RestClient             restClient;
     private final OddsProperties         props;
     private final OddsSnapshotRepository snapshotRepository;
@@ -90,12 +100,23 @@ public class OddsClient {
         this.snapshotRepository = snapshotRepository;
         this.cotaRepository     = cotaRepository;
         this.objectMapper       = objectMapper;
-        this.requestsTotal = meterRegistry.counter("odds_api_requests_total");
-        this.errorsTotal   = meterRegistry.counter("odds_api_errors_total");
+        // Nomes na convencao do Micrometer (pontuada), e nao ja no formato do Prometheus: cada
+        // registry aplica a propria traducao, e o codigo nao fica preso ao exporter da vez. Na
+        // exposicao o resultado e identico ao anterior — odds_api_requests_total,
+        // odds_api_errors_total e odds_api_requests_remaining —, o que o
+        // MetricasOddsPrometheusTest fixa, porque e por esses nomes que dashboard e alerta
+        // perguntam.
+        this.requestsTotal = Counter.builder(METRICA_REQUESTS)
+                .description("Chamadas feitas a The Odds API, contadas na tentativa: uma chamada "
+                        + "que falha consumiu a tentativa igual e precisa aparecer no total")
+                .register(meterRegistry);
+        this.errorsTotal = Counter.builder(METRICA_ERRORS)
+                .description("Chamadas a The Odds API que terminaram em erro")
+                .register(meterRegistry);
         // NaN, e nao o sentinela, enquanto nao houve leitura: um -1 exportado faria todo
         // alerta de "saldo < minimo" disparar a cada deploy, antes da primeira chamada.
         // Comparacao com NaN e falsa no PromQL, entao a serie fica silenciosa ate haver dado.
-        Gauge.builder("odds_api_requests_remaining", this, OddsClient::saldoParaMetrica)
+        Gauge.builder(METRICA_REMAINING, this, OddsClient::saldoParaMetrica)
                 .description("Saldo de requisicoes restantes informado pela The Odds API")
                 .register(meterRegistry);
     }
@@ -179,6 +200,22 @@ public class OddsClient {
         return ultimaLeitura.get();
     }
 
+    /** Instante da ultima chamada de sondagem liberada pelo guardrail, ou {@code null} se nunca houve. */
+    public LocalDateTime getUltimaSondagem() {
+        return ultimaSondagem.get();
+    }
+
+    /**
+     * Quando a proxima sondagem libera uma chamada ao provedor. Com o guardrail ativo, e a
+     * resposta para a unica pergunta que o operador tem ao ver {@code guardrailAtivo: true} —
+     * quando isso destrava sozinho. {@code null} quando nao ha referencia nenhuma (sem leitura
+     * e sem sondagem): ai a proxima busca ja sonda.
+     */
+    public LocalDateTime getProximaSondagem() {
+        var referencia = referenciaDaSondagem();
+        return referencia == null ? null : referencia.plusHours(props.getSondaIntervaloHoras());
+    }
+
     /** {@code true} quando o saldo conhecido esta abaixo do minimo configurado. */
     public boolean isGuardrailAtivo() {
         long valor = requestsRemaining.get();
@@ -206,6 +243,13 @@ public class OddsClient {
             var uri = "/sports/%s/odds".formatted(props.getSport());
             log.debug("Buscando odds: {}", uri);
 
+            // Contado na tentativa, nao no sucesso. O provedor cobra pela chamada, e a chamada
+            // recusada por cota estourada — o evento que este guardrail existe para tornar
+            // visivel — nunca chega ao caminho de sucesso: contando la, ela ficaria de fora
+            // justamente do contador de consumo. Contando aqui, requests continua sendo o total
+            // e errors um subconjunto dele, que e o que faz errors/requests ser uma taxa.
+            requestsTotal.increment();
+
             var resposta = restClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path(uri)
@@ -216,7 +260,6 @@ public class OddsClient {
                     .retrieve()
                     .toEntity(new ParameterizedTypeReference<List<OddsResponse>>() {});
 
-            requestsTotal.increment();
             registrarCota(resposta.getHeaders());
 
             List<OddsResponse> odds = resposta.getBody() != null ? resposta.getBody() : Collections.emptyList();
@@ -262,9 +305,8 @@ public class OddsClient {
     private boolean guardrailBloqueia() {
         if (!isGuardrailAtivo()) return false;
 
-        var referencia = maisRecente(ultimaLeitura.get(), ultimaSondagem.get());
-        boolean sondagemVencida = referencia == null
-                || referencia.plusHours(props.getSondaIntervaloHoras()).isBefore(LocalDateTime.now());
+        var proxima = getProximaSondagem();
+        boolean sondagemVencida = proxima == null || proxima.isBefore(LocalDateTime.now());
 
         if (sondagemVencida) {
             ultimaSondagem.set(LocalDateTime.now());
@@ -275,6 +317,15 @@ public class OddsClient {
             return false;
         }
         return true;
+    }
+
+    /**
+     * De onde o intervalo de sondagem e contado: a noticia mais recente que temos da cota, seja
+     * uma leitura de header, seja uma tentativa que nao trouxe nada. Contar da tentativa e o que
+     * impede um provedor fora do ar de transformar cada requisicao numa sondagem nova.
+     */
+    private LocalDateTime referenciaDaSondagem() {
+        return maisRecente(ultimaLeitura.get(), ultimaSondagem.get());
     }
 
     private static LocalDateTime maisRecente(LocalDateTime a, LocalDateTime b) {

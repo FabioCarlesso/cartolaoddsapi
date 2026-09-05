@@ -212,10 +212,13 @@ devolve o saldo restante em todo response, nos headers `x-requests-remaining` e
 estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último valor conhecido:
 
 - **Métricas Micrometer** em `/actuator/prometheus` (`ADMIN`): `odds_api_requests_total`
-  (contador de chamadas feitas ao provedor), `odds_api_requests_remaining` (gauge com o saldo
-  informado) e `odds_api_errors_total` (contador de falhas).
-- **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura
-  e se o guardrail está ativo.
+  (chamadas feitas ao provedor, contadas **na tentativa** — a recusa por cota estourada consumiu
+  a tentativa igual e precisa aparecer no total), `odds_api_requests_remaining` (gauge com o
+  saldo informado) e `odds_api_errors_total` (falhas, um subconjunto do total — o que faz
+  `odds_api_errors_total / odds_api_requests_total` ser uma taxa de erro de verdade).
+- **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura,
+  se o guardrail está ativo e — a pergunta que se faz ao ver o guardrail armado — quando a
+  próxima sondagem libera uma chamada (`proximaSondagem`).
 - **Guardrail** `odds.api.min-requests-remaining` (padrão `50`): abaixo desse saldo, o
   `OddsClient` para de chamar o provedor e passa a servir a **última resposta conhecida**,
   persistida na tabela `odds_snapshot` — o que faz o fallback sobreviver a restart e redeploy,
@@ -223,7 +226,8 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
 - **Sondagem** `odds.api.sonda-intervalo-horas` (padrão `24`): com o guardrail ativo, uma
   chamada por intervalo é liberada para reavaliar o saldo. Sem ela o guardrail se auto-alimenta
   — barra, o saldo nunca é relido, continua barrando — e a virada de mês que renova a cota só
-  apareceria num restart.
+  apareceria num restart. O campo `proximaSondagem` de `GET /api/odds/cota` diz quando essa
+  janela abre, ou seja, quando o guardrail se destrava sozinho.
 - **Estado persistido** na tabela `odds_cota` e recuperado no boot: sem isso, cada deploy
   voltaria para "sem leitura" e desarmaria o guardrail justamente quando o cache em memória
   some — que é o momento em que a próxima requisição quer chamar o provedor.
@@ -246,6 +250,13 @@ momentânea do provedor não desligue o filtro de favoritos pela hora inteira do
 Uma resposta servida pelo snapshot é cacheada pelo **tempo que resta** do TTL, contado de quando
 o provedor produziu aquelas odds — sem isso, um snapshot de 50 minutos ganharia mais um TTL
 inteiro e serviria odds de quase duas horas.
+
+> **Configuração recusada no boot:** `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` é um *piso* dentro
+> de `ODDS_API_CACHE_TTL_MINUTOS`, então precisa caber nele; e as quatro variáveis do guardrail
+> têm mínimo `1` (com `ODDS_API_SONDA_INTERVALO_HORAS=0` toda requisição viraria sondagem e o
+> guardrail deixaria de existir na prática). A aplicação recusa a subir com esses valores
+> inválidos, nomeando a propriedade — em vez de falhar em cada requisição de odds, já em
+> produção e depois de o crédito ter sido gasto.
 
 > **Custo por chamada:** a The Odds API cobra por requisição **por região e por mercado**. Com
 > `odds.api.regions=us` e `odds.api.markets=h2h` (um valor em cada), cada chamada custa 1
@@ -601,7 +612,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
-| `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura e se o guardrail de cota está ativo |
+| `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura, se o guardrail de cota está ativo e quando a próxima sondagem o destrava |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -650,7 +661,9 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
   "consumoMes": 88,
   "ultimaLeitura": "2026-09-05T10:00:00",
   "minRequestsRemaining": 50,
-  "guardrailAtivo": false
+  "guardrailAtivo": false,
+  "ultimaSondagem": null,
+  "proximaSondagem": "2026-09-06T10:00:00"
 }
 ```
 
@@ -1060,7 +1073,7 @@ cartola/
     │           ├── V9__create_odds_snapshot.sql                  # Última resposta de odds, para o guardrail de cota
     │           └── V10__create_odds_cota.sql                     # Saldo e consumo da cota, para o guardrail sobreviver ao deploy
     └── test/
-        ├── java/                            # 32 classes de teste — 560 cenários
+        ├── java/                            # 42 classes de teste — 739 cenários
         └── resources/
             ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2

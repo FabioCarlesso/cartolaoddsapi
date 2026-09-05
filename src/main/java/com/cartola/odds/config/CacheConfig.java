@@ -97,7 +97,7 @@ public class CacheConfig {
      * no fallback: um snapshot de 50 minutos guardado por mais um TTL inteiro serviria odds de
      * quase duas horas com o padrao de 60 min.
      */
-    private record TtlPorResultado(long ttlMinutos, long ttlDegradadoMinutos) implements Expiry<Object, Object> {
+    record TtlPorResultado(long ttlMinutos, long ttlDegradadoMinutos) implements Expiry<Object, Object> {
 
         @Override
         public long expireAfterCreate(Object chave, Object valor, long agora) {
@@ -125,7 +125,14 @@ public class CacheConfig {
             // O piso e o TTL degradado: com o guardrail ativo servindo um snapshot ja vencido, o
             // restante seria negativo, e reexecutar o metodo a cada requisicao nao ajudaria
             // ninguem — a chamada ao provedor esta barrada de qualquer forma.
-            long restante = Math.clamp(ttlMinutos - idadeMinutos, ttlDegradadoMinutos, ttlMinutos);
+            //
+            // Piso e teto aplicados na mao, e nao por Math.clamp, porque este codigo roda dentro
+            // da escrita no cache: com as duas propriedades invertidas, o clamp lanca
+            // IllegalArgumentException, e a excecao sobe pelo @Cacheable ate virar 500 em
+            // /api/favoritos, /api/time e /api/ranking — depois de o credito ja ter sido gasto.
+            // O OddsProperties recusa essa configuracao no boot; aqui o pior caso e um TTL
+            // esquisito, que e o tipo de falha que este metodo pode se dar ao luxo de ter.
+            long restante = Math.max(ttlDegradadoMinutos, Math.min(ttlMinutos, ttlMinutos - idadeMinutos));
             return TimeUnit.MINUTES.toNanos(restante);
         }
     }

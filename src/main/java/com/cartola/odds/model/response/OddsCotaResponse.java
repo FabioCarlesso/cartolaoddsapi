@@ -35,4 +35,15 @@ public class OddsCotaResponse {
                         + "e o cliente parou de chamar o provedor, servindo a ultima resposta conhecida.",
             example = "false")
     private final boolean guardrailAtivo;
+
+    @Schema(description = "Instante da ultima chamada de sondagem liberada pelo guardrail para "
+                        + "reavaliar o saldo. Null quando nenhuma sondagem ocorreu.",
+            nullable = true)
+    private final LocalDateTime ultimaSondagem;
+
+    @Schema(description = "Quando a proxima sondagem libera uma chamada ao provedor, com o guardrail "
+                        + "ativo — ou seja, quando o guardrail pode se destravar sozinho. Null quando "
+                        + "nao ha leitura nem sondagem anterior: nesse caso a proxima busca ja sonda.",
+            nullable = true)
+    private final LocalDateTime proximaSondagem;
 }

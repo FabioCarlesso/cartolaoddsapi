@@ -39,6 +39,26 @@ class OddsCotaServiceTest {
     }
 
     @Test
+    @DisplayName("deve dizer quando a proxima sondagem destrava o guardrail")
+    void deveExporJanelaDeSondagem() {
+        // Com guardrailAtivo=true, essa e a unica pergunta que sobra para quem esta olhando:
+        // quando isso volta sozinho. Sem o campo, a resposta so existia no log.
+        var sondagem = LocalDateTime.now().minusHours(2);
+        var proxima  = sondagem.plusHours(24);
+        when(oddsClient.getRequestsRemaining()).thenReturn(10L);
+        when(oddsClient.getRequestsUsed()).thenReturn(490L);
+        when(oddsClient.isGuardrailAtivo()).thenReturn(true);
+        when(oddsClient.getUltimaSondagem()).thenReturn(sondagem);
+        when(oddsClient.getProximaSondagem()).thenReturn(proxima);
+
+        var resposta = new OddsCotaService(oddsClient, propriedadesComMinimo(50)).buscarCota();
+
+        assertThat(resposta.isGuardrailAtivo()).isTrue();
+        assertThat(resposta.getUltimaSondagem()).isEqualTo(sondagem);
+        assertThat(resposta.getProximaSondagem()).isEqualTo(proxima);
+    }
+
+    @Test
     @DisplayName("deve refletir guardrail ativo e valores nulos sem leitura ainda")
     void deveRefletirSemLeitura() {
         when(oddsClient.getRequestsRemaining()).thenReturn(null);
@@ -52,6 +72,8 @@ class OddsCotaServiceTest {
         assertThat(resposta.getSaldoRestante()).isNull();
         assertThat(resposta.getConsumoMes()).isNull();
         assertThat(resposta.getUltimaLeitura()).isNull();
+        assertThat(resposta.getUltimaSondagem()).isNull();
+        assertThat(resposta.getProximaSondagem()).isNull();
     }
 
     private OddsProperties propriedadesComMinimo(int minimo) {

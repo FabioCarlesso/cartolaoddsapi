@@ -48,18 +48,23 @@ class OddsCotaControllerTest {
     }
 
     @Test
-    @DisplayName("deve refletir guardrailAtivo=true quando o saldo esta abaixo do minimo")
+    @DisplayName("deve refletir guardrailAtivo=true e dizer quando a proxima sondagem destrava")
     void deveRefletirGuardrailAtivo() throws Exception {
+        var proxima = LocalDateTime.of(2026, 9, 6, 10, 0);
         when(oddsCotaService.buscarCota()).thenReturn(OddsCotaResponse.builder()
                 .saldoRestante(10L)
                 .consumoMes(490L)
                 .minRequestsRemaining(50)
                 .guardrailAtivo(true)
+                .ultimaSondagem(LocalDateTime.of(2026, 9, 5, 10, 0))
+                .proximaSondagem(proxima)
                 .build());
 
         mockMvc.perform(get("/api/odds/cota"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.guardrailAtivo").value(true));
+                .andExpect(jsonPath("$.guardrailAtivo").value(true))
+                .andExpect(jsonPath("$.ultimaSondagem").value("2026-09-05T10:00:00"))
+                .andExpect(jsonPath("$.proximaSondagem").value("2026-09-06T10:00:00"));
     }
 
     @Test
@@ -73,6 +78,7 @@ class OddsCotaControllerTest {
         mockMvc.perform(get("/api/odds/cota"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.saldoRestante").doesNotExist())
-                .andExpect(jsonPath("$.consumoMes").doesNotExist());
+                .andExpect(jsonPath("$.consumoMes").doesNotExist())
+                .andExpect(jsonPath("$.proximaSondagem").doesNotExist());
     }
 }

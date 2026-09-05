@@ -69,6 +69,22 @@ class CacheConfigTest {
         assertThat(ttlNoCacheDeOdds(vencido)).isEqualTo(10L);
     }
 
+    @Test
+    @DisplayName("TTL invertido deve produzir duracao valida em vez de excecao na escrita do cache")
+    void ttlInvertidoNaoDeveLancar() {
+        // O OddsProperties recusa essa combinacao no boot, entao aqui nao ha configuracao real
+        // para reproduzir — o Expiry e construido direto. O que se fixa e a propriedade que
+        // torna essa validacao uma rede, e nao a unica linha de defesa: este codigo roda dentro
+        // da escrita no cache, sob @Cacheable, e uma excecao aqui vira 500 em /api/favoritos,
+        // /api/time e /api/ranking, por requisicao e depois de o credito ja ter sido gasto.
+        var expiry = new CacheConfig.TtlPorResultado(5, 10);
+        var valor  = OddsComOrigem.aoVivo(List.of(new OddsResponse()));
+
+        long nanos = expiry.expireAfterCreate("chave", valor, 0L);
+
+        assertThat(nanos).isPositive();
+    }
+
     /** TTL efetivo, em minutos, que o cache de odds atribui a uma resposta com estes jogos. */
     private long ttlDeOddsEmMinutos(OddsResponse... jogos) {
         return ttlNoCacheDeOdds(OddsComOrigem.aoVivo(List.of(jogos)));
