@@ -29,6 +29,12 @@ public class FavoritosResponse {
     @Schema(description = "Jogos descartados por nao ter favorito claro")
     private final List<JogoDescartadoDto> descartados;
 
+    @Schema(description = "true quando as odds vieram do ultimo snapshot persistido em vez de uma "
+                        + "consulta ao vivo a The Odds API — por guardrail de cota ativo, falha no "
+                        + "provedor ou snapshot ainda dentro do TTL apos um restart.",
+            example = "false")
+    private final boolean oddsDeSnapshot;
+
     @Getter
     @Builder
     @Schema(description = "Jogo com time favorito identificado")

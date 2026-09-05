@@ -215,11 +215,18 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
 - `V5__add_budget_maximo.sql` — adiciona constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
 - `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
+- `V7__create_escalacao_rodada.sql` — cria a tabela de histórico de escalações por rodada
+- `V8__create_usuario.sql` — cria a tabela de usuários (perfil de acesso e `tokenVersion`)
+- `V9__create_odds_snapshot.sql` — cria a tabela de snapshot da última resposta de odds, para o guardrail de cota
+- `V10__create_odds_cota.sql` — cria a tabela do último estado conhecido da cota (saldo, consumo, leitura e sondagem)
 
 ### Cache Caffeine (in-memory)
 
-Todos os caches usam TTL de **10 minutos** e máximo de 500 entradas.
-O cache é reiniciado junto com a aplicação — não há persistência entre restarts.
+Máximo de 500 entradas por cache. TTL de **10 minutos** para a maioria, exceto `odds`
+(configurável via `odds.api.cache-ttl-minutos`, padrão **60 minutos** — odds de Brasileirão não
+mudam a cada poucos minutos, e um TTL curto multiplicava o consumo de cota sem ganho real).
+O cache é reiniciado junto com a aplicação — não há persistência entre restarts. O cache `odds`
+é o único com um fallback que sobrevive a isso: ver "Guardrail de cota da The Odds API" abaixo.
 
 | Cache | Dado cacheado |
 |---|---|
@@ -232,6 +239,99 @@ O cache é reiniciado junto com a aplicação — não há persistência entre r
 | `configuracao` | Config do banco (invalidado via PATCH/POST /api/config) |
 
 Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome}` (específico).
+
+### Guardrail de cota da The Odds API
+
+A autenticação por JWT limita *quem* chama a API, não *quanto* se gasta com ela — e a The Odds
+API é o único componente pago da stack (plano free: 500 requisições/mês). Antes desta issue
+(#40), estourar a cota degradava a escalação silenciosamente: o `OddsClient` cacheava por 10
+minutos e, em qualquer falha, devolvia lista vazia com um `log.error`, sem filtro de favoritos e
+sem ninguém perceber pela API. Pior em produção na Railway, onde o cache é em memória e todo
+redeploy o zera — cada deploy virava pelo menos uma chamada nova.
+
+A The Odds API devolve o saldo em cada resposta, nos headers `x-requests-remaining` e
+`x-requests-used`. O `OddsClient` lê esses headers — inclusive **na resposta de erro**, que é
+onde o saldo real aparece quando a cota estoura: lendo só no caminho de sucesso, o saldo ficaria
+congelado no último valor saudável e o guardrail nunca armaria justamente no caso em que ele
+existe para agir. O último valor conhecido é exposto por `GET /api/odds/cota` (restrito a
+`ADMIN`) e pelas métricas Micrometer `odds_api_requests_total`, `odds_api_requests_remaining` e
+`odds_api_errors_total`. Os contadores medem **tentativas**, não sucessos: o provedor cobra pela
+chamada, e a recusa por cota estourada só existe no caminho de erro — contá-la fora do total
+deixaria justo esse evento de fora do contador de consumo, e `errors/requests` deixaria de ser
+uma taxa. Os nomes são declarados na convenção pontuada do Micrometer (`odds.api.requests`), com
+a tradução para o formato do Prometheus fixada por teste, porque é por `odds_api_requests_total`
+que dashboard e alerta perguntam. Abaixo do guardrail `odds.api.min-requests-remaining` (padrão 50), o
+cliente para de chamar o provedor — sem essa parada, a aplicação continuaria gastando cota até
+o provedor recusar as chamadas.
+
+Esse estado é persistido na tabela `odds_cota` (linha única) e recuperado no boot. O snapshot de
+odds já sobrevivia ao redeploy, mas o saldo que decide *se vale a pena chamar* vivia só em
+memória: cada deploy voltava para "sem leitura" e desarmava o guardrail — no ambiente que
+motivou a issue, onde o cache é zerado a cada subida. A leitura só é marcada quando algum header
+foi de fato lido; um `200` sem os headers não reinicia o relógio da sondagem, senão o guardrail
+seguiria barrando por mais um intervalo inteiro com um saldo que ninguém conferiu.
+
+O fallback é a última resposta bem-sucedida, persistida na tabela `odds_snapshot` (linha única,
+sobrescrita a cada resposta **com jogos**) em vez de só o cache Caffeine: o cache é apagado a
+cada restart e redeploy, e sem persistência o guardrail ficaria sem nada para servir logo depois
+de subir — justamente o cenário mais comum em produção. Uma resposta vazia não sobrescreve nada:
+a The Odds API responde `200 []` fora de temporada, e gravar isso por cima apagaria o único
+fallback que o guardrail tem para o momento em que ele acionar.
+
+Pelo mesmo motivo, na **primeira busca após o boot** o `OddsClient` confere se o snapshot
+persistido ainda está dentro do TTL do cache e, se estiver, dispensa a chamada — um restart com
+cache Caffeine vazio não precisa gastar crédito para redescobrir a mesma resposta. O atalho é
+consumido uma única vez por instância, e essa é a parte que importa: depois dele, todo miss
+significa TTL vencido ou cache limpo à mão, e servir o snapshot de novo transformaria
+`DELETE /api/cache` num comando sem efeito, quando ele é justamente o gatilho manual de gasto
+(agora sujeito ao mesmo guardrail).
+
+O guardrail tem uma válvula: `odds.api.sonda-intervalo-horas` (padrão 24) libera uma chamada por
+intervalo mesmo com o saldo abaixo do mínimo. Sem ela o mecanismo se auto-alimentaria — o saldo
+só é reavaliado quando uma chamada acontece, então barrar todas as chamadas congelaria o último
+saldo conhecido para sempre, e a virada de mês que renova a cota nunca seria percebida sem um
+restart. O intervalo conta a partir da tentativa, não da leitura bem-sucedida, para que um
+provedor fora do ar não transforme cada requisição numa sondagem nova. `GET /api/odds/cota`
+devolve essa janela em `proximaSondagem`: com o guardrail armado, é a única pergunta que sobra
+para quem está olhando — quando isso volta sozinho —, e antes disso a resposta só existia no log.
+
+As propriedades do guardrail são recusadas no boot quando não descrevem configuração válida:
+mínimo `1` em todas (`sonda-intervalo-horas=0` faria de toda requisição uma sondagem, gastando
+exatamente a cota que o mecanismo preserva) e `cache-ttl-degradado-minutos` menor ou igual a
+`cache-ttl-minutos`, já que o degradado é um piso dentro do cheio. Invertidos, o cálculo de
+validade do cache receberia um intervalo de cabeça para baixo — e esse cálculo roda dentro da
+escrita no cache, sob `@Cacheable`: o erro viraria `500` em `/api/favoritos`, `/api/time` e
+`/api/ranking`, a cada requisição e depois de o crédito já ter sido gasto. Recusar no boot custa
+um restart e diz qual propriedade está errada.
+
+O TTL do cache de odds também é decidido por resultado: resposta com jogos vale **o que resta**
+do TTL cheio, contado do instante em que o provedor produziu aquelas odds (`obtidoEm`, carregado
+no próprio `OddsComOrigem`) — sem isso, um snapshot de 50 minutos guardado por mais um TTL
+inteiro serviria odds de quase duas horas. Resposta vazia vale
+`odds.api.cache-ttl-degradado-minutos` (padrão 10), que também é o piso quando o restante seria
+negativo. Guardar uma lista vazia
+pelos 60 minutos do TTL normal desligaria o filtro de favoritos por uma hora por causa de uma
+falha momentânea; não guardar nada faria cada requisição repetir a chamada, e uma resposta
+legitimamente vazia custa crédito igual. O `@Cacheable` usa `sync = true` pelo mesmo motivo de
+custo: sem ele, N misses simultâneos viram N chamadas pagas para produzir o mesmo valor.
+
+A origem (ao vivo ou snapshot) viaja no próprio valor retornado, `OddsComOrigem`, e não num
+campo do cliente: o resultado é cacheado, e num acerto de cache o método nem chega a executar —
+uma flag de instância descreveria a última *execução* em vez do que aquele chamador recebeu.
+
+Quando uma resposta usa o snapshot — por guardrail ativo, falha do provedor, ou snapshot ainda
+válido logo após um restart —, isso fica explícito no campo `oddsDeSnapshot` de
+`GET /api/favoritos`, e não só no log: a degradação silenciosa era exatamente o problema que
+motivou a issue. Os alertas em log avisam ao cruzar o **dobro do mínimo configurado** e o
+próprio mínimo — derivados da configuração, e não fixos em 100/50, senão um
+`min-requests-remaining` maior acionaria o guardrail sem nenhum aviso prévio; com o padrão de
+50, os limiares continuam sendo 100 e 50. `ERROR` fica para quando o guardrail efetivamente
+entra em ação ou o provedor falha sem snapshot disponível para cobrir a falta.
+
+A métrica `odds_api_requests_remaining` exporta `NaN` enquanto não houve nenhuma leitura, e não
+o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mínimo" disparar a
+cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
+fica silenciosa até existir dado de verdade.
 
 ### Observabilidade (Spring Actuator + Micrometer)
 
@@ -338,6 +438,7 @@ com.cartola.odds/
 | `DELETE` | `/api/usuarios/{id}` | Desativação lógica (`ADMIN`) |
 | `GET` | `/api/usuarios/me` | Dados da própria conta (autenticado) |
 | `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha (autenticado) |
+| `GET` | `/api/odds/cota` | Saldo, consumo do mês e estado do guardrail de cota da The Odds API (`ADMIN`) |
 | `GET` | `/swagger-ui.html` | Documentação interativa (público fora de produção, `404` no perfil `prod`) |
 | `GET` | `/actuator/health` | Status de saúde da aplicação (público) |
 | `GET` | `/actuator/info` | Informações da build (público) |
@@ -352,6 +453,10 @@ com.cartola.odds/
 | Variável de Ambiente | Padrão | Descrição |
 |---|---|---|
 | `ODDS_API_KEY` | — | Chave da The Odds API (obrigatória para filtro por odds) |
+| `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, para de chamar o provedor e serve o último snapshot |
+| `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds`, em minutos |
+| `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` | `10` | TTL de uma resposta de odds sem nenhum jogo |
+| `ODDS_API_SONDA_INTERVALO_HORAS` | `24` | Intervalo mínimo entre sondagens de saldo com o guardrail ativo |
 | `APP_PORT` | `8080` | Porta exposta no host |
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
 | `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
@@ -365,7 +470,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-544 cenários distribuídos em 32 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
+739 cenários distribuídos em 42 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

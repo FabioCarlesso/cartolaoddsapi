@@ -54,7 +54,8 @@ public class OddsService {
     }
 
     public Set<String> buscarFavoritos(double oddLimite, Set<String> confrontos) {
-        var response = processarOdds(oddsClient.buscarOdds(), oddLimite, confrontos);
+        var resultado = oddsClient.buscarOdds();
+        var response  = processarOdds(resultado.odds(), oddLimite, confrontos, resultado.deSnapshot());
         return response.getFavoritos().stream()
                 .map(j -> NormalizadorUtil.normalizar(j.getTimeFavorito()))
                 .collect(Collectors.toUnmodifiableSet());
@@ -64,7 +65,9 @@ public class OddsService {
 
     public FavoritosResponse buscarFavoritosDetalhado(double oddLimite) {
         log.info("Buscando favoritos detalhado | oddLimite={}", oddLimite);
-        List<OddsResponse> odds = oddsClient.buscarOdds();
+        var resultado = oddsClient.buscarOdds();
+        List<OddsResponse> odds = resultado.odds();
+        boolean oddsDeSnapshot  = resultado.deSnapshot();
 
         if (odds.isEmpty()) {
             log.warn("Nenhuma odd disponivel da API.");
@@ -75,15 +78,17 @@ public class OddsService {
                     .totalDescartados(0)
                     .favoritos(List.of())
                     .descartados(List.of())
+                    .oddsDeSnapshot(oddsDeSnapshot)
                     .build();
         }
 
-        return processarOdds(odds, oddLimite, buscarConfrontosComFallback());
+        return processarOdds(odds, oddLimite, buscarConfrontosComFallback(), oddsDeSnapshot);
     }
 
     // ── Privado ───────────────────────────────────────────────────────
 
-    private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite, Set<String> confrontosRodadaAtual) {
+    private FavoritosResponse processarOdds(List<OddsResponse> odds, double oddLimite, Set<String> confrontosRodadaAtual,
+                                             boolean oddsDeSnapshot) {
         List<JogoFavoritoDto>   favoritos   = new ArrayList<>();
         List<JogoDescartadoDto> descartados = new ArrayList<>();
         List<OddsResponse> oddsRodadaAtual = filtrarOddsRodadaAtual(odds, confrontosRodadaAtual);
@@ -102,6 +107,7 @@ public class OddsService {
                 .totalDescartados(descartados.size())
                 .favoritos(favoritos)
                 .descartados(descartados)
+                .oddsDeSnapshot(oddsDeSnapshot)
                 .build();
     }
 
