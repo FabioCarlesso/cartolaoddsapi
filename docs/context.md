@@ -218,6 +218,7 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V7__create_escalacao_rodada.sql` — cria a tabela de histórico de escalações por rodada
 - `V8__create_usuario.sql` — cria a tabela de usuários (perfil de acesso e `tokenVersion`)
 - `V9__create_odds_snapshot.sql` — cria a tabela de snapshot da última resposta de odds, para o guardrail de cota
+- `V10__create_odds_cota.sql` — cria a tabela do último estado conhecido da cota (saldo, consumo, leitura e sondagem)
 
 ### Cache Caffeine (in-memory)
 
@@ -249,11 +250,21 @@ sem ninguém perceber pela API. Pior em produção na Railway, onde o cache é e
 redeploy o zera — cada deploy virava pelo menos uma chamada nova.
 
 A The Odds API devolve o saldo em cada resposta, nos headers `x-requests-remaining` e
-`x-requests-used`. O `OddsClient` lê esses headers e mantém o último valor conhecido em memória
-(exposto por `GET /api/odds/cota`, restrito a `ADMIN`, e pelas métricas Micrometer
-`odds_api_requests_total`, `odds_api_requests_remaining` e `odds_api_errors_total`). Abaixo do
-guardrail `odds.api.min-requests-remaining` (padrão 50), o cliente para de chamar o provedor —
-sem essa parada, a aplicação continuaria gastando cota até o provedor recusar as chamadas.
+`x-requests-used`. O `OddsClient` lê esses headers — inclusive **na resposta de erro**, que é
+onde o saldo real aparece quando a cota estoura: lendo só no caminho de sucesso, o saldo ficaria
+congelado no último valor saudável e o guardrail nunca armaria justamente no caso em que ele
+existe para agir. O último valor conhecido é exposto por `GET /api/odds/cota` (restrito a
+`ADMIN`) e pelas métricas Micrometer `odds_api_requests_total`, `odds_api_requests_remaining` e
+`odds_api_errors_total`. Abaixo do guardrail `odds.api.min-requests-remaining` (padrão 50), o
+cliente para de chamar o provedor — sem essa parada, a aplicação continuaria gastando cota até
+o provedor recusar as chamadas.
+
+Esse estado é persistido na tabela `odds_cota` (linha única) e recuperado no boot. O snapshot de
+odds já sobrevivia ao redeploy, mas o saldo que decide *se vale a pena chamar* vivia só em
+memória: cada deploy voltava para "sem leitura" e desarmava o guardrail — no ambiente que
+motivou a issue, onde o cache é zerado a cada subida. A leitura só é marcada quando algum header
+foi de fato lido; um `200` sem os headers não reinicia o relógio da sondagem, senão o guardrail
+seguiria barrando por mais um intervalo inteiro com um saldo que ninguém conferiu.
 
 O fallback é a última resposta bem-sucedida, persistida na tabela `odds_snapshot` (linha única,
 sobrescrita a cada resposta **com jogos**) em vez de só o cache Caffeine: o cache é apagado a
@@ -277,8 +288,12 @@ saldo conhecido para sempre, e a virada de mês que renova a cota nunca seria pe
 restart. O intervalo conta a partir da tentativa, não da leitura bem-sucedida, para que um
 provedor fora do ar não transforme cada requisição numa sondagem nova.
 
-O TTL do cache de odds também é decidido por resultado: resposta com jogos vale o TTL cheio,
-resposta vazia vale `odds.api.cache-ttl-degradado-minutos` (padrão 10). Guardar uma lista vazia
+O TTL do cache de odds também é decidido por resultado: resposta com jogos vale **o que resta**
+do TTL cheio, contado do instante em que o provedor produziu aquelas odds (`obtidoEm`, carregado
+no próprio `OddsComOrigem`) — sem isso, um snapshot de 50 minutos guardado por mais um TTL
+inteiro serviria odds de quase duas horas. Resposta vazia vale
+`odds.api.cache-ttl-degradado-minutos` (padrão 10), que também é o piso quando o restante seria
+negativo. Guardar uma lista vazia
 pelos 60 minutos do TTL normal desligaria o filtro de favoritos por uma hora por causa de uma
 falha momentânea; não guardar nada faria cada requisição repetir a chamada, e uma resposta
 legitimamente vazia custa crédito igual. O `@Cacheable` usa `sync = true` pelo mesmo motivo de
@@ -439,7 +454,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-718 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
+726 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

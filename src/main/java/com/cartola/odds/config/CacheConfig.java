@@ -11,6 +11,8 @@ import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -89,7 +91,12 @@ public class CacheConfig {
                 .build();
     }
 
-    /** TTL curto para resposta de odds sem nenhum jogo, TTL cheio para as demais. */
+    /**
+     * TTL curto para resposta de odds sem nenhum jogo; para as demais, o que resta do TTL cheio
+     * contado a partir do instante em que o provedor produziu aquelas odds. A diferenca aparece
+     * no fallback: um snapshot de 50 minutos guardado por mais um TTL inteiro serviria odds de
+     * quase duas horas com o padrao de 60 min.
+     */
     private record TtlPorResultado(long ttlMinutos, long ttlDegradadoMinutos) implements Expiry<Object, Object> {
 
         @Override
@@ -108,8 +115,18 @@ public class CacheConfig {
         }
 
         private long duracaoNanos(Object valor) {
-            boolean degradado = valor instanceof OddsComOrigem odds && odds.vazio();
-            return TimeUnit.MINUTES.toNanos(degradado ? ttlDegradadoMinutos : ttlMinutos);
+            if (!(valor instanceof OddsComOrigem odds)) {
+                return TimeUnit.MINUTES.toNanos(ttlMinutos);
+            }
+            if (odds.vazio()) {
+                return TimeUnit.MINUTES.toNanos(ttlDegradadoMinutos);
+            }
+            long idadeMinutos = Duration.between(odds.obtidoEm(), LocalDateTime.now()).toMinutes();
+            // O piso e o TTL degradado: com o guardrail ativo servindo um snapshot ja vencido, o
+            // restante seria negativo, e reexecutar o metodo a cada requisicao nao ajudaria
+            // ninguem — a chamada ao provedor esta barrada de qualquer forma.
+            long restante = Math.clamp(ttlMinutos - idadeMinutos, ttlDegradadoMinutos, ttlMinutos);
+            return TimeUnit.MINUTES.toNanos(restante);
         }
     }
 }

@@ -208,7 +208,8 @@ odds.api.key=SUA_API_KEY_AQUI
 O plano free da The Odds API dá **500 requisições/mês** — é o que motivou fechar a API com
 autenticação (autenticação limita *quem* chama; não limita *quanto* se gasta). A The Odds API
 devolve o saldo restante em todo response, nos headers `x-requests-remaining` e
-`x-requests-used`; o `OddsClient` lê esses headers e expõe o último valor conhecido:
+`x-requests-used` — inclusive nas respostas de **erro**, que é onde o saldo aparece quando a cota
+estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último valor conhecido:
 
 - **Métricas Micrometer** em `/actuator/prometheus` (`ADMIN`): `odds_api_requests_total`
   (contador de chamadas feitas ao provedor), `odds_api_requests_remaining` (gauge com o saldo
@@ -223,6 +224,9 @@ devolve o saldo restante em todo response, nos headers `x-requests-remaining` e
   chamada por intervalo é liberada para reavaliar o saldo. Sem ela o guardrail se auto-alimenta
   — barra, o saldo nunca é relido, continua barrando — e a virada de mês que renova a cota só
   apareceria num restart.
+- **Estado persistido** na tabela `odds_cota` e recuperado no boot: sem isso, cada deploy
+  voltaria para "sem leitura" e desarmaria o guardrail justamente quando o cache em memória
+  some — que é o momento em que a próxima requisição quer chamar o provedor.
 - Log em `WARN` quando o saldo cruza o **dobro do mínimo** e o próprio mínimo configurado (com
   o padrão de `50`, os limiares são 100 e 50), e em `ERROR` quando o guardrail entra em ação ou
   quando o provedor falha sem snapshot disponível.
@@ -238,6 +242,10 @@ invalidação continua sendo o gatilho manual de gasto que sempre foi, agora res
 Uma resposta **sem nenhum jogo** nunca sobrescreve o snapshot (isso destruiria o único fallback)
 e fica no cache só por `odds.api.cache-ttl-degradado-minutos` (padrão `10`), para que uma falha
 momentânea do provedor não desligue o filtro de favoritos pela hora inteira do TTL normal.
+
+Uma resposta servida pelo snapshot é cacheada pelo **tempo que resta** do TTL, contado de quando
+o provedor produziu aquelas odds — sem isso, um snapshot de 50 minutos ganharia mais um TTL
+inteiro e serviria odds de quase duas horas.
 
 > **Custo por chamada:** a The Odds API cobra por requisição **por região e por mercado**. Com
 > `odds.api.regions=us` e `odds.api.markets=h2h` (um valor em cada), cada chamada custa 1
@@ -1049,7 +1057,8 @@ cartola/
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
     │           ├── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
-    │           └── V9__create_odds_snapshot.sql                  # Última resposta de odds, para o guardrail de cota
+    │           ├── V9__create_odds_snapshot.sql                  # Última resposta de odds, para o guardrail de cota
+    │           └── V10__create_odds_cota.sql                     # Saldo e consumo da cota, para o guardrail sobreviver ao deploy
     └── test/
         ├── java/                            # 32 classes de teste — 560 cenários
         └── resources/

@@ -29,7 +29,7 @@ public interface CacheApi {
             Limpa imediatamente todas as entradas de todos os caches em memoria (Caffeine).
 
             **Caches afetados:**
-            - `odds` — respostas da The Odds API (TTL 10 min)
+            - `odds` — respostas da The Odds API (TTL configuravel, padrao 60 min; resposta sem jogos, 10 min)
             - `atletas` — /atletas/mercado (TTL 15 min)
             - `clubes` — /clubes (TTL 60 min)
             - `partidas` — /partidas (TTL 15 min)
@@ -37,6 +37,11 @@ public interface CacheApi {
             - `statusMercado` — /mercado/status (TTL 2 min)
 
             Apos a invalidacao, a proxima requisicao busca dados frescos nas APIs externas.
+
+            **Cota da The Odds API:** invalidar o cache `odds` gasta uma requisicao da cota paga
+            na proxima busca. O guardrail continua valendo — com o saldo abaixo de
+            `odds.api.min-requests-remaining`, a busca seguinte e servida pelo snapshot
+            persistido em vez de chamar o provedor.
             """
     )
     @ApiResponses({

@@ -5,7 +5,9 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.cartola.odds.config.OddsProperties;
+import com.cartola.odds.model.OddsCota;
 import com.cartola.odds.model.OddsSnapshot;
+import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -17,7 +19,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
@@ -34,6 +38,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withServerError;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 /**
@@ -52,6 +57,7 @@ class OddsClientTest {
             """;
 
     @Mock OddsSnapshotRepository snapshotRepository;
+    @Mock OddsCotaRepository     cotaRepository;
 
     private MockRestServiceServer server;
     private OddsClient            oddsClient;
@@ -75,7 +81,7 @@ class OddsClientTest {
         server = MockRestServiceServer.bindTo(builder).build();
         meterRegistry = new SimpleMeterRegistry();
 
-        oddsClient = new OddsClient(builder.build(), props, snapshotRepository,
+        oddsClient = new OddsClient(builder.build(), props, snapshotRepository, cotaRepository,
                 new ObjectMapper(), meterRegistry);
     }
 
@@ -111,6 +117,34 @@ class OddsClientTest {
 
             assertThat(oddsClient.getRequestsRemaining()).isNull();
             assertThat(oddsClient.getRequestsUsed()).isNull();
+        }
+
+        @Test
+        @DisplayName("nao deve marcar leitura de cota quando a resposta nao traz nenhum header")
+        void naoDeveMarcarLeituraSemHeaders() {
+            // Marcar assim mesmo empurraria a proxima sondagem por um intervalo inteiro em
+            // troca de nada, mantendo o guardrail barrando com um saldo que ninguem conferiu.
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON));
+
+            oddsClient.buscarOdds();
+
+            assertThat(oddsClient.getUltimaLeitura()).isNull();
+        }
+
+        @Test
+        @DisplayName("deve ler o saldo dos headers tambem na resposta de erro do provedor")
+        void deveLerSaldoNaRespostaDeErro() {
+            // Cota estourada nao chega como 200: o provedor recusa a chamada e e nessa resposta
+            // que o saldo real aparece. Sem ler aqui, o guardrail nunca armaria.
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).headers(cota("3", "497")));
+
+            oddsClient.buscarOdds();
+
+            assertThat(oddsClient.getRequestsRemaining()).isEqualTo(3L);
+            assertThat(oddsClient.getRequestsUsed()).isEqualTo(497L);
+            assertThat(oddsClient.isGuardrailAtivo()).isTrue();
         }
 
         @Test
@@ -309,6 +343,74 @@ class OddsClientTest {
 
             assertThat(resultado.odds()).isEmpty();
             verify(snapshotRepository, never()).save(any(OddsSnapshot.class));
+        }
+    }
+
+    @Nested
+    @DisplayName("estado da cota entre restarts")
+    class CotaPersistida {
+
+        @Test
+        @DisplayName("deve recuperar o saldo persistido no boot, mantendo o guardrail armado apos o deploy")
+        void deveRecuperarSaldoNoBoot() {
+            // Sem isto o guardrail nasce desarmado a cada deploy — e e no deploy que o cache
+            // em memoria some, ou seja, exatamente quando a proxima requisicao quer chamar.
+            when(cotaRepository.findById(OddsCota.ID_UNICO)).thenReturn(Optional.of(
+                    cotaPersistida(20L, 480L, LocalDateTime.now().minusMinutes(5))));
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
+
+            oddsClient.carregarCotaPersistida();
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(oddsClient.getRequestsRemaining()).isEqualTo(20L);
+            assertThat(oddsClient.isGuardrailAtivo()).isTrue();
+            assertThat(resultado.deSnapshot()).isTrue();
+        }
+
+        @Test
+        @DisplayName("deve persistir o estado da cota ao ler os headers do provedor")
+        void devePersistirEstadoDaCota() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            responderComCota("412", "88");
+
+            oddsClient.buscarOdds();
+
+            verify(cotaRepository).save(any(OddsCota.class));
+        }
+
+        @Test
+        @DisplayName("deve subir sem saldo conhecido quando o banco falha na recuperacao")
+        void deveTolerarFalhaAoRecuperar() {
+            when(cotaRepository.findById(OddsCota.ID_UNICO))
+                    .thenThrow(new DataAccessResourceFailureException("banco fora"));
+
+            oddsClient.carregarCotaPersistida();
+
+            assertThat(oddsClient.getRequestsRemaining()).isNull();
+            assertThat(oddsClient.isGuardrailAtivo()).isFalse();
+        }
+
+        @Test
+        @DisplayName("nao deve quebrar a busca quando a leitura do snapshot falha no banco")
+        void deveTolerarFalhaAoLerSnapshot() {
+            // O fallback existe para degradar com elegancia; nao pode ser ele proprio a virar 500.
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO))
+                    .thenThrow(new DataAccessResourceFailureException("banco fora"));
+            responderComCota("412", "88");
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).hasSize(1);
+            assertThat(resultado.deSnapshot()).isFalse();
+        }
+
+        private OddsCota cotaPersistida(Long remaining, Long used, LocalDateTime leitura) {
+            var cota = new OddsCota();
+            cota.setId(OddsCota.ID_UNICO);
+            cota.setRequestsRemaining(remaining);
+            cota.setRequestsUsed(used);
+            cota.setUltimaLeitura(leitura);
+            return cota;
         }
     }
 

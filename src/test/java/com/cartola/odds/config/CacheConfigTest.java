@@ -11,6 +11,7 @@ import org.springframework.cache.caffeine.CaffeineCache;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
 import org.springframework.test.context.TestPropertySource;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -49,10 +50,33 @@ class CacheConfigTest {
         assertThat(ttlDeOddsEmMinutos()).isEqualTo(10L);
     }
 
+    @Test
+    @DisplayName("resposta vinda de snapshot deve expirar no tempo que resta do TTL, nao num TTL novo")
+    void snapshotDeveExpirarNoTempoRestante() {
+        // Um snapshot de 30 min guardado por mais 60 serviria odds de uma hora e meia.
+        var deSnapshot = OddsComOrigem.deSnapshot(
+                List.of(new OddsResponse()), LocalDateTime.now().minusMinutes(30));
+
+        assertThat(ttlNoCacheDeOdds(deSnapshot)).isEqualTo(30L);
+    }
+
+    @Test
+    @DisplayName("snapshot ja vencido deve cair no piso do TTL degradado, sem duracao negativa")
+    void snapshotVencidoDeveUsarPiso() {
+        var vencido = OddsComOrigem.deSnapshot(
+                List.of(new OddsResponse()), LocalDateTime.now().minusHours(5));
+
+        assertThat(ttlNoCacheDeOdds(vencido)).isEqualTo(10L);
+    }
+
     /** TTL efetivo, em minutos, que o cache de odds atribui a uma resposta com estes jogos. */
     private long ttlDeOddsEmMinutos(OddsResponse... jogos) {
+        return ttlNoCacheDeOdds(OddsComOrigem.aoVivo(List.of(jogos)));
+    }
+
+    private long ttlNoCacheDeOdds(OddsComOrigem valor) {
         var cacheNativo = ((CaffeineCache) cacheManager.getCache(CacheConfig.CACHE_ODDS)).getNativeCache();
-        cacheNativo.put("chave-de-teste", OddsComOrigem.aoVivo(List.of(jogos)));
+        cacheNativo.put("chave-de-teste", valor);
 
         long nanos = cacheNativo.policy().expireVariably().orElseThrow()
                 .getExpiresAfter("chave-de-teste", TimeUnit.NANOSECONDS).orElseThrow();

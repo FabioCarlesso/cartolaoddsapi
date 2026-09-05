@@ -3,14 +3,17 @@ package com.cartola.odds.client;
 import com.cartola.odds.config.CacheConfig;
 import com.cartola.odds.config.OddsProperties;
 import com.cartola.odds.model.OddsComOrigem;
+import com.cartola.odds.model.OddsCota;
 import com.cartola.odds.model.OddsSnapshot;
 import com.cartola.odds.model.response.OddsResponse;
+import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.Cacheable;
@@ -19,6 +22,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
+import org.springframework.web.client.RestClientResponseException;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
@@ -55,6 +59,7 @@ public class OddsClient {
     private final RestClient             restClient;
     private final OddsProperties         props;
     private final OddsSnapshotRepository snapshotRepository;
+    private final OddsCotaRepository     cotaRepository;
     private final ObjectMapper           objectMapper;
 
     private final Counter requestsTotal;
@@ -77,11 +82,13 @@ public class OddsClient {
     public OddsClient(@Qualifier("oddsRestClient") RestClient restClient,
                        OddsProperties props,
                        OddsSnapshotRepository snapshotRepository,
+                       OddsCotaRepository cotaRepository,
                        ObjectMapper objectMapper,
                        MeterRegistry meterRegistry) {
         this.restClient         = restClient;
         this.props              = props;
         this.snapshotRepository = snapshotRepository;
+        this.cotaRepository     = cotaRepository;
         this.objectMapper       = objectMapper;
         this.requestsTotal = meterRegistry.counter("odds_api_requests_total");
         this.errorsTotal   = meterRegistry.counter("odds_api_errors_total");
@@ -91,6 +98,31 @@ public class OddsClient {
         Gauge.builder("odds_api_requests_remaining", this, OddsClient::saldoParaMetrica)
                 .description("Saldo de requisicoes restantes informado pela The Odds API")
                 .register(meterRegistry);
+    }
+
+    /**
+     * Recupera o ultimo estado conhecido da cota. Sem isto o guardrail nasceria desarmado a
+     * cada deploy — e e num deploy que o cache em memoria some, ou seja, exatamente quando a
+     * proxima requisicao vai querer chamar o provedor.
+     *
+     * <p>Falha de banco aqui nao impede a aplicacao de subir: o pior caso e comecar sem saldo
+     * conhecido, que era o comportamento anterior.
+     */
+    @PostConstruct
+    void carregarCotaPersistida() {
+        try {
+            cotaRepository.findById(OddsCota.ID_UNICO).ifPresent(cota -> {
+                if (cota.getRequestsRemaining() != null) requestsRemaining.set(cota.getRequestsRemaining());
+                if (cota.getRequestsUsed() != null)      requestsUsed.set(cota.getRequestsUsed());
+                ultimaLeitura.set(cota.getUltimaLeitura());
+                ultimaSondagem.set(cota.getUltimaSondagem());
+                log.info("Cota da The Odds API recuperada do banco: saldo={} consumo={} ultima leitura={}",
+                        cota.getRequestsRemaining(), cota.getRequestsUsed(), cota.getUltimaLeitura());
+            });
+        } catch (Exception e) {
+            log.warn("Nao foi possivel recuperar a cota persistida: {}. Comecando sem saldo conhecido.",
+                    e.getMessage());
+        }
     }
 
     /**
@@ -108,7 +140,7 @@ public class OddsClient {
             return OddsComOrigem.indisponivel();
         }
 
-        Optional<OddsSnapshot> snapshot = snapshotRepository.findById(OddsSnapshot.ID_UNICO);
+        Optional<OddsSnapshot> snapshot = buscarSnapshot();
         boolean atalhoDeBoot = atalhoDeBootDisponivel.getAndSet(false);
 
         if (atalhoDeBoot && snapshot.isPresent() && dentroDoTtl(snapshot.get())) {
@@ -155,6 +187,20 @@ public class OddsClient {
 
     // ── Privado ───────────────────────────────────────────────────────
 
+    /**
+     * Le o snapshot sem deixar uma falha de banco derrubar a busca. O fallback existe para
+     * degradar com elegancia; nao faria sentido ele proprio transformar {@code /api/favoritos}
+     * e {@code /api/time} em 500 quando o banco tossir.
+     */
+    private Optional<OddsSnapshot> buscarSnapshot() {
+        try {
+            return snapshotRepository.findById(OddsSnapshot.ID_UNICO);
+        } catch (Exception e) {
+            log.warn("Nao foi possivel ler o snapshot de odds: {}. Seguindo sem fallback.", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
     private OddsComOrigem consultarProvedor(Optional<OddsSnapshot> snapshot) {
         try {
             var uri = "/sports/%s/odds".formatted(props.getSport());
@@ -189,6 +235,13 @@ public class OddsClient {
         } catch (RestClientException e) {
             errorsTotal.increment();
             log.error("Erro ao buscar odds: {}.", e.getMessage());
+            // A resposta de erro e onde o saldo real aparece quando a cota estoura: a The Odds
+            // API recusa a chamada e informa o que sobrou. Ler so no caminho de sucesso deixava
+            // o saldo congelado no ultimo valor saudavel — o guardrail nunca armaria justamente
+            // no caso em que ele existe para agir.
+            if (e instanceof RestClientResponseException erro && erro.getResponseHeaders() != null) {
+                registrarCota(erro.getResponseHeaders());
+            }
             return snapshot.map(s -> {
                 log.warn("Servindo a ultima resposta conhecida de odds apos falha no provedor.");
                 return lerSnapshot(s);
@@ -215,6 +268,7 @@ public class OddsClient {
 
         if (sondagemVencida) {
             ultimaSondagem.set(LocalDateTime.now());
+            persistirCota();
             log.warn("Guardrail de cota ativo (saldo {} < {}), mas a ultima leitura tem mais de {}h: "
                             + "liberando uma chamada de sondagem para reavaliar o saldo.",
                     requestsRemaining.get(), props.getMinRequestsRemaining(), props.getSondaIntervaloHoras());
@@ -238,6 +292,15 @@ public class OddsClient {
         Long remaining = parseHeader(headers, "x-requests-remaining");
         Long used      = parseHeader(headers, "x-requests-used");
 
+        // Sem nenhum header, nada foi aprendido — e marcar a leitura assim mesmo empurraria a
+        // proxima sondagem por um intervalo inteiro em troca de nada, mantendo o guardrail
+        // barrando com um saldo que ninguem conferiu.
+        if (remaining == null && used == null) {
+            log.warn("Resposta da The Odds API sem os headers de cota. "
+                    + "O saldo conhecido segue sendo o da ultima leitura.");
+            return;
+        }
+
         if (remaining != null) {
             long anterior = requestsRemaining.getAndSet(remaining);
             avisarSeCruzouLimiar(anterior, remaining);
@@ -246,6 +309,26 @@ public class OddsClient {
             requestsUsed.set(used);
         }
         ultimaLeitura.set(LocalDateTime.now());
+        persistirCota();
+    }
+
+    /**
+     * Grava o estado da cota para ele sobreviver ao restart. Falha aqui nao interrompe a busca:
+     * o valor em memoria continua valendo para esta instancia, e o pior caso e um deploy futuro
+     * comecar sem saldo conhecido.
+     */
+    private void persistirCota() {
+        try {
+            var cota = cotaRepository.findById(OddsCota.ID_UNICO).orElseGet(OddsCota::new);
+            cota.setId(OddsCota.ID_UNICO);
+            cota.setRequestsRemaining(getRequestsRemaining());
+            cota.setRequestsUsed(getRequestsUsed());
+            cota.setUltimaLeitura(ultimaLeitura.get());
+            cota.setUltimaSondagem(ultimaSondagem.get());
+            cotaRepository.save(cota);
+        } catch (Exception e) {
+            log.warn("Nao foi possivel persistir a cota da The Odds API: {}", e.getMessage());
+        }
     }
 
     /**
@@ -294,7 +377,9 @@ public class OddsClient {
             List<OddsResponse> odds = objectMapper.readValue(
                     snapshot.getOddsJson(), new TypeReference<List<OddsResponse>>() {});
             log.info("Servindo {} jogos do snapshot de odds persistido em {}.", odds.size(), snapshot.getCriadoEm());
-            return OddsComOrigem.deSnapshot(odds);
+            // O instante de origem e o do snapshot, nao o de agora: e o que faz o cache guardar
+            // so o tempo que resta do TTL em vez de comecar a contar de novo.
+            return OddsComOrigem.deSnapshot(odds, snapshot.getCriadoEm());
         } catch (Exception e) {
             log.error("Snapshot de odds persistido esta corrompido: {}. Rodando sem filtro de favoritos.",
                     e.getMessage());
