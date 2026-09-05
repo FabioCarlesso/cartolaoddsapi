@@ -215,11 +215,17 @@ O Flyway aplica as migrations automaticamente na inicialização:
 - `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
 - `V5__add_budget_maximo.sql` — adiciona constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
 - `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
+- `V7__create_escalacao_rodada.sql` — cria a tabela de histórico de escalações por rodada
+- `V8__create_usuario.sql` — cria a tabela de usuários (perfil de acesso e `tokenVersion`)
+- `V9__create_odds_snapshot.sql` — cria a tabela de snapshot da última resposta de odds, para o guardrail de cota
 
 ### Cache Caffeine (in-memory)
 
-Todos os caches usam TTL de **10 minutos** e máximo de 500 entradas.
-O cache é reiniciado junto com a aplicação — não há persistência entre restarts.
+Máximo de 500 entradas por cache. TTL de **10 minutos** para a maioria, exceto `odds`
+(configurável via `odds.api.cache-ttl-minutos`, padrão **60 minutos** — odds de Brasileirão não
+mudam a cada poucos minutos, e um TTL curto multiplicava o consumo de cota sem ganho real).
+O cache é reiniciado junto com a aplicação — não há persistência entre restarts. O cache `odds`
+é o único com um fallback que sobrevive a isso: ver "Guardrail de cota da The Odds API" abaixo.
 
 | Cache | Dado cacheado |
 |---|---|
@@ -232,6 +238,38 @@ O cache é reiniciado junto com a aplicação — não há persistência entre r
 | `configuracao` | Config do banco (invalidado via PATCH/POST /api/config) |
 
 Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome}` (específico).
+
+### Guardrail de cota da The Odds API
+
+A autenticação por JWT limita *quem* chama a API, não *quanto* se gasta com ela — e a The Odds
+API é o único componente pago da stack (plano free: 500 requisições/mês). Antes desta issue
+(#40), estourar a cota degradava a escalação silenciosamente: o `OddsClient` cacheava por 10
+minutos e, em qualquer falha, devolvia lista vazia com um `log.error`, sem filtro de favoritos e
+sem ninguém perceber pela API. Pior em produção na Railway, onde o cache é em memória e todo
+redeploy o zera — cada deploy virava pelo menos uma chamada nova.
+
+A The Odds API devolve o saldo em cada resposta, nos headers `x-requests-remaining` e
+`x-requests-used`. O `OddsClient` lê esses headers e mantém o último valor conhecido em memória
+(exposto por `GET /api/odds/cota`, restrito a `ADMIN`, e pelas métricas Micrometer
+`odds_api_requests_total`, `odds_api_requests_remaining` e `odds_api_errors_total`). Abaixo do
+guardrail `odds.api.min-requests-remaining` (padrão 50), o cliente para de chamar o provedor —
+sem essa parada, a aplicação continuaria gastando cota até o provedor recusar as chamadas.
+
+O fallback é a última resposta bem-sucedida, persistida na tabela `odds_snapshot` (linha única,
+sobrescrita a cada chamada bem-sucedida) em vez de só o cache Caffeine: o cache é apagado a cada
+restart e redeploy, e sem persistência o guardrail ficaria sem nada para servir logo depois de
+subir — justamente o cenário mais comum em produção. Pelo mesmo motivo, antes de decidir se
+chama o provedor, o `OddsClient` primeiro confere se o snapshot persistido ainda está dentro do
+TTL do cache: um restart com cache Caffeine vazio não precisa gastar uma chamada nova se já
+existe uma resposta recente guardada no banco.
+
+Quando uma resposta usa o snapshot — por guardrail ativo, falha do provedor, ou snapshot ainda
+válido logo após um restart —, isso fica explícito no campo `oddsDeSnapshot` de
+`GET /api/favoritos`, e não só no log: a degradação silenciosa era exatamente o problema que
+motivou a issue. Os alertas em log seguem a mesma lógica dos scores desta API: `WARN` ao cruzar
+100 e 50 requisições restantes (aviso cedo, sem virar ruído), `ERROR` quando o guardrail
+efetivamente entra em ação ou quando o provedor falha sem snapshot disponível para cobrir a
+falta.
 
 ### Observabilidade (Spring Actuator + Micrometer)
 
@@ -338,6 +376,7 @@ com.cartola.odds/
 | `DELETE` | `/api/usuarios/{id}` | Desativação lógica (`ADMIN`) |
 | `GET` | `/api/usuarios/me` | Dados da própria conta (autenticado) |
 | `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha (autenticado) |
+| `GET` | `/api/odds/cota` | Saldo, consumo do mês e estado do guardrail de cota da The Odds API (`ADMIN`) |
 | `GET` | `/swagger-ui.html` | Documentação interativa (público fora de produção, `404` no perfil `prod`) |
 | `GET` | `/actuator/health` | Status de saúde da aplicação (público) |
 | `GET` | `/actuator/info` | Informações da build (público) |
@@ -352,6 +391,8 @@ com.cartola.odds/
 | Variável de Ambiente | Padrão | Descrição |
 |---|---|---|
 | `ODDS_API_KEY` | — | Chave da The Odds API (obrigatória para filtro por odds) |
+| `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, para de chamar o provedor e serve o último snapshot |
+| `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds`, em minutos |
 | `APP_PORT` | `8080` | Porta exposta no host |
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
 | `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
@@ -365,7 +406,7 @@ Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via ban
 
 ## Testes
 
-544 cenários distribuídos em 32 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
+702 cenários distribuídos em 40 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
 Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
 
 ```bash

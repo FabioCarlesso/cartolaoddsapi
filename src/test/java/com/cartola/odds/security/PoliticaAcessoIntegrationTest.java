@@ -136,7 +136,9 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.PATCH, "/api/usuarios/1", Acesso.ADMIN),
                 new Caso(HttpMethod.DELETE, "/api/usuarios/1", Acesso.ADMIN),
                 new Caso(HttpMethod.GET, "/actuator/metrics", Acesso.ADMIN),
-                new Caso(HttpMethod.GET, "/actuator/prometheus", Acesso.ADMIN));
+                new Caso(HttpMethod.GET, "/actuator/prometheus", Acesso.ADMIN),
+                // Saldo e consumo de cota da The Odds API: informacao operacional interna (#40).
+                new Caso(HttpMethod.GET, "/api/odds/cota", Acesso.ADMIN));
     }
 
     private String tokenUser;

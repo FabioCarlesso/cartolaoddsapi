@@ -1,6 +1,7 @@
 package com.cartola.odds.config;
 
 import com.github.benmanes.caffeine.cache.Caffeine;
+import lombok.RequiredArgsConstructor;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.caffeine.CaffeineCacheManager;
@@ -13,7 +14,8 @@ import java.util.concurrent.TimeUnit;
  * Configuracao de cache em memoria com Caffeine.
  *
  * Caches definidos:
- *  - odds        : respostas da The Odds API  (TTL 10 min — odds mudam pouco durante o dia)
+ *  - odds        : respostas da The Odds API  (TTL configuravel via odds.api.cache-ttl-minutos,
+ *                  padrao 60 min — odds de Brasileirao nao mudam a cada poucos minutos)
  *  - atletas     : /atletas/mercado           (TTL 15 min — mercado abre/fecha poucas vezes por dia)
  *  - clubes      : /clubes                    (TTL  1 hora — dados estaticos durante a temporada)
  *  - partidas    : /partidas                  (TTL 15 min — partidas da rodada sao fixas)
@@ -22,6 +24,7 @@ import java.util.concurrent.TimeUnit;
  */
 @Configuration
 @EnableCaching
+@RequiredArgsConstructor
 public class CacheConfig {
 
     public static final String CACHE_ODDS           = "odds";
@@ -32,10 +35,11 @@ public class CacheConfig {
     public static final String CACHE_STATUS_MERCADO = "statusMercado";
     public static final String CACHE_CONFIGURACAO   = "configuracao";
 
+    private final OddsProperties oddsProperties;
+
     @Bean
     public CacheManager cacheManager() {
         var manager = new CaffeineCacheManager(
-            CACHE_ODDS,
             CACHE_ATLETAS,
             CACHE_CLUBES,
             CACHE_PARTIDAS,
@@ -43,19 +47,22 @@ public class CacheConfig {
             CACHE_STATUS_MERCADO,
             CACHE_CONFIGURACAO
         );
-        manager.setCaffeine(caffeine());
+        manager.setCaffeine(caffeine(10));
+        // TTL proprio para 'odds': configuravel via odds.api.cache-ttl-minutos, em vez do
+        // padrao de 10 minutos compartilhado pelos demais caches.
+        manager.registerCustomCache(CACHE_ODDS, caffeine(oddsProperties.getCacheTtlMinutos()).build());
         return manager;
     }
 
     /**
      * Configuracao base do Caffeine:
-     *  - TTL de 10 minutos (sobrescrito por cache especifico quando necessario)
+     *  - TTL informado (em minutos)
      *  - Tamanho maximo de 500 entradas por cache
      *  - Remocao apos escrita (write-based expiration)
      */
-    private Caffeine<Object, Object> caffeine() {
+    private Caffeine<Object, Object> caffeine(long ttlMinutos) {
         return Caffeine.newBuilder()
-                .expireAfterWrite(10, TimeUnit.MINUTES)
+                .expireAfterWrite(ttlMinutos, TimeUnit.MINUTES)
                 .maximumSize(500)
                 .recordStats();
     }

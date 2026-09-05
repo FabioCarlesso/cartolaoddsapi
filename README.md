@@ -189,6 +189,8 @@ odds.api.key=SUA_API_KEY_AQUI
 | `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
 | `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas para CORS, separadas por vírgula |
+| `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, o cliente para de chamar a The Odds API e serve o último snapshot conhecido |
+| `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds` em minutos |
 
 > **Parâmetros de negócio (odd limite, pesos, formação e regras):** gerenciados via banco de dados.
 > Na primeira execução, o Flyway cria a tabela `configuracao` com os valores padrão.
@@ -198,6 +200,32 @@ odds.api.key=SUA_API_KEY_AQUI
 > Para forçar atualização imediata sem reiniciar, use `DELETE /api/cache`.
 
 > **Sem API Key configurada:** a aplicação sobe normalmente, o filtro por time favorito é desativado e todos os atletas elegíveis por status/preço são considerados.
+
+### Cota da The Odds API e guardrail
+
+O plano free da The Odds API dá **500 requisições/mês** — é o que motivou fechar a API com
+autenticação (autenticação limita *quem* chama; não limita *quanto* se gasta). A The Odds API
+devolve o saldo restante em todo response, nos headers `x-requests-remaining` e
+`x-requests-used`; o `OddsClient` lê esses headers e expõe o último valor conhecido:
+
+- **Métricas Micrometer** em `/actuator/prometheus` (`ADMIN`): `odds_api_requests_total`
+  (contador de chamadas feitas ao provedor), `odds_api_requests_remaining` (gauge com o saldo
+  informado) e `odds_api_errors_total` (contador de falhas).
+- **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura
+  e se o guardrail está ativo.
+- **Guardrail** `odds.api.min-requests-remaining` (padrão `50`): abaixo desse saldo, o
+  `OddsClient` para de chamar o provedor e passa a servir a **última resposta conhecida**,
+  persistida na tabela `odds_snapshot` — o que faz o fallback sobreviver a restart e redeploy,
+  em vez de depender só do cache Caffeine em memória (zerado a cada boot).
+- Log em `WARN` quando o saldo cruza os limiares de 100 e 50 requisições restantes, e em
+  `ERROR` quando o guardrail entra em ação ou quando o provedor falha sem snapshot disponível.
+- Quando uma resposta usa o snapshot em vez de uma consulta ao vivo — por guardrail ativo, falha
+  no provedor, ou snapshot ainda dentro do TTL logo após um restart —, isso fica explícito no
+  campo `oddsDeSnapshot` de `GET /api/favoritos`.
+
+> **Custo por chamada:** a The Odds API cobra por requisição **por região e por mercado**. Com
+> `odds.api.regions=us` e `odds.api.markets=h2h` (um valor em cada), cada chamada custa 1
+> crédito — acrescentar uma região ou mercado multiplica o custo por chamada.
 
 ---
 
@@ -295,6 +323,7 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
+| `GET /api/odds/cota` | `ADMIN` |
 | `GET /api/usuarios/me`, `PATCH /api/usuarios/me/senha` | Autenticado (qualquer perfil) |
 | Todo o resto de `/api/usuarios**` | `ADMIN` |
 | Qualquer outra rota | Autenticado |
@@ -548,6 +577,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico` | Lista todas as rodadas com escalação registrada e resumo de score sugerido vs. real |
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
+| `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura e se o guardrail de cota está ativo |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -583,7 +613,20 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
       "oddEmpate": 3.10,
       "motivo": "Menor odd (3.20) acima do limite (3.0)"
     }
-  ]
+  ],
+  "oddsDeSnapshot": false
+}
+```
+
+### Exemplo — `GET /api/odds/cota`
+
+```json
+{
+  "saldoRestante": 412,
+  "consumoMes": 88,
+  "ultimaLeitura": "2026-09-05T10:00:00",
+  "minRequestsRemaining": 50,
+  "guardrailAtivo": false
 }
 ```
 
@@ -989,7 +1032,8 @@ cartola/
     │           ├── V5__add_budget_maximo.sql                     # Budget máximo em C$
     │           ├── V6__add_peso_desvio.sql                       # Peso da penalidade por desvio padrão
     │           ├── V7__create_escalacao_rodada.sql               # Histórico de escalações por rodada
-    │           └── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
+    │           ├── V8__create_usuario.sql                        # Usuários, perfil de acesso e tokenVersion
+    │           └── V9__create_odds_snapshot.sql                  # Última resposta de odds, para o guardrail de cota
     └── test/
         ├── java/                            # 32 classes de teste — 560 cenários
         └── resources/
