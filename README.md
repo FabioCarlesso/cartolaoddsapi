@@ -1179,7 +1179,7 @@ O guardrail de cota impede o desastre, mas não avisa que armou — e enquanto e
 
 **São arquivos, não serviços.** O projeto não sobe Prometheus nem Grafana: não há nada disso no `docker-compose.yml`. Quem já opera essa stack importa o dashboard e copia as regras; quem não opera não herda uma segunda stack para cuidar.
 
-Para ver o estado da cota **agora**, nada disso é necessário — [`GET /api/odds/cota`](#cota-da-the-odds-api-e-guardrail) devolve saldo, consumo do mês, `guardrailAtivo`, `minRequestsRemaining` e `proximaSondagem` num JSON. O que os arquivos acrescentam é o que o endpoint não tem: histórico ao longo do mês, taxa de erro e avaliação contínua.
+Para ver a cota, nada disso é necessário: [`GET /api/odds/cota`](#cota-da-the-odds-api-e-guardrail) devolve o estado atual e [`GET /api/odds/cota/historico`](#cota-da-the-odds-api-e-guardrail) devolve a série do mês, os dois em JSON. O que os arquivos acrescentam sobre isso é a **avaliação contínua** — algo perguntando pelo saldo sem ninguém abrir tela — e a taxa de erro sobre os contadores, que não têm endpoint.
 
 **Saldo baixo e saldo não lido são estados diferentes.** `odds_api_requests_remaining` exporta `NaN` — e não `-1` — enquanto nenhuma leitura aconteceu, para não fazer todo alerta de saldo baixo disparar a cada deploy. O dashboard mostra `sem leitura ainda` em vez de zero.
 

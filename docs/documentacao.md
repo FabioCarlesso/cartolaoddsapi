@@ -1455,10 +1455,11 @@ Não há serviço de observabilidade no `docker-compose.yml`, e parado em `docs/
 memória, disco ou operação. Quem já opera um Prometheus e um Grafana copia o que precisa; quem
 não opera não herda uma segunda stack para cuidar.
 
-> Para ver o estado da cota **agora** — saldo, consumo do mês, se o guardrail está armado e
-> quando ele destrava — não é preciso nada disto: `GET /api/odds/cota` devolve os sete campos
-> num JSON, incluindo o próprio `minRequestsRemaining`. O que estes arquivos acrescentam é o que
-> o endpoint não tem: histórico ao longo do mês, taxa de erro e avaliação contínua.
+> Para ver a cota não é preciso nada disto. `GET /api/odds/cota` devolve o estado atual nos sete
+> campos, incluindo o próprio `minRequestsRemaining`, e `GET /api/odds/cota/historico` devolve a
+> série do mês (ver 9). O que estes arquivos acrescentam sobre os dois endpoints é a **avaliação
+> contínua** — algo perguntando pelo saldo sem ninguém abrir tela — e a taxa de erro sobre
+> `odds_api_errors_total` / `odds_api_requests_total`, que não têm endpoint equivalente.
 
 ### 14.2 Apontar um Prometheus para a aplicação
 

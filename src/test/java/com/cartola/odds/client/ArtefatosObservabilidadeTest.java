@@ -1,6 +1,7 @@
 package com.cartola.odds.client;
 
 import com.cartola.odds.config.OddsProperties;
+import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -52,8 +53,9 @@ class ArtefatosObservabilidadeTest {
     /** Nomes de metrica na convencao do Prometheus, do jeito que os artefatos os escrevem. */
     private static final Pattern NOME_DE_METRICA = Pattern.compile("odds_api_[a-z_]+");
 
-    @Mock OddsSnapshotRepository snapshotRepository;
-    @Mock OddsCotaRepository     cotaRepository;
+    @Mock OddsSnapshotRepository      snapshotRepository;
+    @Mock OddsCotaRepository          cotaRepository;
+    @Mock OddsCotaHistoricoRepository historicoRepository;
 
     private PrometheusMeterRegistry registry;
 
@@ -64,7 +66,7 @@ class ArtefatosObservabilidadeTest {
         registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
 
         new OddsClient(RestClient.builder().baseUrl(props.getBaseUrl()).build(), props,
-                snapshotRepository, cotaRepository, new ObjectMapper(), registry);
+                snapshotRepository, cotaRepository, historicoRepository, new ObjectMapper(), registry);
     }
 
     @Test
