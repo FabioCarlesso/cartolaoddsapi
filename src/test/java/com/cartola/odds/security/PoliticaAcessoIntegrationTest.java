@@ -138,7 +138,10 @@ class PoliticaAcessoIntegrationTest {
                 new Caso(HttpMethod.GET, "/actuator/metrics", Acesso.ADMIN),
                 new Caso(HttpMethod.GET, "/actuator/prometheus", Acesso.ADMIN),
                 // Saldo e consumo de cota da The Odds API: informacao operacional interna (#40).
-                new Caso(HttpMethod.GET, "/api/odds/cota", Acesso.ADMIN));
+                new Caso(HttpMethod.GET, "/api/odds/cota", Acesso.ADMIN),
+                // O subcaminho precisa de linha propria: o matcher de /api/odds/cota e de path
+                // exato, e sem a regra o historico (#61) cairia no anyRequest().authenticated().
+                new Caso(HttpMethod.GET, "/api/odds/cota/historico", Acesso.ADMIN));
     }
 
     private String tokenUser;

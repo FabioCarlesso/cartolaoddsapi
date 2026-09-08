@@ -427,6 +427,7 @@ como a RFC 9110 exige.
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
+| `GET /api/odds/cota`, `GET /api/odds/cota/**` | `ADMIN` |
 | `POST /api/historico/{rodadaId}/atualizar-pontuacao` | `ADMIN` |
 | `/api/usuarios/me`, `/api/usuarios/me/senha` | Autenticado |
 | `/api/usuarios/**` | `ADMIN` |
@@ -841,6 +842,21 @@ Após o fechamento da rodada, `atualizarPontuacaoReal(rodadaId)` consulta `/atle
 
 > **Restrição da rodada corrente:** o `/atletas/pontuados` do Cartola expõe somente a rodada atual. Para não gravar a pontuação de uma rodada em outra, `atualizarPontuacaoReal` valida `rodadaId == rodada corrente` (via `/mercado/status`) e lança `IllegalArgumentException` (→ `400`) caso contrário. A leitura e a chamada HTTP ocorrem fora de transação de escrita; apenas o `saveAll` final abre transação.
 
+**Tabela `odds_cota_historico` (migration `V11`):**
+
+| Coluna | Tipo | Conteúdo |
+|---|---|---|
+| `id` | `BIGSERIAL` | Chave |
+| `instante` | `TIMESTAMP NOT NULL` | Momento da leitura dos headers de cota |
+| `saldo_restante` | `BIGINT` | `x-requests-remaining`; nulo quando o header não veio |
+| `consumo_mes` | `BIGINT` | `x-requests-used`; nulo quando o header não veio |
+
+Append-only: uma linha por leitura, nunca atualizada. Complementa a `odds_cota` (`V10`, linha
+única com o estado corrente) em vez de substituí-la — é a linha única que o guardrail recupera no
+boot, e é a série que responde "quanto se gastou ao longo do mês". Sem retenção, por decisão: uma
+linha só nasce de uma chamada ao provedor, e as chamadas são limitadas pela própria cota que a
+tabela mede (~500 linhas/mês no plano free).
+
 **Tabela `escalacao_rodada` (migration `V7`):**
 
 ```sql
@@ -1165,6 +1181,8 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `AtletaTest` | Unitário | `formatado()`, `isDuvida()`, `isProvavel()`, imutabilidade `@With` |
 | `EnumsTest` | Unitário | `fromId()`, `fromSigla()`, `isEscalavel()`, `idsEscalaveis()` para todos os valores |
 | `OddsServiceTest` | Unitário (Mockito) | Filtro ODD_LIMITE, normalização, filtro por rodada atual, fallback sem confrontos, múltiplos jogos, jogo sem bookmaker, set imutável |
+| `OddsClientTest` | Unitário (Mockito + MockRestServiceServer) | Guardrail de cota, sondagem, fallback por snapshot, leitura dos headers e gravação do histórico de leituras |
+| `OddsCotaServiceTest` | Unitário (Mockito) | Montagem de `GET /api/odds/cota`, janela do histórico, detecção de reinício de ciclo e recusa de janela inválida |
 | `CartolaDataServiceTest` | Unitário (Mockito) | Filtros status/preço/favorito, mapeamento de posição, fallback de sigla, times da casa e confrontos da rodada |
 | `ScoreServiceTest` | Unitário (Mockito) | Pesos ponderados, bônus casa/favorito, desempenho real vs proxy, imutabilidade |
 | `MontadorTimeServiceTest` | Unitário | Formação 4-3-3, regra de defesa sem clube repetido, limite máximo por clube, fallback intermediário (relaxa defesa mas mantém limite por clube), capitão, reserva de luxo pertencente ao conjunto de reservas, reservas por posição sem TEC, dúvidas com substituto |
@@ -1227,6 +1245,8 @@ mvn test jacoco:report
 | `GET /api/ranking?posicao=MEI&limite=10` | Top 10 meias |
 | `GET /api/favoritos` | Times favoritos com oddLimite atual |
 | `GET /api/favoritos?oddLimite=2.5` | Favoritos com limite customizado |
+| `GET /api/odds/cota` | Estado da cota da The Odds API (`ADMIN`) |
+| `GET /api/odds/cota/historico` | Série das leituras de cota na janela (`?dias=30`) (`ADMIN`) |
 | `DELETE /api/cache` | Invalida todos os caches |
 | `DELETE /api/cache/{nome}` | Invalida um cache específico |
 | `GET /api/config` | Retorna configuração atual |
