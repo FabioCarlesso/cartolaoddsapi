@@ -4,8 +4,10 @@ import com.cartola.odds.config.CacheConfig;
 import com.cartola.odds.config.OddsProperties;
 import com.cartola.odds.model.OddsComOrigem;
 import com.cartola.odds.model.OddsCota;
+import com.cartola.odds.model.OddsCotaHistorico;
 import com.cartola.odds.model.OddsSnapshot;
 import com.cartola.odds.model.response.OddsResponse;
+import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -66,11 +68,12 @@ public class OddsClient {
     static final String METRICA_ERRORS    = "odds.api.errors";
     static final String METRICA_REMAINING = "odds.api.requests.remaining";
 
-    private final RestClient             restClient;
-    private final OddsProperties         props;
-    private final OddsSnapshotRepository snapshotRepository;
-    private final OddsCotaRepository     cotaRepository;
-    private final ObjectMapper           objectMapper;
+    private final RestClient                  restClient;
+    private final OddsProperties              props;
+    private final OddsSnapshotRepository      snapshotRepository;
+    private final OddsCotaRepository          cotaRepository;
+    private final OddsCotaHistoricoRepository historicoRepository;
+    private final ObjectMapper                objectMapper;
 
     private final Counter requestsTotal;
     private final Counter errorsTotal;
@@ -93,13 +96,15 @@ public class OddsClient {
                        OddsProperties props,
                        OddsSnapshotRepository snapshotRepository,
                        OddsCotaRepository cotaRepository,
+                       OddsCotaHistoricoRepository historicoRepository,
                        ObjectMapper objectMapper,
                        MeterRegistry meterRegistry) {
-        this.restClient         = restClient;
-        this.props              = props;
-        this.snapshotRepository = snapshotRepository;
-        this.cotaRepository     = cotaRepository;
-        this.objectMapper       = objectMapper;
+        this.restClient          = restClient;
+        this.props               = props;
+        this.snapshotRepository  = snapshotRepository;
+        this.cotaRepository      = cotaRepository;
+        this.historicoRepository = historicoRepository;
+        this.objectMapper        = objectMapper;
         // Nomes na convencao do Micrometer (pontuada), e nao ja no formato do Prometheus: cada
         // registry aplica a propria traducao, e o codigo nao fica preso ao exporter da vez. Na
         // exposicao o resultado e identico ao anterior — odds_api_requests_total,
@@ -361,6 +366,30 @@ public class OddsClient {
         }
         ultimaLeitura.set(LocalDateTime.now());
         persistirCota();
+        registrarHistorico();
+    }
+
+    /**
+     * Acrescenta a leitura a serie de {@code odds_cota_historico} (#61). Fica aqui, e nao no
+     * {@link #persistirCota()}, porque o outro caminho que chama {@code persistirCota} e a
+     * liberacao de sondagem em {@link #guardrailBloqueia()} — ali nenhum header foi lido e o
+     * saldo nao mudou. Gravar tambem naquele ponto encheria a serie de pontos que nao sao
+     * leituras, e o grafico do mes passaria a mostrar degraus onde nada aconteceu.
+     *
+     * <p>Falha aqui nao interrompe a busca, pelo mesmo motivo do {@code persistirCota}: isto e
+     * um registro para grafico, e nao pode transformar {@code /api/favoritos} e {@code /api/time}
+     * em 500 depois de o credito ja ter sido gasto.
+     */
+    private void registrarHistorico() {
+        try {
+            var leitura = new OddsCotaHistorico();
+            leitura.setInstante(ultimaLeitura.get());
+            leitura.setSaldoRestante(getRequestsRemaining());
+            leitura.setConsumoMes(getRequestsUsed());
+            historicoRepository.save(leitura);
+        } catch (Exception e) {
+            log.warn("Nao foi possivel registrar a leitura de cota no historico: {}", e.getMessage());
+        }
     }
 
     /**

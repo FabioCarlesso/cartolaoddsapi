@@ -38,7 +38,7 @@ import java.util.List;
  *               /actuator/health, /actuator/health/**, /actuator/info
  *               /swagger-ui**, /v3/api-docs** (404 no perfil prod — springdoc desligado)
  * ADMIN         /actuator/** (metrics, prometheus)
- *               GET /api/odds/cota
+ *               GET /api/odds/cota, GET /api/odds/cota/**
  *               PATCH /api/config, POST /api/config/reset
  *               DELETE /api/cache, DELETE /api/cache/**
  *               POST /api/historico/{rodada}/atualizar-pontuacao
@@ -128,8 +128,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/config/reset").hasRole(ADMIN)
                         .requestMatchers(HttpMethod.DELETE, "/api/cache", "/api/cache/**").hasRole(ADMIN)
                         // Saldo e consumo da cota da The Odds API: informacao operacional
-                        // interna, no mesmo espirito de /actuator/metrics.
-                        .requestMatchers(HttpMethod.GET, "/api/odds/cota").hasRole(ADMIN)
+                        // interna, no mesmo espirito de /actuator/metrics. O subcaminho entra
+                        // explicitamente porque o matcher e de path exato: sem ele,
+                        // /api/odds/cota/historico cairia no anyRequest().authenticated() la
+                        // embaixo e a serie ficaria aberta a qualquer token.
+                        .requestMatchers(HttpMethod.GET, "/api/odds/cota", "/api/odds/cota/**").hasRole(ADMIN)
                         // Regrava a pontuacao real de todos os atletas da rodada numa tabela
                         // que e da instancia, nao de quem chamou, e consulta a API do Cartola
                         // antes disso. E a unica escrita global fora de /api/config: as demais

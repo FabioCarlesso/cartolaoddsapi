@@ -1,6 +1,7 @@
 package com.cartola.odds.controller;
 
 import com.cartola.odds.controller.api.OddsCotaApi;
+import com.cartola.odds.model.response.OddsCotaHistoricoResponse;
 import com.cartola.odds.model.response.OddsCotaResponse;
 import com.cartola.odds.service.OddsCotaService;
 import lombok.RequiredArgsConstructor;
@@ -19,5 +20,11 @@ public class OddsCotaController implements OddsCotaApi {
     public ResponseEntity<OddsCotaResponse> buscarCota() {
         log.info("GET /api/odds/cota");
         return ResponseEntity.ok(oddsCotaService.buscarCota());
+    }
+
+    @Override
+    public ResponseEntity<OddsCotaHistoricoResponse> buscarHistorico(int dias) {
+        log.info("GET /api/odds/cota/historico | dias={}", dias);
+        return ResponseEntity.ok(oddsCotaService.buscarHistorico(dias));
     }
 }

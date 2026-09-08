@@ -221,6 +221,10 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
 - **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura,
   se o guardrail está ativo e — a pergunta que se faz ao ver o guardrail armado — quando a
   próxima sondagem libera uma chamada (`proximaSondagem`).
+- **`GET /api/odds/cota/historico`** (`ADMIN`): a série das leituras dentro de uma janela
+  (`?dias=30`, de 1 a 365), em ordem cronológica. É o que responde *"quanto eu gastei ao longo
+  deste mês"* — a `odds_cota` guarda só o estado corrente, e uma linha sobrescrita não tem
+  passado. Cada item traz `reinicioDeCota: true` na primeira leitura de um ciclo novo.
 - **Guardrail** `odds.api.min-requests-remaining` (padrão `50`): abaixo desse saldo, o
   `OddsClient` para de chamar o provedor e passa a servir a **última resposta conhecida**,
   persistida na tabela `odds_snapshot` — o que faz o fallback sobreviver a restart e redeploy,
@@ -233,6 +237,10 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
 - **Estado persistido** na tabela `odds_cota` e recuperado no boot: sem isso, cada deploy
   voltaria para "sem leitura" e desarmaria o guardrail justamente quando o cache em memória
   some — que é o momento em que a próxima requisição quer chamar o provedor.
+- **Histórico append-only** na tabela `odds_cota_historico`: uma linha por leitura de header,
+  gravada ao lado do estado corrente. A tabela não tem retenção, e é decisão: uma linha só nasce
+  de uma chamada ao provedor, e as chamadas são limitadas pela própria cota que ela mede — no
+  plano free, no máximo ~500 linhas por mês.
 - Log em `WARN` quando o saldo cruza o **dobro do mínimo** e o próprio mínimo configurado (com
   o padrão de `50`, os limiares são 100 e 50), e em `ERROR` quando o guardrail entra em ação ou
   quando o provedor falha sem snapshot disponível.
@@ -360,7 +368,7 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
-| `GET /api/odds/cota` | `ADMIN` |
+| `GET /api/odds/cota`, `/api/odds/cota/**` | `ADMIN` |
 | `GET /api/usuarios/me`, `PATCH /api/usuarios/me/senha` | Autenticado (qualquer perfil) |
 | Todo o resto de `/api/usuarios**` | `ADMIN` |
 | Qualquer outra rota | Autenticado |
@@ -615,6 +623,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
 | `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura, se o guardrail de cota está ativo e quando a próxima sondagem o destrava |
+| `GET` | `/api/odds/cota/historico` | **`ADMIN`** — série das leituras de cota na janela (`?dias=30`, 1 a 365), em ordem cronológica, com marca de reinício de ciclo |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -668,6 +677,27 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
   "proximaSondagem": "2026-09-06T10:00:00"
 }
 ```
+
+### Exemplo — `GET /api/odds/cota/historico?dias=7`
+
+```json
+{
+  "dias": 7,
+  "desde": "2026-08-29T10:00:00",
+  "total": 3,
+  "leituras": [
+    { "instante": "2026-08-31T22:00:00", "saldoRestante": 8,   "consumoMes": 492, "reinicioDeCota": false },
+    { "instante": "2026-09-01T09:00:00", "saldoRestante": 500, "consumoMes": 0,   "reinicioDeCota": true  },
+    { "instante": "2026-09-01T10:00:00", "saldoRestante": 499, "consumoMes": 1,   "reinicioDeCota": false }
+  ]
+}
+```
+
+> `reinicioDeCota` marca a primeira leitura de um ciclo novo: o consumo caiu em relação à leitura
+> anterior, ou seja, o provedor renovou a cota entre as duas. A detecção acontece uma vez, no
+> servidor, para que quem desenha o gráfico não precise reimplementá-la — e para que a queda do
+> consumo não seja lida como falha de coleta. Nunca vem `true` na primeira leitura da janela:
+> sem uma anterior para comparar, afirmar que houve renovação seria chute.
 
 ### Exemplo — `GET /api/ranking?posicao=ATA&limite=3`
 

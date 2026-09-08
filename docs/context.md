@@ -333,6 +333,38 @@ o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mí
 cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
 fica silenciosa até existir dado de verdade.
 
+### Histórico das leituras de cota
+
+A `odds_cota` guarda o estado corrente numa linha só, sobrescrita a cada leitura — e é isso que o
+guardrail precisa no boot. Mas uma linha sobrescrita não tem passado, então "quanto se gastou ao
+longo deste mês" não tinha resposta dentro da aplicação. Foi por não ter que a pergunta quase
+virou um Prometheus ao lado (#58): guardar amostras era o serviço que aquela stack prestava, e
+era o único que ela prestava de fato. Guardar a série aqui custa uma tabela.
+
+A `odds_cota_historico` (#61) é append-only e complementa a `odds_cota`, não a substitui: as duas
+respondem perguntas diferentes e mudam pelo mesmo evento. O append fica em `registrarCota()`, e
+não em `persistirCota()`, porque o outro chamador de `persistirCota` é a liberação de sondagem em
+`guardrailBloqueia()` — ali nenhum header foi lido e o saldo não mudou. Gravar também naquele
+ponto encheria a série de degraus onde nada aconteceu. Falha ao gravar não interrompe a busca,
+pela mesma regra do `persistirCota`: é registro para gráfico, não pode custar um `500` depois de
+o crédito já ter sido gasto.
+
+Não há retenção, e é decisão em vez de esquecimento: uma linha só nasce de uma chamada ao
+provedor, e as chamadas são limitadas pela própria cota que a tabela mede — no plano free, no
+máximo ~500 linhas por mês. Uma política de expurgo custaria mais atenção do que o espaço que
+economiza.
+
+A virada de ciclo é detectada no servidor, e não em cada consumidor: `reinicioDeCota` marca a
+leitura em que o consumo caiu em relação à anterior. A renovação da The Odds API não está
+confirmada como sendo por mês calendário ou por aniversário da assinatura, e detectar pela série
+funciona nos dois casos — enquanto chutar o dia 1º cortaria o gráfico no lugar errado. A primeira
+leitura da janela nunca é marcada: sem uma anterior para comparar, afirmar que houve renovação
+seria chute. Sem essa marca, a queda do consumo pareceria falha de coleta.
+
+O matcher de `/api/odds/cota` no `SecurityConfig` é de path exato, então o subcaminho precisou
+entrar explicitamente. Sem isso, `/api/odds/cota/historico` cairia no
+`anyRequest().authenticated()` e a série ficaria aberta a qualquer token — a rota que existe
+justamente para descrever o consumo do componente pago.
 ### Dashboard e alertas da cota
 
 O guardrail evita o desastre, mas não avisa que armou — e armado ele serve snapshot antigo em
@@ -362,10 +394,12 @@ Os artefatos são arquivos, não serviços: o projeto não sobe Prometheus nem G
 versão desta issue trazia um perfil `observabilidade` no compose, e ele foi cortado antes do
 merge — o estado *atual* da cota, que é o que se olha em 90% das vezes, já sai inteiro de
 `GET /api/odds/cota`, inclusive o `minRequestsRemaining` que o dashboard precisa duplicar. Uma
-segunda stack para cuidar não se paga por gráfico; o que ela acrescenta de fato é histórico do
-mês, taxa de erro e avaliação contínua, e quem precisar disso normalmente já opera um Prometheus.
-Somado a isso, o scrape depende de um token de `ADMIN` que expira em 24 h (#44), então a stack
-não teria como rodar continuamente mesmo se estivesse no compose.
+segunda stack para cuidar não se paga por gráfico. O que sobra de exclusivo dela é a avaliação
+contínua — alguém perguntando pelo saldo sem ninguém abrir tela — e a taxa de erro sobre os
+contadores; o histórico do mês deixou de estar nessa lista quando a série passou a ser guardada
+na própria aplicação (#61, acima). Somado a isso, o scrape depende de um token de `ADMIN` que
+expira em 24 h (#44), então a stack não teria como rodar continuamente mesmo se estivesse no
+compose.
 
 ### Observabilidade (Spring Actuator + Micrometer)
 

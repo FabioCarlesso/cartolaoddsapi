@@ -6,7 +6,9 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.cartola.odds.config.OddsProperties;
 import com.cartola.odds.model.OddsCota;
+import com.cartola.odds.model.OddsCotaHistorico;
 import com.cartola.odds.model.OddsSnapshot;
+import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
@@ -31,9 +34,12 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
@@ -56,8 +62,9 @@ class OddsClientTest {
             [{"id":"1","home_team":"Flamengo","away_team":"Palmeiras","bookmakers":[]}]
             """;
 
-    @Mock OddsSnapshotRepository snapshotRepository;
-    @Mock OddsCotaRepository     cotaRepository;
+    @Mock OddsSnapshotRepository       snapshotRepository;
+    @Mock OddsCotaRepository           cotaRepository;
+    @Mock OddsCotaHistoricoRepository  historicoRepository;
 
     private MockRestServiceServer server;
     private OddsClient            oddsClient;
@@ -82,7 +89,7 @@ class OddsClientTest {
         meterRegistry = new SimpleMeterRegistry();
 
         oddsClient = new OddsClient(builder.build(), props, snapshotRepository, cotaRepository,
-                new ObjectMapper(), meterRegistry);
+                historicoRepository, new ObjectMapper(), meterRegistry);
     }
 
     @Nested
@@ -297,6 +304,95 @@ class OddsClientTest {
             var resultado = oddsClient.buscarOdds();
 
             assertThat(resultado.deSnapshot()).isTrue();
+        }
+    }
+
+    @Nested
+    @DisplayName("historico de leituras de cota")
+    class HistoricoDeLeituras {
+
+        @Test
+        @DisplayName("deve gravar uma leitura por resposta que traz os headers de cota")
+        void deveGravarUmaLeituraPorResposta() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            // As duas expectativas vao antes das duas chamadas: o MockRestServiceServer nao
+            // aceita registrar expectativa depois que uma requisicao ja passou por ele.
+            responderComCota("412", "88");
+            responderComCota("411", "89");
+            oddsClient.buscarOdds();
+            oddsClient.buscarOdds();
+
+            var gravadas = ArgumentCaptor.forClass(OddsCotaHistorico.class);
+            verify(historicoRepository, times(2)).save(gravadas.capture());
+
+            assertThat(gravadas.getAllValues())
+                    .extracting(OddsCotaHistorico::getSaldoRestante, OddsCotaHistorico::getConsumoMes)
+                    .containsExactly(tuple(412L, 88L), tuple(411L, 89L));
+            assertThat(gravadas.getAllValues()).allSatisfy(
+                    leitura -> assertThat(leitura.getInstante()).isNotNull());
+        }
+
+        @Test
+        @DisplayName("deve gravar a leitura tambem na resposta de erro que traz os headers")
+        void deveGravarNaRespostaDeErro() {
+            // E onde o saldo real aparece quando a cota estoura. Deixar esse ponto de fora
+            // faria o grafico terminar no ultimo valor saudavel, escondendo justamente a
+            // queda que interessa.
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS).headers(cota("3", "497")));
+
+            oddsClient.buscarOdds();
+
+            var gravada = ArgumentCaptor.forClass(OddsCotaHistorico.class);
+            verify(historicoRepository).save(gravada.capture());
+            assertThat(gravada.getValue().getSaldoRestante()).isEqualTo(3L);
+            assertThat(gravada.getValue().getConsumoMes()).isEqualTo(497L);
+        }
+
+        @Test
+        @DisplayName("nao deve gravar leitura quando a resposta nao traz nenhum header de cota")
+        void naoDeveGravarSemHeaders() {
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON));
+
+            oddsClient.buscarOdds();
+
+            verify(historicoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("nao deve gravar leitura na sondagem liberada pelo guardrail")
+        void naoDeveGravarNaSondagem() {
+            // A sondagem chama persistirCota() para marcar que tentou — mas nao leu header
+            // nenhum, entao nao mediu nada. Enganchar o historico no persistirCota faria esta
+            // tentativa virar um ponto no grafico, um degrau onde o saldo nao mudou.
+            comSaldoLidoHa(30, LocalDateTime.now().minusHours(25));
+            comSnapshot(JOGO_JSON, LocalDateTime.now().minusDays(1));
+            server.expect(requestTo(containsString("/odds")))
+                    .andRespond(withSuccess(JOGO_JSON, MediaType.APPLICATION_JSON));
+
+            oddsClient.buscarOdds();
+
+            server.verify();
+            verify(cotaRepository, atLeastOnce()).save(any());
+            verify(historicoRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("falha ao gravar o historico nao deve interromper a busca de odds")
+        void falhaNoHistoricoNaoDerrubaBusca() {
+            // O historico e um registro para grafico. Nao pode transformar /api/favoritos e
+            // /api/time em 500 — ainda por cima depois de o credito ja ter sido gasto.
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            when(historicoRepository.save(any())).thenThrow(new RuntimeException("banco fora do ar"));
+            responderComCota("412", "88");
+
+            var resultado = oddsClient.buscarOdds();
+
+            assertThat(resultado.odds()).hasSize(1);
+            assertThat(oddsClient.getRequestsRemaining()).isEqualTo(412L);
         }
     }
 
