@@ -1,22 +1,26 @@
 # ══════════════════════════════════════════════════════════════════════
-# Prometheus — coleta das metricas do cartola-odds
+# Prometheus — exemplo de coleta das metricas do cartola-odds (#58)
 #
-# Usado pelo perfil `observabilidade` do docker-compose.yml:
-#   docker compose --profile observabilidade up
+# Este arquivo e referencia, nao um servico que o projeto sobe: nao ha
+# Prometheus no docker-compose.yml. Copie o `scrape_config` abaixo para o
+# Prometheus que voce ja opera, junto com o `rule_files` que carrega os
+# alertas, e recarregue (`curl -X POST http://prometheus:9090/-/reload`).
 #
-# O alvo e /actuator/prometheus, que exige um token de ADMIN (a matriz do
-# SecurityConfig nao abre metricas para anonimo). O token vai num arquivo,
-# e nao aqui: o Prometheus nao expande variaveis de ambiente no config, e
-# um token colado neste arquivo iria para o repositorio.
+# ── O alvo ───────────────────────────────────────────────────────────
+# O Actuator responde na mesma porta da aplicacao (nao ha porta separada),
+# e /actuator/prometheus exige um token de ADMIN — a matriz do SecurityConfig
+# nao abre metricas para anonimo.
 #
-#   cp docs/observabilidade/scrape-token.example docs/observabilidade/scrape-token
-#   # cole dentro o accessToken devolvido por POST /api/auth/login
+# O token vai num arquivo, e nao inline: o Prometheus nao expande variaveis de
+# ambiente no proprio config, e um token colado aqui iria para o repositorio.
+# `docs/observabilidade/scrape-token` esta no .gitignore para o caso de voce
+# criar o arquivo neste diretorio.
 #
-# O token expira em JWT_EXPIRATION_MS (padrao 24 h) e nao ha renovacao: a
-# coleta para quando ele vence, e refaze-la e colar um token novo. Enquanto
-# a issue #44 (credencial de conta de maquina) nao fecha, este perfil serve
-# para diagnostico e para validar dashboard e alertas — nao para monitoracao
-# continua desassistida.
+# ── Limite conhecido ─────────────────────────────────────────────────
+# O access token expira em JWT_EXPIRATION_MS (padrao 24 h) e nao ha renovacao:
+# a coleta para quando ele vence, e retoma-la e colar um token novo. O sintoma
+# e o alvo aparecer como DOWN com 401 em /targets. Uma credencial de conta de
+# maquina esta na issue #44.
 # ══════════════════════════════════════════════════════════════════════
 
 global:
@@ -26,7 +30,7 @@ global:
   evaluation_interval: 30s
 
 rule_files:
-  - /etc/prometheus/alertas-cota-odds.yml
+  - alertas-cota-odds.yml
 
 scrape_configs:
   - job_name: cartola-odds
@@ -36,5 +40,4 @@ scrape_configs:
       type: Bearer
       credentials_file: /etc/prometheus/scrape-token
     static_configs:
-      # Nome do servico no compose. Fora do compose, troque por host:porta da aplicacao.
       - targets: ['cartola-odds:8080']

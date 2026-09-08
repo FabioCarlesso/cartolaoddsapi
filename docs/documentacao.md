@@ -918,7 +918,7 @@ GET /api/time
 ```
 cartola/
 ├── Dockerfile               # Multi-stage build (JDK 21 build + JRE 21 runtime)
-├── docker-compose.yml       # app + postgres:16 (+ perfil `observabilidade`)
+├── docker-compose.yml       # app + postgres:16, healthcheck, resource limits
 ├── .env.example             # Template de variáveis de ambiente
 ├── .dockerignore
 ├── pom.xml
@@ -931,9 +931,7 @@ cartola/
 │       ├── grafana-cota-odds.json
 │       ├── alertas-cota-odds.yml
 │       ├── alertas-cota-odds.test.yml
-│       ├── prometheus.yml
-│       ├── scrape-token.example
-│       └── grafana/provisioning/            # Datasource + provider de dashboards
+│       └── prometheus.yml
 └── src/
     ├── main/java/com/cartola/odds/
     │   ├── CartolaOddsApplication.java
@@ -1430,55 +1428,58 @@ Tudo vive em `docs/observabilidade/`:
 | `grafana-cota-odds.json` | Dashboard do Grafana (uid `cota-the-odds-api`) |
 | `alertas-cota-odds.yml` | Regras de alerta do Prometheus |
 | `alertas-cota-odds.test.yml` | Teste das regras (`promtool test rules`) |
-| `prometheus.yml` | Configuração de scrape usada pelo perfil do compose |
-| `scrape-token.example` | Modelo do arquivo de token do scrape |
-| `grafana/provisioning/` | Datasource e provider de dashboard do Grafana |
+| `prometheus.yml` | Exemplo de configuração de scrape |
 
-### 14.2 Subir Prometheus e Grafana pelo compose
+São quatro arquivos de texto, e é de propósito: **o projeto não sobe Prometheus nem Grafana.**
+Não há serviço de observabilidade no `docker-compose.yml`, e parado em `docs/` nada disso custa
+memória, disco ou operação. Quem já opera um Prometheus e um Grafana copia o que precisa; quem
+não opera não herda uma segunda stack para cuidar.
 
-O `docker-compose.yml` traz um perfil opcional. Fora dele nada é criado: monitorar a cota não
-pode ser condição para rodar a aplicação.
+> Para ver o estado da cota **agora** — saldo, consumo do mês, se o guardrail está armado e
+> quando ele destrava — não é preciso nada disto: `GET /api/odds/cota` devolve os sete campos
+> num JSON, incluindo o próprio `minRequestsRemaining`. O que estes arquivos acrescentam é o que
+> o endpoint não tem: histórico ao longo do mês, taxa de erro e avaliação contínua.
 
-```bash
-# 1. O scrape de /actuator/prometheus exige ADMIN — crie o arquivo de token
-cp docs/observabilidade/scrape-token.example docs/observabilidade/scrape-token
+### 14.2 Apontar um Prometheus para a aplicação
 
-# 2. Faça login e cole o accessToken dentro do arquivo (sem aspas, sem "Bearer")
-curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@cartolaodds.local","senha":"..."}'
+O Actuator responde na **mesma porta da aplicação** (`8080`) — não há porta separada. O alvo é
+`GET /actuator/prometheus`, que exige um token de `ADMIN`: a matriz do `SecurityConfig` não abre
+métricas para anônimo.
 
-# 3. Suba o perfil
-docker compose --profile observabilidade up -d
+`docs/observabilidade/prometheus.yml` traz o `scrape_config` pronto para copiar:
+
+```yaml
+scrape_configs:
+  - job_name: cartola-odds
+    metrics_path: /actuator/prometheus
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/scrape-token
+    static_configs:
+      - targets: ['cartola-odds:8080']
 ```
 
-| Serviço | URL | Credencial |
-|---|---|---|
-| Prometheus | http://localhost:9090 | — |
-| Grafana | http://localhost:3000 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_SENHA` (padrão `admin`/`admin`) |
+O token vai num **arquivo**, e não inline: o Prometheus não expande variáveis de ambiente no
+próprio config, e um token colado no YAML iria para o repositório. O caminho
+`docs/observabilidade/scrape-token` está no `.gitignore` para o caso de você criar o arquivo aqui.
 
-O Grafana sobe com o datasource e o dashboard já provisionados, na pasta **Cartola Odds**. O
-arquivo de token está no `.gitignore` — ele carrega uma credencial de `ADMIN`.
+As regras de alerta entram no `rule_files` do mesmo Prometheus. Depois de copiar, recarregue:
 
-Pular o passo 1 faz o `up` parar dizendo qual arquivo falta (`bind source path does not exist`),
-em vez de subir um Prometheus que falha depois com `is a directory`: o mount do token usa
-`create_host_path: false` justamente para o Docker não criar um diretório vazio no lugar.
+```bash
+curl -X POST http://prometheus:9090/-/reload
+```
 
 > ⚠️ **Limite conhecido.** O access token expira em `JWT_EXPIRATION_MS` (padrão 24 h) e não há
-> renovação: o scrape para quando ele vence e volta quando alguém cola um token novo. Enquanto a
-> [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44) (credencial de conta de
-> máquina) não fecha, este perfil serve para diagnóstico e para validar dashboard e alertas — não
-> para monitoração contínua desassistida. O sintoma é o alvo `cartola-odds` aparecer como `DOWN`
-> com `401` em http://localhost:9090/targets.
+> renovação: a coleta para quando ele vence e volta quando alguém cola um token novo. O sintoma é
+> o alvo `cartola-odds` aparecer como `DOWN` com `401` em `/targets`. Uma credencial de conta de
+> máquina está na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44) — até lá,
+> a coleta contínua não tem caminho sustentável.
 
-### 14.3 Importar o dashboard num Grafana existente
+### 14.3 Importar o dashboard
 
-Fora do compose, **Dashboards → New → Import → Upload JSON file**, e apontar para
-`docs/observabilidade/grafana-cota-odds.json`. Não é preciso editar o JSON: a fonte de dados é
+No seu Grafana: **Dashboards → New → Import → Upload JSON file**, apontando para
+`docs/observabilidade/grafana-cota-odds.json`. Não é preciso editar o JSON — a fonte de dados é
 uma variável no topo do dashboard, e o Grafana pede para escolhê-la na importação.
-
-O Prometheus aponta para `GET /actuator/prometheus` na porta da aplicação (a mesma, `8080` —
-o Actuator não tem porta própria), com um `Bearer` de `ADMIN`. Ver `docs/observabilidade/prometheus.yml`.
 
 **Duas variáveis no topo do dashboard** existem porque os valores correspondentes não são
 exportados como métrica:

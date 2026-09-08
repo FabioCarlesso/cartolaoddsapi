@@ -358,10 +358,14 @@ O alerta de saldo parado mede o tempo no `for:`, e não numa janela de 25 h dent
 Prometheus recém-subido dispararia na primeira meia hora. Com janela curta e `for: 25h`, as 25
 horas precisam ter acontecido de fato.
 
-O perfil `observabilidade` do compose sobe Prometheus e Grafana já provisionados, mas depende de
-um token de `ADMIN` colado num arquivo local: o Prometheus não expande variáveis de ambiente no
-config, e o token expira em 24 h. Enquanto a #44 não fecha, o perfil serve para diagnóstico e
-para validar dashboard e alertas — não para monitoração contínua desassistida.
+Os artefatos são arquivos, não serviços: o projeto não sobe Prometheus nem Grafana. A primeira
+versão desta issue trazia um perfil `observabilidade` no compose, e ele foi cortado antes do
+merge — o estado *atual* da cota, que é o que se olha em 90% das vezes, já sai inteiro de
+`GET /api/odds/cota`, inclusive o `minRequestsRemaining` que o dashboard precisa duplicar. Uma
+segunda stack para cuidar não se paga por gráfico; o que ela acrescenta de fato é histórico do
+mês, taxa de erro e avaliação contínua, e quem precisar disso normalmente já opera um Prometheus.
+Somado a isso, o scrape depende de um token de `ADMIN` que expira em 24 h (#44), então a stack
+não teria como rodar continuamente mesmo se estivesse no compose.
 
 ### Observabilidade (Spring Actuator + Micrometer)
 

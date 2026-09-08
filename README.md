@@ -1144,18 +1144,12 @@ O guardrail de cota impede o desastre, mas não avisa que armou — e enquanto e
 |---|---|
 | `grafana-cota-odds.json` | Dashboard: saldo restante, consumo do mês, taxa de erro e estado do guardrail |
 | `alertas-cota-odds.yml` | Alertas: guardrail armado, armado há mais de um dia, saldo sem leitura e taxa de erro anormal |
-| `prometheus.yml` | Configuração de scrape |
+| `alertas-cota-odds.test.yml` | Teste das regras (`promtool test rules`) |
+| `prometheus.yml` | Exemplo de configuração de scrape |
 
-Para subir Prometheus e Grafana já configurados, apontados para a aplicação:
+**São arquivos, não serviços.** O projeto não sobe Prometheus nem Grafana: não há nada disso no `docker-compose.yml`. Quem já opera essa stack importa o dashboard e copia as regras; quem não opera não herda uma segunda stack para cuidar.
 
-```bash
-# O scrape exige ADMIN — cole um access token no arquivo antes de subir
-cp docs/observabilidade/scrape-token.example docs/observabilidade/scrape-token
-
-docker compose --profile observabilidade up -d
-```
-
-Grafana em `http://localhost:3000` (`admin`/`admin` por padrão), com o dashboard já provisionado na pasta **Cartola Odds**; Prometheus em `http://localhost:9090`. Fora do perfil nada disso é criado: monitorar a cota não é condição para rodar a aplicação.
+Para ver o estado da cota **agora**, nada disso é necessário — [`GET /api/odds/cota`](#cota-da-the-odds-api-e-guardrail) devolve saldo, consumo do mês, `guardrailAtivo`, `minRequestsRemaining` e `proximaSondagem` num JSON. O que os arquivos acrescentam é o que o endpoint não tem: histórico ao longo do mês, taxa de erro e avaliação contínua.
 
 **Saldo baixo e saldo não lido são estados diferentes.** `odds_api_requests_remaining` exporta `NaN` — e não `-1` — enquanto nenhuma leitura aconteceu, para não fazer todo alerta de saldo baixo disparar a cada deploy. O dashboard mostra `sem leitura ainda` em vez de zero.
 
