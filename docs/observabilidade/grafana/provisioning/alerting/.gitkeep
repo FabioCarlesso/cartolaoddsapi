@@ -1,0 +1,3 @@
+# Diretorio vazio de proposito: sem ele o Grafana registra um ERROR no boot
+# ("can%27t read provisioning files from directory"). Nada aqui e provisionado —
+# os alertas moram no Prometheus (alertas-cota-odds.yml), nao no Grafana.

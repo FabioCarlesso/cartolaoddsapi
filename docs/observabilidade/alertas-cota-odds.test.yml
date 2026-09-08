@@ -1,0 +1,161 @@
+# ══════════════════════════════════════════════════════════════════════
+# Teste das regras de alerta da cota — `promtool test rules`.
+#
+#   docker run --rm --entrypoint promtool \
+#     -v "$PWD/docs/observabilidade:/cfg:ro" prom/prometheus:v2.53.0 \
+#     test rules /cfg/alertas-cota-odds.test.yml
+#
+# O caso que este arquivo existe para fixar e o do NaN. A metrica de saldo
+# exporta NaN enquanto nao houve leitura, e a regra so nao dispara nesse
+# estado porque comparacao com NaN e falsa no PromQL — um detalhe que
+# sobrevive a qualquer revisao de expressao apenas se estiver preso por teste.
+# ══════════════════════════════════════════════════════════════════════
+
+rule_files:
+  - alertas-cota-odds.yml
+
+evaluation_interval: 5m
+
+tests:
+
+  # ── Saldo abaixo do minimo arma o guardrail, e so ele ────────────
+  - interval: 5m
+    input_series:
+      - series: 'odds_api_requests_remaining{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '40x12'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CotaOddsApiAbaixoDoMinimo
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: CotaOddsApiAbaixoDoMinimo
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              componente: the-odds-api
+              job: cartola-odds
+              instance: cartola-odds:8080
+              application: cartolaoddsapi
+            exp_annotations:
+              resumo: "Guardrail de cota armado (saldo 40 < 50)"
+              descricao: "O saldo da The Odds API caiu abaixo de odds.api.min-requests-remaining. A aplicacao parou de chamar o provedor e serve a ultima resposta conhecida (odds_snapshot). Nada quebrou: o filtro de favoritos continua funcionando com odds que vao envelhecendo."
+              acao: "Confira o saldo e a janela de destravamento em GET /api/odds/cota (campo proximaSondagem). Se a virada de mes esta perto, nao ha o que fazer: a sondagem periodica reavalia o saldo sozinha e o guardrail desarma."
+      # Um dia inteiro abaixo do minimo e o que pede acao humana.
+      - eval_time: 55m
+        alertname: CotaOddsApiGuardrailArmadoHaUmDia
+        exp_alerts: []
+
+  # ── Sem leitura nenhuma (NaN): nenhuma regra de saldo dispara ─────
+  # 54 amostras a cada 30 min cobrem as 26 h que o `for: 25h` exige. A serie
+  # vai escrita porque o repetidor `x` do promtool nao aceita NaN.
+  - interval: 30m
+    input_series:
+      - series: 'odds_api_requests_remaining{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: >-
+          NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN
+          NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN
+          NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN NaN
+    alert_rule_test:
+      - eval_time: 26h
+        alertname: CotaOddsApiAbaixoDoMinimo
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: CotaOddsApiGuardrailArmadoHaUmDia
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: CotaOddsApiSaldoSemLeitura
+        exp_alerts: []
+
+  # ── Saldo saudavel mas parado por mais de um intervalo de sondagem ─
+  - interval: 5m
+    input_series:
+      - series: 'odds_api_requests_remaining{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '300x400'
+    alert_rule_test:
+      # Antes de 25 h de estabilidade real o alerta nao sai, mesmo que a
+      # expressao ja seja verdadeira desde o primeiro minuto.
+      - eval_time: 20h
+        alertname: CotaOddsApiSaldoSemLeitura
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: CotaOddsApiSaldoSemLeitura
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              componente: the-odds-api
+              job: cartola-odds
+              instance: cartola-odds:8080
+              application: cartolaoddsapi
+            exp_annotations:
+              resumo: "Saldo da cota sem atualizacao ha mais de 25 h"
+              descricao: "odds_api_requests_remaining nao muda ha mais de um intervalo de sondagem (odds.api.sonda-intervalo-horas, padrao 24 h). O valor exibido e o da ultima leitura de header, de data desconhecida pelo Prometheus."
+              acao: "Compare com ultimaLeitura em GET /api/odds/cota. Se a aplicacao esta ociosa de verdade, e ruido: aumente a janela desta regra. Se ela esta recebendo trafego, olhe CotaOddsApiTaxaDeErroAlta e os logs do OddsClient."
+      # Saldo alto nao arma guardrail nenhum.
+      - eval_time: 26h
+        alertname: CotaOddsApiAbaixoDoMinimo
+        exp_alerts: []
+
+  # ── Taxa de erro alta com volume suficiente ──────────────────────
+  - interval: 30m
+    input_series:
+      - series: 'odds_api_requests_total{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '0+1x24'
+      - series: 'odds_api_errors_total{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '0+1x24'
+    alert_rule_test:
+      - eval_time: 11h
+        alertname: CotaOddsApiTaxaDeErroAlta
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              componente: the-odds-api
+              job: cartola-odds
+              instance: cartola-odds:8080
+              application: cartolaoddsapi
+            exp_annotations:
+              resumo: "Mais de 50% das chamadas a The Odds API falhando em 6 h"
+              descricao: "A taxa de erro (odds_api_errors_total / odds_api_requests_total) passou de 50% na janela de 6 h. Cada tentativa que falha consome credito igual, entao uma falha persistente queima cota sem produzir odds."
+              acao: "Veja os logs do OddsClient para separar as causas: chave invalida e cota estourada respondem 4xx (o saldo real vem nos headers da propria resposta de erro), provedor fora do ar da timeout. Se for cota estourada, o guardrail arma em seguida sozinho."
+
+  # ── Poucas chamadas nao viram taxa: 1 erro em 1 tentativa e 100% ──
+  - interval: 30m
+    input_series:
+      - series: 'odds_api_requests_total{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+      - series: 'odds_api_errors_total{job="cartola-odds",instance="cartola-odds:8080",application="cartolaoddsapi"}'
+        values: '0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: CotaOddsApiTaxaDeErroAlta
+        exp_alerts: []
+
+  # ── Expressao do painel "Guardrail" do dashboard ─────────────────
+  # Nao e regra de alerta, e o unico lugar onde a leitura de "sem leitura"
+  # do dashboard pode ser verificada por teste. clamp(sgn(minimo - saldo))
+  # precisa devolver 1 armado, 0 desarmado e NaN sem leitura — se ela
+  # colapsasse NaN em 0, o painel diria "desarmado" antes da primeira
+  # chamada, que e exatamente o erro que a metrica evita ao nao exportar -1.
+  - interval: 5m
+    input_series:
+      - series: 'odds_api_requests_remaining{estado="armado"}'
+        values: '40x3'
+      - series: 'odds_api_requests_remaining{estado="folgado"}'
+        values: '300x3'
+      - series: 'odds_api_requests_remaining{estado="sem_leitura"}'
+        values: 'NaN NaN NaN NaN'
+    #
+    # A verificacao e feita por filtro (`== 1`, `== 0`) porque o promtool
+    # compara valores por igualdade, e NaN nunca e igual a NaN. Filtrar diz o
+    # que importa: sem leitura, a expressao nao cai em nenhum dos dois lados —
+    # o painel mostra o texto de "sem leitura ainda", e nao "desarmado".
+    promql_expr_test:
+      - expr: clamp(sgn(50 - odds_api_requests_remaining), 0, 1) == 1
+        eval_time: 10m
+        exp_samples:
+          - labels: '{estado="armado"}'
+            value: 1
+      - expr: clamp(sgn(50 - odds_api_requests_remaining), 0, 1) == 0
+        eval_time: 10m
+        exp_samples:
+          - labels: '{estado="folgado"}'
+            value: 0

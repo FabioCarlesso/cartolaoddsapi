@@ -22,7 +22,8 @@ API REST que monta automaticamente um time competitivo para o Cartola FC cruzand
 11. [Swagger / OpenAPI](#11-swagger--openapi)
 12. [Docker](#12-docker)
 13. [Como Executar](#13-como-executar)
-14. [Melhorias Futuras](#14-melhorias-futuras)
+14. [Observabilidade da Cota](#14-observabilidade-da-cota)
+15. [Melhorias Futuras](#15-melhorias-futuras)
 
 ---
 
@@ -917,14 +918,22 @@ GET /api/time
 ```
 cartola/
 ├── Dockerfile               # Multi-stage build (JDK 21 build + JRE 21 runtime)
-├── docker-compose.yml       # app + postgres:16, healthcheck, resource limits
+├── docker-compose.yml       # app + postgres:16 (+ perfil `observabilidade`)
 ├── .env.example             # Template de variáveis de ambiente
 ├── .dockerignore
 ├── pom.xml
 ├── README.md
 ├── docs/
 │   ├── documentacao.md
-│   └── documentacao.docx
+│   ├── documentacao.docx
+│   ├── context.md
+│   └── observabilidade/                     # Dashboard e alertas da cota (ver 14)
+│       ├── grafana-cota-odds.json
+│       ├── alertas-cota-odds.yml
+│       ├── alertas-cota-odds.test.yml
+│       ├── prometheus.yml
+│       ├── scrape-token.example
+│       └── grafana/provisioning/            # Datasource + provider de dashboards
 └── src/
     ├── main/java/com/cartola/odds/
     │   ├── CartolaOddsApplication.java
@@ -1178,6 +1187,7 @@ Converte valores de query param/path variable que não convertem para o tipo esp
 | `CorsConfigTest` | Unitário | Origens aparadas e entradas vazias descartadas, `HEAD` entre os métodos, headers explícitos, sem curinga |
 | `SwaggerProdIntegrationTest` | Integração (`@ActiveProfiles("prod")`) | Swagger UI e `/v3/api-docs` respondem 404 em produção |
 | `ActuatorEndpointsTest` | Integração (HTTP real) | `health`/`info` públicos, `health` sem detalhes para anônimo e com detalhes para `ADMIN`, `metrics`/`prometheus` exigindo `ADMIN`, endpoints sensíveis não expostos |
+| `ArtefatosObservabilidadeTest` | Unitário | Nomes `odds_api_*` citados no dashboard e nas regras de alerta existem na exposição; o mínimo do guardrail nos artefatos acompanha o `application.properties` |
 
 Os testes de integração usam Flyway em `classpath:db/migration/h2` para manter migrations equivalentes às de produção com sintaxe compatível com H2.
 
@@ -1395,7 +1405,170 @@ mvn spring-boot:run
 
 ---
 
-## 14. Melhorias Futuras
+## 14. Observabilidade da Cota
+
+O guardrail de cota (#40) impede o desastre — a aplicação para de gastar antes de estourar o
+plano —, mas não avisa ninguém de que armou. Enquanto está armado, a aplicação serve o último
+snapshot conhecido, que envelhece em silêncio. Esta seção descreve o dashboard e os alertas que
+tornam esse estado visível (#58).
+
+Nenhuma métrica nova foi adicionada à aplicação: dashboard e alertas usam as três que o
+`OddsClient` já expõe.
+
+| Métrica | Tipo | O que mede |
+|---|---|---|
+| `odds_api_requests_total` | counter | Tentativas de chamada à The Odds API |
+| `odds_api_errors_total` | counter | Tentativas que terminaram em erro |
+| `odds_api_requests_remaining` | gauge | Saldo lido do header `x-requests-remaining` |
+
+### 14.1 Arquivos versionados
+
+Tudo vive em `docs/observabilidade/`:
+
+| Arquivo | Para que serve |
+|---|---|
+| `grafana-cota-odds.json` | Dashboard do Grafana (uid `cota-the-odds-api`) |
+| `alertas-cota-odds.yml` | Regras de alerta do Prometheus |
+| `alertas-cota-odds.test.yml` | Teste das regras (`promtool test rules`) |
+| `prometheus.yml` | Configuração de scrape usada pelo perfil do compose |
+| `scrape-token.example` | Modelo do arquivo de token do scrape |
+| `grafana/provisioning/` | Datasource e provider de dashboard do Grafana |
+
+### 14.2 Subir Prometheus e Grafana pelo compose
+
+O `docker-compose.yml` traz um perfil opcional. Fora dele nada é criado: monitorar a cota não
+pode ser condição para rodar a aplicação.
+
+```bash
+# 1. O scrape de /actuator/prometheus exige ADMIN — crie o arquivo de token
+cp docs/observabilidade/scrape-token.example docs/observabilidade/scrape-token
+
+# 2. Faça login e cole o accessToken dentro do arquivo (sem aspas, sem "Bearer")
+curl -s -X POST http://localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@cartolaodds.local","senha":"..."}'
+
+# 3. Suba o perfil
+docker compose --profile observabilidade up -d
+```
+
+| Serviço | URL | Credencial |
+|---|---|---|
+| Prometheus | http://localhost:9090 | — |
+| Grafana | http://localhost:3000 | `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_SENHA` (padrão `admin`/`admin`) |
+
+O Grafana sobe com o datasource e o dashboard já provisionados, na pasta **Cartola Odds**. O
+arquivo de token está no `.gitignore` — ele carrega uma credencial de `ADMIN`.
+
+Pular o passo 1 faz o `up` parar dizendo qual arquivo falta (`bind source path does not exist`),
+em vez de subir um Prometheus que falha depois com `is a directory`: o mount do token usa
+`create_host_path: false` justamente para o Docker não criar um diretório vazio no lugar.
+
+> ⚠️ **Limite conhecido.** O access token expira em `JWT_EXPIRATION_MS` (padrão 24 h) e não há
+> renovação: o scrape para quando ele vence e volta quando alguém cola um token novo. Enquanto a
+> [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44) (credencial de conta de
+> máquina) não fecha, este perfil serve para diagnóstico e para validar dashboard e alertas — não
+> para monitoração contínua desassistida. O sintoma é o alvo `cartola-odds` aparecer como `DOWN`
+> com `401` em http://localhost:9090/targets.
+
+### 14.3 Importar o dashboard num Grafana existente
+
+Fora do compose, **Dashboards → New → Import → Upload JSON file**, e apontar para
+`docs/observabilidade/grafana-cota-odds.json`. Não é preciso editar o JSON: a fonte de dados é
+uma variável no topo do dashboard, e o Grafana pede para escolhê-la na importação.
+
+O Prometheus aponta para `GET /actuator/prometheus` na porta da aplicação (a mesma, `8080` —
+o Actuator não tem porta própria), com um `Bearer` de `ADMIN`. Ver `docs/observabilidade/prometheus.yml`.
+
+**Duas variáveis no topo do dashboard** existem porque os valores correspondentes não são
+exportados como métrica:
+
+| Variável | Padrão | Espelha |
+|---|---|---|
+| `minimo` | `50` | `odds.api.min-requests-remaining` (`ODDS_API_MIN_REQUESTS_REMAINING`) |
+| `cota_mensal` | `500` | Requisições/mês do plano contratado na The Odds API |
+
+Mudou a configuração da aplicação? Mude aqui e em `alertas-cota-odds.yml` também —
+`ArtefatosObservabilidadeTest` quebra quando o mínimo diverge do `application.properties`.
+
+### 14.4 Painéis
+
+| Painel | Expressão | Leitura |
+|---|---|---|
+| Saldo restante | `odds_api_requests_remaining` | Último saldo lido do provedor |
+| Consumo no mês | `$cota_mensal - odds_api_requests_remaining` | `remaining + used` somam a cota do plano, e `used` não é métrica |
+| Taxa de erro | `increase(errors[janela]) / increase(requests[janela])` | Taxa legítima: os dois contadores medem tentativas |
+| Guardrail | `clamp(sgn($minimo - saldo), 0, 1)` | `ARMADO` / `desarmado` / `sem leitura ainda` |
+| Saldo ao longo do mês | `odds_api_requests_remaining` | Linha tracejada no mínimo do guardrail |
+| Chamadas e erros por hora | `increase(...[1h])` | Onde o crédito foi gasto |
+
+**Saldo baixo e saldo não lido são estados diferentes.** `odds_api_requests_remaining` exporta
+`NaN` — e não o sentinela interno `-1` — enquanto nenhuma leitura aconteceu, justamente para
+não fazer todo alerta de saldo baixo disparar a cada deploy. O painel de saldo mostra
+`sem leitura ainda` em vez de zero, e o painel de guardrail preserva o `NaN` pela aritmética
+(`clamp(sgn(...))`), em vez de colapsá-lo em "desarmado".
+
+### 14.5 Alertas e o que fazer quando cada um dispara
+
+As regras estão em `docs/observabilidade/alertas-cota-odds.yml` e são carregadas pelo
+`prometheus.yml` do perfil. Num Prometheus já existente, copie o arquivo para o diretório de
+regras e recarregue (`curl -X POST http://prometheus:9090/-/reload`).
+
+| Alerta | Dispara quando | Severidade |
+|---|---|---|
+| `CotaOddsApiAbaixoDoMinimo` | Saldo abaixo do mínimo por 15 min | `warning` |
+| `CotaOddsApiGuardrailArmadoHaUmDia` | O mesmo, por 24 h contínuas | `critical` |
+| `CotaOddsApiSaldoSemLeitura` | Saldo parado por mais de 25 h | `warning` |
+| `CotaOddsApiTaxaDeErroAlta` | Mais de 50% de erro em 6 h, com pelo menos 3 chamadas | `warning` |
+
+**`CotaOddsApiAbaixoDoMinimo` — o guardrail armou.** Informativo de propósito: a aplicação já se
+defendeu sozinha, parou de chamar o provedor e passou a servir o snapshot persistido. Nada
+quebrou; o que muda é que as odds começam a envelhecer. Confira saldo e janela de destravamento
+em `GET /api/odds/cota` (campo `proximaSondagem`). Perto da virada do mês não há o que fazer: a
+sondagem periódica reavalia o saldo sozinha e o guardrail desarma.
+
+**`CotaOddsApiGuardrailArmadoHaUmDia` — o que pede decisão humana.** Um dia inteiro armado
+significa que a sondagem já rodou e o saldo continua no chão: a cota não volta sozinha antes da
+virada do mês. Decida entre aumentar o plano da The Odds API e aceitar odds de mais de 24 h. Se
+aceitar, silencie o alerta **com data para acabar** — não o desligue.
+
+**`CotaOddsApiSaldoSemLeitura` — o número no painel virou lembrança.** O saldo só muda quando uma
+chamada acontece; parado por mais de um intervalo de sondagem
+(`odds.api.sonda-intervalo-horas`, padrão 24 h), ele descreve o passado. Compare com
+`ultimaLeitura` em `GET /api/odds/cota`. Se a aplicação está de fato ociosa, é ruído — aumente o
+`for:` da regra. Se está recebendo tráfego, o próximo lugar a olhar é a taxa de erro e os logs do
+`OddsClient`.
+
+**`CotaOddsApiTaxaDeErroAlta` — está queimando crédito sem produzir odds.** Cada tentativa que
+falha consome crédito igual. Os logs do `OddsClient` separam as causas: chave inválida e cota
+estourada respondem `4xx` (e o saldo real vem nos headers da própria resposta de erro), provedor
+fora do ar dá timeout. Se for cota estourada, o guardrail arma em seguida sozinho.
+
+> As duas primeiras regras disparam juntas quando o problema persiste. Com Alertmanager,
+> configure uma inibição de `critical` sobre `warning` no mesmo `componente`.
+
+O envio das notificações (e-mail, Slack) está **fora do escopo**: depende do Alertmanager e da
+preferência de quem opera.
+
+### 14.6 Testar as regras
+
+As regras têm teste próprio, incluindo o comportamento com `NaN` — que é o detalhe que faz um
+deploy novo não disparar todo alerta de saldo:
+
+```bash
+docker run --rm --entrypoint promtool \
+  -v "$PWD/docs/observabilidade:/cfg:ro" prom/prometheus:v2.53.0 \
+  test rules /cfg/alertas-cota-odds.test.yml
+```
+
+Do lado da aplicação, `ArtefatosObservabilidadeTest` confere que todo nome `odds_api_*` citado no
+dashboard e nas regras existe de fato na exposição, e que o mínimo do guardrail nos artefatos é o
+mesmo do `application.properties`. Sem isso, uma renomeação de métrica deixaria o painel vazio e
+o alerta mudo — sem nenhum erro em lugar nenhum.
+
+---
+
+## 15. Melhorias Futuras
 
 ### Dados e Algoritmos
 - [ ] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
@@ -1404,7 +1577,7 @@ mvn spring-boot:run
 
 ### Infraestrutura
 - [ ] **Retry** com backoff exponencial via Spring Retry
-- [ ] **Métricas** com Spring Actuator + Micrometer
+- [x] **Métricas** com Spring Actuator + Micrometer, com dashboard e alertas da cota (ver 14)
 - [ ] **Cobertura de testes** com JaCoCo + relatório HTML
 
 ### Regras de Negócio

@@ -1,0 +1,2 @@
+# Diretorio vazio de proposito: evita o ERROR de provisionamento no boot do
+# Grafana. O dashboard so usa paineis nativos, nenhum plugin externo.

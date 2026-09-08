@@ -1,0 +1,358 @@
+{
+  "uid": "cota-the-odds-api",
+  "title": "Cota da The Odds API",
+  "description": "Consumo, saldo e estado do guardrail da The Odds API (issue #58). Metricas expostas por GET /actuator/prometheus. Os limiares dos paineis espelham odds.api.min-requests-remaining (50) e o dobro dele (100), que sao os mesmos limiares dos avisos em log.",
+  "tags": ["cartola-odds", "the-odds-api", "cota"],
+  "timezone": "browser",
+  "editable": true,
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "Prometheus", "value": "prometheus-cartola" },
+        "hide": 0,
+        "refresh": 1
+      },
+      {
+        "name": "minimo",
+        "label": "Minimo do guardrail",
+        "description": "Espelha odds.api.min-requests-remaining (ODDS_API_MIN_REQUESTS_REMAINING). O minimo nao e exportado como metrica; o painel de guardrail precisa dele para saber onde esta o corte.",
+        "type": "textbox",
+        "query": "50",
+        "current": { "text": "50", "value": "50" },
+        "hide": 0
+      },
+      {
+        "name": "cota_mensal",
+        "label": "Cota do plano",
+        "description": "Requisicoes por mes do plano contratado (free = 500). Usado so para derivar o consumo: remaining + used = cota do plano, e used nao e exportado como metrica.",
+        "type": "textbox",
+        "query": "500",
+        "current": { "text": "500", "value": "500" },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Saldo restante",
+      "description": "Ultimo valor lido do header x-requests-remaining. Enquanto nao houve leitura nenhuma a metrica vale NaN — e nao zero —, e o painel mostra 'sem leitura ainda'. Saldo baixo e saldo nao lido sao estados diferentes e pedem reacoes diferentes.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "odds_api_requests_remaining",
+          "legendFormat": "saldo",
+          "instant": false
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "noValue": "sem leitura ainda",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 50 },
+              { "color": "green", "value": 100 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Consumo no mes",
+      "description": "Derivado de $cota_mensal - saldo restante: remaining + used somam a cota do plano, e o consumo (x-requests-used) nao e exportado como metrica. Zera na virada do mes, quando o provedor renova a cota. Os limiares de cor (400 e 450) sao 80% e 90% do plano free de 500 — ajuste junto com a variavel se o plano mudar.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "$cota_mensal - odds_api_requests_remaining",
+          "legendFormat": "consumo",
+          "instant": false
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "min": 0,
+          "noValue": "sem leitura ainda",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 400 },
+              { "color": "red", "value": 450 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Taxa de erro (janela do dashboard)",
+      "description": "errors/requests na janela selecionada. E uma taxa legitima porque os dois contadores medem tentativas: o OddsClient conta a chamada antes de faze-la, entao errors e sempre subconjunto de requests. Sem nenhuma chamada na janela a divisao nao produz valor e o painel mostra 'sem chamadas'.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "increase(odds_api_errors_total[$__range]) / increase(odds_api_requests_total[$__range])",
+          "legendFormat": "taxa de erro",
+          "instant": true
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "noValue": "sem chamadas",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.2 },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Guardrail",
+      "description": "clamp(sgn($minimo - saldo), 0, 1): 1 quando o saldo esta abaixo do minimo (guardrail armado, a aplicacao parou de chamar o provedor), 0 quando esta acima, e NaN quando ainda nao houve leitura — a aritmetica preserva o NaN de proposito, para 'sem leitura' nao virar 'desarmado'.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "clamp(sgn($minimo - odds_api_requests_remaining), 0, 1)",
+          "legendFormat": "guardrail",
+          "instant": false
+        }
+      ],
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto",
+        "justifyMode": "auto",
+        "orientation": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "noValue": "sem leitura ainda",
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "desarmado", "color": "green", "index": 0 },
+                "1": { "text": "ARMADO", "color": "red", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Saldo restante ao longo do mes",
+      "description": "A linha tracejada marca o minimo do guardrail. Trechos sem linha sao periodos sem leitura (NaN) ou sem a aplicacao no ar — nao sao saldo zero.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "odds_api_requests_remaining",
+          "legendFormat": "saldo restante"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0,
+          "min": 0,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "color": { "mode": "fixed", "fixedColor": "blue" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 50 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Chamadas e erros por hora",
+      "description": "Tentativas de chamada a The Odds API, contadas antes da requisicao: uma chamada que falha consumiu credito igual e aparece nas duas series.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "increase(odds_api_requests_total[1h])",
+          "legendFormat": "chamadas"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "increase(odds_api_errors_total[1h])",
+          "legendFormat": "erros"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "lineWidth": 1,
+            "fillOpacity": 60,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "erros" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Taxa de erro (janela de 6 h)",
+      "description": "Mesma janela da regra CotaOddsApiTaxaDeErroAlta. A janela e de horas, e nao de minutos, porque o cache de odds vale 60 min: um rate() curto seria zero quase sempre.",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "increase(odds_api_errors_total[6h]) / increase(odds_api_requests_total[6h])",
+          "legendFormat": "erros / chamadas"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true, "calcs": [] },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "thresholdsStyle": { "mode": "dashed" }
+          },
+          "color": { "mode": "fixed", "fixedColor": "orange" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "transparent", "value": null },
+              { "color": "red", "value": 0.5 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

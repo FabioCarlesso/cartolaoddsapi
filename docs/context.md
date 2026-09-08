@@ -333,6 +333,36 @@ o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mí
 cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
 fica silenciosa até existir dado de verdade.
 
+### Dashboard e alertas da cota
+
+O guardrail evita o desastre, mas não avisa que armou — e armado ele serve snapshot antigo em
+silêncio. O dashboard do Grafana e as regras do Prometheus vivem versionados em
+`docs/observabilidade/`, sobre as três métricas que já existiam: a issue (#58) deixou explícito
+que nenhuma métrica nova era necessária, e o que faltava era o outro lado da instrumentação.
+
+Dois números da aplicação não são métricas e por isso ficam repetidos nos artefatos: o mínimo do
+guardrail (`odds.api.min-requests-remaining`) e a cota do plano contratado, sem a qual o consumo
+do mês não é derivável (`remaining + used` somam a cota, e `used` não é exportado). Repetido, um
+número diverge — então `ArtefatosObservabilidadeTest` amarra o mínimo dos artefatos ao
+`application.properties` e confere que todo nome `odds_api_*` citado neles existe na exposição.
+Um alerta que descreve um corte que a aplicação não aplica é pior do que nenhum alerta, e uma
+renomeação de métrica deixaria painel e alerta mudos sem erro em lugar nenhum.
+
+O `NaN` de "sem leitura" atravessa os artefatos de ponta a ponta. As regras de saldo não disparam
+porque comparação com `NaN` é falsa; o painel de guardrail usa `clamp(sgn($minimo - saldo), 0, 1)`
+justamente porque a aritmética preserva `NaN`, enquanto `< bool` o colapsaria em `0` e diria
+"desarmado" antes da primeira chamada.
+
+O alerta de saldo parado mede o tempo no `for:`, e não numa janela de 25 h dentro do `changes()`:
+"sem mudança nos últimos 25 h" também é verdade quando só existem dez minutos de dado, e um
+Prometheus recém-subido dispararia na primeira meia hora. Com janela curta e `for: 25h`, as 25
+horas precisam ter acontecido de fato.
+
+O perfil `observabilidade` do compose sobe Prometheus e Grafana já provisionados, mas depende de
+um token de `ADMIN` colado num arquivo local: o Prometheus não expande variáveis de ambiente no
+config, e o token expira em 24 h. Enquanto a #44 não fecha, o perfil serve para diagnóstico e
+para validar dashboard e alertas — não para monitoração contínua desassistida.
+
 ### Observabilidade (Spring Actuator + Micrometer)
 
 O projeto inclui **Spring Boot Actuator** com **Micrometer** e o registry **Prometheus** para coleta de métricas.

@@ -1,0 +1,16 @@
+# Datasource do Grafana apontado para o Prometheus do perfil `observabilidade`.
+# O uid e fixo (`prometheus-cartola`) porque e o valor gravado na variavel
+# `datasource` do dashboard versionado: sem uid estavel, cada subida do
+# compose criaria um id novo e o dashboard provisionado subiria sem fonte.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus-cartola
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s

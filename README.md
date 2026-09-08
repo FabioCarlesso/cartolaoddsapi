@@ -215,7 +215,9 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
   (chamadas feitas ao provedor, contadas **na tentativa** — a recusa por cota estourada consumiu
   a tentativa igual e precisa aparecer no total), `odds_api_requests_remaining` (gauge com o
   saldo informado) e `odds_api_errors_total` (falhas, um subconjunto do total — o que faz
-  `odds_api_errors_total / odds_api_requests_total` ser uma taxa de erro de verdade).
+  `odds_api_errors_total / odds_api_requests_total` ser uma taxa de erro de verdade). Dashboard e
+  alertas prontos sobre essas três métricas estão em
+  [`docs/observabilidade/`](docs/observabilidade/) — ver [Dashboard e alertas da cota](#dashboard-e-alertas-da-cota).
 - **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura,
   se o guardrail está ativo e — a pergunta que se faz ao ver o guardrail armado — quando a
   próxima sondagem libera uma chamada (`proximaSondagem`).
@@ -1133,6 +1135,31 @@ scrape_configs:
 ```
 
 > ⚠️ O scrape precisa de um token de `ADMIN`, e o access token expira (`JWT_EXPIRATION_MS`, padrão 24 h) sem mecanismo de renovação — na prática o Prometheus para de coletar quando o token vence. Um credencial próprio para conta de máquina está na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44). Até lá, a coleta contínua exige colar um token novo periodicamente.
+
+### Dashboard e alertas da cota
+
+O guardrail de cota impede o desastre, mas não avisa que armou — e enquanto ele está armado a aplicação serve o último snapshot conhecido, que envelhece em silêncio. O dashboard e as regras de alerta que tornam isso visível são versionados em [`docs/observabilidade/`](docs/observabilidade/), sobre as três métricas que a aplicação já expõe:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `grafana-cota-odds.json` | Dashboard: saldo restante, consumo do mês, taxa de erro e estado do guardrail |
+| `alertas-cota-odds.yml` | Alertas: guardrail armado, armado há mais de um dia, saldo sem leitura e taxa de erro anormal |
+| `prometheus.yml` | Configuração de scrape |
+
+Para subir Prometheus e Grafana já configurados, apontados para a aplicação:
+
+```bash
+# O scrape exige ADMIN — cole um access token no arquivo antes de subir
+cp docs/observabilidade/scrape-token.example docs/observabilidade/scrape-token
+
+docker compose --profile observabilidade up -d
+```
+
+Grafana em `http://localhost:3000` (`admin`/`admin` por padrão), com o dashboard já provisionado na pasta **Cartola Odds**; Prometheus em `http://localhost:9090`. Fora do perfil nada disso é criado: monitorar a cota não é condição para rodar a aplicação.
+
+**Saldo baixo e saldo não lido são estados diferentes.** `odds_api_requests_remaining` exporta `NaN` — e não `-1` — enquanto nenhuma leitura aconteceu, para não fazer todo alerta de saldo baixo disparar a cada deploy. O dashboard mostra `sem leitura ainda` em vez de zero.
+
+O que fazer quando cada alerta dispara está em [`docs/documentacao.md`, seção 14](docs/documentacao.md#14-observabilidade-da-cota).
 
 > Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
