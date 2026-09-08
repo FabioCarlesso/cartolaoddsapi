@@ -222,7 +222,7 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
   se o guardrail está ativo e — a pergunta que se faz ao ver o guardrail armado — quando a
   próxima sondagem libera uma chamada (`proximaSondagem`).
 - **`GET /api/odds/cota/historico`** (`ADMIN`): a série das leituras dentro de uma janela
-  (`?dias=30`, de 1 a 365), em ordem cronológica. É o que responde *"quanto eu gastei ao longo
+  (`?dias=30`, de 1 a 92), em ordem cronológica. É o que responde *"quanto eu gastei ao longo
   deste mês"* — a `odds_cota` guarda só o estado corrente, e uma linha sobrescrita não tem
   passado. Cada item traz `reinicioDeCota: true` na primeira leitura de um ciclo novo.
 - **Guardrail** `odds.api.min-requests-remaining` (padrão `50`): abaixo desse saldo, o
@@ -623,7 +623,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
 | `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura, se o guardrail de cota está ativo e quando a próxima sondagem o destrava |
-| `GET` | `/api/odds/cota/historico` | **`ADMIN`** — série das leituras de cota na janela (`?dias=30`, 1 a 365), em ordem cronológica, com marca de reinício de ciclo |
+| `GET` | `/api/odds/cota/historico` | **`ADMIN`** — série das leituras de cota na janela (`?dias=30`, 1 a 92), em ordem cronológica, com marca de reinício de ciclo |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -693,11 +693,22 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 }
 ```
 
-> `reinicioDeCota` marca a primeira leitura de um ciclo novo: o consumo caiu em relação à leitura
-> anterior, ou seja, o provedor renovou a cota entre as duas. A detecção acontece uma vez, no
-> servidor, para que quem desenha o gráfico não precise reimplementá-la — e para que a queda do
-> consumo não seja lida como falha de coleta. Nunca vem `true` na primeira leitura da janela:
-> sem uma anterior para comparar, afirmar que houve renovação seria chute.
+> `reinicioDeCota` marca a primeira leitura de um ciclo novo: em relação à leitura anterior, o
+> consumo caiu **ou** o saldo subiu — os dois sinais que a renovação da cota produz. A detecção
+> acontece uma vez, no servidor, para que quem desenha o gráfico não precise reimplementá-la — e
+> para que a queda do consumo não seja lida como falha de coleta. Nunca vem `true` na primeira
+> leitura da janela: sem uma anterior para comparar, afirmar que houve renovação seria chute.
+
+> ⏱️ **Fuso horário.** `instante` e `desde` são `LocalDateTime`: data e hora **locais do
+> servidor**, sem offset. Um `new Date(instante)` no navegador interpreta como hora local dele —
+> com servidor em UTC e navegador em UTC−3, todo ponto do gráfico desloca 3 h. Converta usando o
+> fuso em que a aplicação roda. É a convenção de data/hora de toda a API, não só deste endpoint.
+
+> 📦 **Tamanho da resposta.** A série não é agregada: cada leitura vira um item. A janela padrão
+> de 30 dias dá ~500 itens (~50 KB); o teto de 92 dias, ~1.500. O teto existe por isso — com um
+> ano de dados a resposta passava de 6.000 itens e 600 KB, meio megabyte para alimentar um
+> gráfico de algumas centenas de pixels. Se um dia fizer sentido olhar um ano, o caminho é
+> agregar por dia, não devolver tudo.
 
 ### Exemplo — `GET /api/ranking?posicao=ATA&limite=3`
 

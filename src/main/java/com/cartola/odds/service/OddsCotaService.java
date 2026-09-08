@@ -8,17 +8,23 @@ import com.cartola.odds.model.response.OddsCotaResponse;
 import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class OddsCotaService {
 
-    /** Teto da janela consultavel. Ver {@link #buscarHistorico(int)}. */
-    static final int DIAS_MAXIMO = 365;
+    /**
+     * Teto da janela consultavel: um trimestre, o suficiente para ver o mes corrente e os dois
+     * anteriores lado a lado. Ver {@link #buscarHistorico(int)}.
+     */
+    static final int DIAS_MAXIMO = 92;
 
     private final OddsClient                  oddsClient;
     private final OddsProperties              oddsProperties;
@@ -39,10 +45,12 @@ public class OddsCotaService {
     /**
      * Serie das leituras de cota dos ultimos {@code dias}, em ordem cronologica (#61).
      *
-     * <p>O teto de {@link #DIAS_MAXIMO} nao existe por medo do volume — a tabela cresce no
-     * maximo ~500 linhas por mes, porque uma linha so nasce de uma chamada ao provedor e as
-     * chamadas sao limitadas pela propria cota. Ele existe para que um {@code ?dias=999999} nao
-     * vire uma varredura da tabela inteira vinda da barra de endereco.
+     * <p>O teto de {@link #DIAS_MAXIMO} e sobre o tamanho da <em>resposta</em>, nao sobre o da
+     * tabela. A serie nao e agregada — cada leitura vira um item —, e a medicao com um ano de
+     * dados deu 6.000 itens e 603 KB, meio megabyte para alimentar um grafico de algumas
+     * centenas de pixels. Um trimestre fica em torno de 1.500 itens, e a janela padrao de 30
+     * dias em ~500 itens e 50 KB. Se um dia fizer sentido olhar um ano inteiro, o caminho e
+     * agregar por dia, e nao devolver tudo.
      *
      * @throws IllegalArgumentException quando a janela nao descreve um intervalo consultavel;
      *         o {@code GlobalExceptionHandler} traduz para 400 com a mensagem.
@@ -57,7 +65,10 @@ public class OddsCotaService {
                     "dias deve ser no maximo " + DIAS_MAXIMO + ". Valor informado: " + dias);
         }
 
-        var desde    = LocalDateTime.now().minusDays(dias);
+        // Truncado a microssegundos porque e a precisao que o PostgreSQL guarda em `timestamp`:
+        // sem isso, `desde` sai com nanossegundos (do relogio da JVM) e os `instante` com
+        // microssegundos, duas precisoes diferentes no mesmo payload.
+        var desde    = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS).minusDays(dias);
         var leituras = historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(desde);
 
         return OddsCotaHistoricoResponse.builder()
@@ -73,26 +84,36 @@ public class OddsCotaService {
      * cada consumidor: o grafico do mes precisa saber onde quebrar a linha, e um consumo que
      * cai lido sem esse contexto parece falha de coleta, nao virada de ciclo.
      *
+     * <p>Dois sinais, porque a renovacao mexe nos dois numeros ao mesmo tempo: o consumo cai e o
+     * saldo sobe. Olhar so o consumo deixa de fora o caso em que o ciclo anterior terminou com
+     * um consumo baixissimo — raro, mas o saldo subindo e um sinal que ja esta na mao, e fora
+     * de uma renovacao ele nao sobe.
+     *
      * <p>A primeira leitura da janela nunca e marcada — sem uma anterior para comparar, dizer
-     * que houve renovacao seria chute. Leituras sem {@code consumoMes} (o header nao veio) nao
-     * quebram a comparacao: a referencia segue sendo o ultimo consumo conhecido.
+     * que houve renovacao seria chute. Leituras sem um dos headers nao quebram a comparacao:
+     * a referencia de cada numero segue sendo o ultimo valor conhecido dele.
      */
     private static List<OddsCotaHistoricoResponse.LeituraCotaDto> mapear(List<OddsCotaHistorico> leituras) {
         var dtos = new ArrayList<OddsCotaHistoricoResponse.LeituraCotaDto>(leituras.size());
         Long consumoAnterior = null;
+        Long saldoAnterior   = null;
 
         for (var leitura : leituras) {
             Long consumo = leitura.getConsumoMes();
-            boolean reinicio = consumo != null && consumoAnterior != null && consumo < consumoAnterior;
+            Long saldo   = leitura.getSaldoRestante();
+
+            boolean consumoCaiu = consumo != null && consumoAnterior != null && consumo < consumoAnterior;
+            boolean saldoSubiu  = saldo   != null && saldoAnterior   != null && saldo   > saldoAnterior;
 
             dtos.add(OddsCotaHistoricoResponse.LeituraCotaDto.builder()
                     .instante(leitura.getInstante())
-                    .saldoRestante(leitura.getSaldoRestante())
+                    .saldoRestante(saldo)
                     .consumoMes(consumo)
-                    .reinicioDeCota(reinicio)
+                    .reinicioDeCota(consumoCaiu || saldoSubiu)
                     .build());
 
             if (consumo != null) consumoAnterior = consumo;
+            if (saldo   != null) saldoAnterior   = saldo;
         }
         return dtos;
     }

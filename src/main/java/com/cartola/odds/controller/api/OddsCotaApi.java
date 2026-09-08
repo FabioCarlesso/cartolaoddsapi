@@ -60,15 +60,20 @@ public interface OddsCotaApi {
             inclusive as respostas de erro. Uma sondagem liberada pelo guardrail que nao le
             header nenhum nao gera leitura: ela nao mediu nada.
 
-            Cada item traz reinicioDeCota=true quando o consumo caiu em relacao a leitura
-            anterior, ou seja, quando o provedor renovou a cota entre as duas. Sem essa marca,
-            a queda do consumo na virada do ciclo pareceria falha de coleta.
+            Cada item traz reinicioDeCota=true quando, em relacao a leitura anterior, o consumo
+            caiu ou o saldo subiu — os dois sinais da renovacao da cota pelo provedor. Sem essa
+            marca, a queda do consumo na virada do ciclo pareceria falha de coleta.
+
+            FUSO HORARIO: instante e desde sao LocalDateTime, data e hora locais do servidor,
+            sem offset. Um cliente que faca new Date(instante) vai interpreta-los como hora
+            local dele — com servidor em UTC e navegador em UTC-3, todo ponto do grafico
+            desloca 3 h. Converta usando o fuso em que a aplicacao roda, nao o do navegador.
             """
     )
     @ApiResponses({
         @ApiResponse(responseCode = "200", description = "Serie retornada com sucesso",
             content = @Content(schema = @Schema(implementation = OddsCotaHistoricoResponse.class))),
-        @ApiResponse(responseCode = "400", description = "Janela invalida (dias fora de 1..365)",
+        @ApiResponse(responseCode = "400", description = "Janela invalida (dias fora de 1..92)",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
         @ApiResponse(responseCode = "401", description = "Sem token",
             content = @Content(schema = @Schema(implementation = ErrorResponse.class))),
@@ -76,7 +81,8 @@ public interface OddsCotaApi {
             content = @Content(schema = @Schema(implementation = ErrorResponse.class)))
     })
     ResponseEntity<OddsCotaHistoricoResponse> buscarHistorico(
-        @Parameter(description = "Tamanho da janela em dias, contada a partir de agora (1 a 365)",
+        @Parameter(description = "Tamanho da janela em dias, contada a partir de agora (1 a 92). "
+                            + "A serie nao e agregada: 30 dias sao ~500 itens, 92 dias ~1.500.",
                    example = "30")
         @RequestParam(defaultValue = "30") int dias
     );

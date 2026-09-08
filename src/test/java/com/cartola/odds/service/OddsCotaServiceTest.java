@@ -154,16 +154,59 @@ class OddsCotaServiceTest {
         }
 
         @Test
-        @DisplayName("deve recusar janela fora de 1..365 com IllegalArgumentException")
+        @DisplayName("deve marcar reinicio quando o saldo sobe sem o consumo cair")
+        void deveMarcarReinicioPeloSaldo() {
+            // A renovacao mexe nos dois numeros: o consumo cai e o saldo sobe. Olhar so o
+            // consumo perderia o ciclo que terminou com consumo baixissimo — aqui, 2 leituras
+            // no mes inteiro. O saldo subindo denuncia a renovacao de qualquer jeito.
+            var base = LocalDateTime.now().minusDays(2);
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+                    .thenReturn(List.of(
+                            leitura(base, 498L, 2L),
+                            leitura(base.plusHours(1), 500L, 2L)));
+
+            assertThat(servico().buscarHistorico(30).getLeituras())
+                    .extracting(l -> l.isReinicioDeCota())
+                    .containsExactly(false, true);
+        }
+
+        @Test
+        @DisplayName("saldo caindo no uso normal nao deve marcar reinicio")
+        void saldoCaindoNaoMarcaReinicio() {
+            var base = LocalDateTime.now().minusDays(1);
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+                    .thenReturn(List.of(
+                            leitura(base, 400L, 100L),
+                            leitura(base.plusHours(1), 399L, 101L),
+                            leitura(base.plusHours(2), 398L, 102L)));
+
+            assertThat(servico().buscarHistorico(30).getLeituras())
+                    .extracting(l -> l.isReinicioDeCota())
+                    .containsExactly(false, false, false);
+        }
+
+        @Test
+        @DisplayName("deve recusar janela fora de 1..92 com IllegalArgumentException")
         void deveRecusarJanelaInvalida() {
             // O GlobalExceptionHandler traduz para 400: um ?dias=0 vindo da barra de endereco
-            // nao pode virar 500, nem varredura da tabela inteira.
+            // nao pode virar 500, nem uma resposta de centenas de KB.
             assertThatThrownBy(() -> servico().buscarHistorico(0))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("maior que 0");
-            assertThatThrownBy(() -> servico().buscarHistorico(366))
+            assertThatThrownBy(() -> servico().buscarHistorico(93))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("no maximo 365");
+                    .hasMessageContaining("no maximo 92");
+        }
+
+        @Test
+        @DisplayName("deve devolver desde com a mesma precisao dos instantes da serie")
+        void desdeDeveTerPrecisaoDeMicros() {
+            // O PostgreSQL guarda `timestamp` em microssegundos; sem truncar, `desde` sairia com
+            // nanossegundos do relogio da JVM e o payload teria duas precisoes diferentes.
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+                    .thenReturn(List.of());
+
+            assertThat(servico().buscarHistorico(30).getDesde().getNano() % 1000).isZero();
         }
 
         private OddsCotaService servico() {

@@ -361,6 +361,18 @@ funciona nos dois casos — enquanto chutar o dia 1º cortaria o gráfico no lug
 leitura da janela nunca é marcada: sem uma anterior para comparar, afirmar que houve renovação
 seria chute. Sem essa marca, a queda do consumo pareceria falha de coleta.
 
+A janela do endpoint é limitada a 92 dias, e o limite é sobre a resposta, não sobre a tabela. A
+série não é agregada — cada leitura vira um item —, e medindo com um ano de dados a resposta deu
+6.000 itens e 603 KB: meio megabyte para alimentar um gráfico de algumas centenas de pixels. Um
+trimestre cobre o mês corrente e os dois anteriores, que é o que se compara na prática. Um ano
+inteiro, se um dia fizer falta, pede agregação por dia — não um teto maior.
+
+Os campos de data são `LocalDateTime`, sem offset, como em toda a API. É a convenção herdada, e
+foi mantida de propósito para não criar um contrato diferente só neste endpoint; o custo é que o
+consumidor precisa converter usando o fuso em que a aplicação roda, e não o do navegador. Está
+dito na descrição OpenAPI do endpoint em vez de ficar implícito, porque o frontend é consumidor
+novo e um deslocamento de fuso num gráfico não se denuncia sozinho — o gráfico só fica errado.
+
 O matcher de `/api/odds/cota` no `SecurityConfig` é de path exato, então o subcaminho precisou
 entrar explicitamente. Sem isso, `/api/odds/cota/historico` cairia no
 `anyRequest().authenticated()` e a série ficaria aberta a qualquer token — a rota que existe

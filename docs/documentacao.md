@@ -858,6 +858,11 @@ boot, e é a série que responde "quanto se gastou ao longo do mês". Sem reten�
 linha só nasce de uma chamada ao provedor, e as chamadas são limitadas pela própria cota que a
 tabela mede (~500 linhas/mês no plano free).
 
+`GET /api/odds/cota/historico?dias=N` lê essa tabela, com `N` entre 1 e 92. O teto é sobre o
+tamanho da **resposta**, não da tabela: a série não é agregada, então 30 dias dão ~500 itens
+(~50 KB) e um ano daria 6.000 itens (~600 KB). Os campos de data são `LocalDateTime` — hora local
+do servidor, sem offset — como no resto da API.
+
 **Tabela `escalacao_rodada` (migration `V7`):**
 
 ```sql
@@ -1254,7 +1259,7 @@ mvn test jacoco:report
 | `GET /api/favoritos` | Times favoritos com oddLimite atual |
 | `GET /api/favoritos?oddLimite=2.5` | Favoritos com limite customizado |
 | `GET /api/odds/cota` | Estado da cota da The Odds API (`ADMIN`) |
-| `GET /api/odds/cota/historico` | Série das leituras de cota na janela (`?dias=30`) (`ADMIN`) |
+| `GET /api/odds/cota/historico` | Série das leituras de cota na janela (`?dias=30`, 1 a 92) (`ADMIN`) |
 | `DELETE /api/cache` | Invalida todos os caches |
 | `DELETE /api/cache/{nome}` | Invalida um cache específico |
 | `GET /api/config` | Retorna configuração atual |

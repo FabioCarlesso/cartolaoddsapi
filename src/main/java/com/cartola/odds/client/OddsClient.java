@@ -364,9 +364,10 @@ public class OddsClient {
         if (used != null) {
             requestsUsed.set(used);
         }
-        ultimaLeitura.set(LocalDateTime.now());
+        var agora = LocalDateTime.now();
+        ultimaLeitura.set(agora);
         persistirCota();
-        registrarHistorico();
+        registrarHistorico(agora);
     }
 
     /**
@@ -379,11 +380,22 @@ public class OddsClient {
      * <p>Falha aqui nao interrompe a busca, pelo mesmo motivo do {@code persistirCota}: isto e
      * um registro para grafico, e nao pode transformar {@code /api/favoritos} e {@code /api/time}
      * em 500 depois de o credito ja ter sido gasto.
+     *
+     * <p>Sim, isto e mais um INSERT dentro do {@code @Cacheable(sync = true)}, que serializa
+     * chamadores concorrentes no mesmo miss. Fica: a secao ja segura uma chamada HTTP ao
+     * provedor com timeout de 10 s, mais a leitura e a escrita do snapshot com o JSON inteiro
+     * das odds. Quatro colunas a mais nao movem esse ponteiro, e tirar daqui custaria um pool
+     * de threads e a propagacao do contexto transacional em troca de nada mensuravel.
+     *
+     * <p>O instante chega por parametro em vez de sair de {@code ultimaLeitura}: a coluna e
+     * {@code NOT NULL} e a excecao aqui e engolida, entao depender de um campo setado logo acima
+     * faria uma reordenacao futura parar de gravar historico em silencio — com um WARN no log e
+     * mais nada.
      */
-    private void registrarHistorico() {
+    private void registrarHistorico(LocalDateTime instante) {
         try {
             var leitura = new OddsCotaHistorico();
-            leitura.setInstante(ultimaLeitura.get());
+            leitura.setInstante(instante);
             leitura.setSaldoRestante(getRequestsRemaining());
             leitura.setConsumoMes(getRequestsUsed());
             historicoRepository.save(leitura);
