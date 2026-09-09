@@ -1,0 +1,142 @@
+# ══════════════════════════════════════════════════════════════════════
+# Regras de alerta — cota da The Odds API (#58)
+#
+# Carregado pelo prometheus.yml deste diretorio (`rule_files`). Fora do
+# compose, copie o arquivo para onde o seu Prometheus le regras e recarregue
+# (`curl -X POST http://prometheus:9090/-/reload` ou SIGHUP).
+#
+# ── Dois numeros precisam acompanhar a aplicacao ─────────────────────
+# `50`  = odds.api.min-requests-remaining (ODDS_API_MIN_REQUESTS_REMAINING).
+#         O minimo do guardrail nao e exportado como metrica, entao a regra
+#         precisa repeti-lo. Mudou la, mude aqui e no dashboard (variavel
+#         `minimo`), senao o alerta passa a descrever um corte que nao existe.
+# `25h` = odds.api.sonda-intervalo-horas (padrao 24) + uma folga de scrape.
+#
+# ── Por que nenhuma regra dispara antes da primeira leitura ──────────
+# `odds_api_requests_remaining` exporta NaN enquanto nao houve leitura de
+# cota, e nao o sentinela interno -1. Toda comparacao com NaN e falsa no
+# PromQL, entao as regras de saldo ficam silenciosas ate existir dado de
+# verdade — em vez de disparar em todo deploy, antes da primeira chamada.
+# ══════════════════════════════════════════════════════════════════════
+
+groups:
+  - name: cota-the-odds-api
+    rules:
+
+      # ── 1. Saldo abaixo do minimo: o guardrail armou ───────────────
+      # Informativo de proposito. Aqui a aplicacao ja se defendeu sozinha —
+      # parou de chamar o provedor e passou a servir o snapshot persistido.
+      # O que este alerta diz e "a partir de agora as odds envelhecem".
+      - alert: CotaOddsApiAbaixoDoMinimo
+        expr: odds_api_requests_remaining < 50
+        for: 15m
+        labels:
+          severity: warning
+          componente: the-odds-api
+        annotations:
+          resumo: "Guardrail de cota armado (saldo {{ $value }} < 50)"
+          descricao: >-
+            O saldo da The Odds API caiu abaixo de odds.api.min-requests-remaining.
+            A aplicacao parou de chamar o provedor e serve a ultima resposta conhecida
+            (odds_snapshot). Nada quebrou: o filtro de favoritos continua funcionando
+            com odds que vao envelhecendo.
+          acao: >-
+            Confira o saldo e a janela de destravamento em GET /api/odds/cota
+            (campo proximaSondagem). Se a virada de mes esta perto, nao ha o que fazer:
+            a sondagem periodica reavalia o saldo sozinha e o guardrail desarma.
+
+      # ── 2. Guardrail armado ha mais de um dia ──────────────────────
+      # O alerta que de fato pede acao humana. Um dia inteiro armado significa
+      # que a sondagem ja rodou e o saldo continua no chao: a cota nao vai
+      # voltar sozinha antes da virada do mes, e alguem precisa decidir entre
+      # aumentar o plano e aceitar odds de mais de 24 h.
+      #
+      # `for: 24h` conta tempo continuo com a serie presente. Um restart curto
+      # nao zera a contagem (o saldo e recuperado da tabela odds_cota no boot,
+      # e a lacuna de scrape cabe na janela de staleness de 5 min); uma parada
+      # longa da aplicacao, sim.
+      - alert: CotaOddsApiGuardrailArmadoHaUmDia
+        expr: odds_api_requests_remaining < 50
+        for: 24h
+        labels:
+          severity: critical
+          componente: the-odds-api
+        annotations:
+          resumo: "Guardrail de cota armado ha mais de 24 h (saldo {{ $value }})"
+          descricao: >-
+            Ha mais de um dia a aplicacao serve odds do snapshot persistido, sem
+            conseguir renovar. A escalacao continua saindo, mas com favoritos
+            calculados sobre odds antigas.
+          acao: >-
+            Decida entre aumentar a cota (plano da The Odds API) e aceitar a
+            degradacao ate a virada do mes. Se optar por aceitar, silencie este
+            alerta com data para acabar — nao o desligue.
+
+      # ── 3. Saldo sem leitura ha mais de um intervalo de sondagem ───
+      # O saldo so muda quando uma chamada ao provedor acontece. Parado por mais
+      # de um intervalo de sondagem, o numero no dashboard e uma lembranca, nao
+      # uma medida — e a causa costuma ser uma das duas: a aplicacao nao recebeu
+      # nenhuma requisicao que gerasse busca de odds, ou toda tentativa esta
+      # falhando antes de trazer os headers de cota.
+      #
+      # O tempo esta no `for`, e nao na janela do changes(), de proposito. Uma
+      # janela de 25 h seria "sem mudanca nos ultimos 25 h" mesmo quando so
+      # existem 10 minutos de dado — um Prometheus recem-subido dispararia o
+      # alerta na primeira meia hora. Com uma janela curta e `for: 25h`, o
+      # alerta so sai depois de 25 h de estabilidade que aconteceram de fato, e
+      # qualquer leitura nova no meio zera a contagem.
+      #
+      # O `and` descarta o caso em que ainda nao houve leitura nenhuma (NaN):
+      # sem leitura o saldo tambem esta "parado", mas isso e um estado diferente
+      # e o dashboard ja o mostra como tal.
+      - alert: CotaOddsApiSaldoSemLeitura
+        expr: |
+          changes(odds_api_requests_remaining[10m]) == 0
+            and on(job, instance) (odds_api_requests_remaining >= 0)
+        for: 25h
+        labels:
+          severity: warning
+          componente: the-odds-api
+        annotations:
+          resumo: "Saldo da cota sem atualizacao ha mais de 25 h"
+          descricao: >-
+            odds_api_requests_remaining nao muda ha mais de um intervalo de sondagem
+            (odds.api.sonda-intervalo-horas, padrao 24 h). O valor exibido e o da
+            ultima leitura de header, de data desconhecida pelo Prometheus.
+          acao: >-
+            Compare com ultimaLeitura em GET /api/odds/cota. Se a aplicacao esta
+            ociosa de verdade, e ruido: aumente a janela desta regra. Se ela esta
+            recebendo trafego, olhe CotaOddsApiTaxaDeErroAlta e os logs do OddsClient.
+
+      # ── 4. Taxa de erro anormal ────────────────────────────────────
+      # errors/requests e uma taxa legitima porque os dois contadores medem
+      # tentativas: o OddsClient incrementa requests antes da chamada, entao
+      # errors e sempre um subconjunto de requests.
+      #
+      # Janela de 6 h, e nao 5 min, porque o cache de odds vale 60 min: um
+      # rate() curto seria zero quase sempre. O piso de 3 requisicoes evita o
+      # falso positivo classico da divisao — 1 erro em 1 tentativa e 100% de
+      # falha, e nao diz nada.
+      - alert: CotaOddsApiTaxaDeErroAlta
+        expr: |
+          (
+            increase(odds_api_errors_total[6h])
+              /
+            increase(odds_api_requests_total[6h])
+          ) > 0.5
+            and increase(odds_api_requests_total[6h]) >= 3
+        for: 30m
+        labels:
+          severity: warning
+          componente: the-odds-api
+        annotations:
+          resumo: "Mais de 50% das chamadas a The Odds API falhando em 6 h"
+          descricao: >-
+            A taxa de erro (odds_api_errors_total / odds_api_requests_total) passou de
+            50% na janela de 6 h. Cada tentativa que falha consome credito igual, entao
+            uma falha persistente queima cota sem produzir odds.
+          acao: >-
+            Veja os logs do OddsClient para separar as causas: chave invalida e cota
+            estourada respondem 4xx (o saldo real vem nos headers da propria resposta de
+            erro), provedor fora do ar da timeout. Se for cota estourada, o guardrail
+            arma em seguida sozinho.

@@ -4,8 +4,10 @@ import com.cartola.odds.config.CacheConfig;
 import com.cartola.odds.config.OddsProperties;
 import com.cartola.odds.model.OddsComOrigem;
 import com.cartola.odds.model.OddsCota;
+import com.cartola.odds.model.OddsCotaHistorico;
 import com.cartola.odds.model.OddsSnapshot;
 import com.cartola.odds.model.response.OddsResponse;
+import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -25,6 +27,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -66,11 +69,12 @@ public class OddsClient {
     static final String METRICA_ERRORS    = "odds.api.errors";
     static final String METRICA_REMAINING = "odds.api.requests.remaining";
 
-    private final RestClient             restClient;
-    private final OddsProperties         props;
-    private final OddsSnapshotRepository snapshotRepository;
-    private final OddsCotaRepository     cotaRepository;
-    private final ObjectMapper           objectMapper;
+    private final RestClient                  restClient;
+    private final OddsProperties              props;
+    private final OddsSnapshotRepository      snapshotRepository;
+    private final OddsCotaRepository          cotaRepository;
+    private final OddsCotaHistoricoRepository historicoRepository;
+    private final ObjectMapper                objectMapper;
 
     private final Counter requestsTotal;
     private final Counter errorsTotal;
@@ -93,13 +97,15 @@ public class OddsClient {
                        OddsProperties props,
                        OddsSnapshotRepository snapshotRepository,
                        OddsCotaRepository cotaRepository,
+                       OddsCotaHistoricoRepository historicoRepository,
                        ObjectMapper objectMapper,
                        MeterRegistry meterRegistry) {
-        this.restClient         = restClient;
-        this.props              = props;
-        this.snapshotRepository = snapshotRepository;
-        this.cotaRepository     = cotaRepository;
-        this.objectMapper       = objectMapper;
+        this.restClient          = restClient;
+        this.props               = props;
+        this.snapshotRepository  = snapshotRepository;
+        this.cotaRepository      = cotaRepository;
+        this.historicoRepository = historicoRepository;
+        this.objectMapper        = objectMapper;
         // Nomes na convencao do Micrometer (pontuada), e nao ja no formato do Prometheus: cada
         // registry aplica a propria traducao, e o codigo nao fica preso ao exporter da vez. Na
         // exposicao o resultado e identico ao anterior — odds_api_requests_total,
@@ -309,7 +315,7 @@ public class OddsClient {
         boolean sondagemVencida = proxima == null || proxima.isBefore(LocalDateTime.now());
 
         if (sondagemVencida) {
-            ultimaSondagem.set(LocalDateTime.now());
+            ultimaSondagem.set(agora());
             persistirCota();
             log.warn("Guardrail de cota ativo (saldo {} < {}), mas a ultima leitura tem mais de {}h: "
                             + "liberando uma chamada de sondagem para reavaliar o saldo.",
@@ -326,6 +332,20 @@ public class OddsClient {
      */
     private LocalDateTime referenciaDaSondagem() {
         return maisRecente(ultimaLeitura.get(), ultimaSondagem.get());
+    }
+
+    /**
+     * Agora, truncado a microssegundos — a precisao que o PostgreSQL guarda em {@code timestamp}.
+     *
+     * <p>Sem truncar, o mesmo instante aparece de dois jeitos para quem consome a API: com nove
+     * casas decimais em {@code ultimaLeitura} de {@code GET /api/odds/cota}, que le da memoria, e
+     * com seis no {@code instante} da mesma leitura em {@code /historico}, que volta do banco — e
+     * arredondado, entao o ponto do historico chega a ficar depois do estado que o originou.
+     * Depois de um restart o campo troca de formato, porque passa a vir do banco. Truncar na
+     * origem faz memoria e tabela guardarem exatamente o mesmo valor.
+     */
+    private static LocalDateTime agora() {
+        return LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     private static LocalDateTime maisRecente(LocalDateTime a, LocalDateTime b) {
@@ -359,8 +379,44 @@ public class OddsClient {
         if (used != null) {
             requestsUsed.set(used);
         }
-        ultimaLeitura.set(LocalDateTime.now());
+        var agora = agora();
+        ultimaLeitura.set(agora);
         persistirCota();
+        registrarHistorico(agora);
+    }
+
+    /**
+     * Acrescenta a leitura a serie de {@code odds_cota_historico} (#61). Fica aqui, e nao no
+     * {@link #persistirCota()}, porque o outro caminho que chama {@code persistirCota} e a
+     * liberacao de sondagem em {@link #guardrailBloqueia()} — ali nenhum header foi lido e o
+     * saldo nao mudou. Gravar tambem naquele ponto encheria a serie de pontos que nao sao
+     * leituras, e o grafico do mes passaria a mostrar degraus onde nada aconteceu.
+     *
+     * <p>Falha aqui nao interrompe a busca, pelo mesmo motivo do {@code persistirCota}: isto e
+     * um registro para grafico, e nao pode transformar {@code /api/favoritos} e {@code /api/time}
+     * em 500 depois de o credito ja ter sido gasto.
+     *
+     * <p>Sim, isto e mais um INSERT dentro do {@code @Cacheable(sync = true)}, que serializa
+     * chamadores concorrentes no mesmo miss. Fica: a secao ja segura uma chamada HTTP ao
+     * provedor com timeout de 10 s, mais a leitura e a escrita do snapshot com o JSON inteiro
+     * das odds. Quatro colunas a mais nao movem esse ponteiro, e tirar daqui custaria um pool
+     * de threads e a propagacao do contexto transacional em troca de nada mensuravel.
+     *
+     * <p>O instante chega por parametro em vez de sair de {@code ultimaLeitura}: a coluna e
+     * {@code NOT NULL} e a excecao aqui e engolida, entao depender de um campo setado logo acima
+     * faria uma reordenacao futura parar de gravar historico em silencio — com um WARN no log e
+     * mais nada.
+     */
+    private void registrarHistorico(LocalDateTime instante) {
+        try {
+            var leitura = new OddsCotaHistorico();
+            leitura.setInstante(instante);
+            leitura.setSaldoRestante(getRequestsRemaining());
+            leitura.setConsumoMes(getRequestsUsed());
+            historicoRepository.save(leitura);
+        } catch (Exception e) {
+            log.warn("Nao foi possivel registrar a leitura de cota no historico: {}", e.getMessage());
+        }
     }
 
     /**

@@ -39,3 +39,6 @@ logs/
 
 # Docker volumes / local data
 data/
+
+# Observabilidade — token de scrape do Prometheus (local, nunca versionado)
+docs/observabilidade/scrape-token

@@ -1,6 +1,7 @@
 package com.cartola.odds.client;
 
 import com.cartola.odds.config.OddsProperties;
+import com.cartola.odds.repository.OddsCotaHistoricoRepository;
 import com.cartola.odds.repository.OddsCotaRepository;
 import com.cartola.odds.repository.OddsSnapshotRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -31,8 +32,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("Metricas de odds no Prometheus")
 class MetricasOddsPrometheusTest {
 
-    @Mock OddsSnapshotRepository snapshotRepository;
-    @Mock OddsCotaRepository     cotaRepository;
+    @Mock OddsSnapshotRepository      snapshotRepository;
+    @Mock OddsCotaRepository          cotaRepository;
+    @Mock OddsCotaHistoricoRepository historicoRepository;
 
     private PrometheusMeterRegistry registry;
 
@@ -43,7 +45,7 @@ class MetricasOddsPrometheusTest {
         registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
 
         new OddsClient(RestClient.builder().baseUrl(props.getBaseUrl()).build(), props,
-                snapshotRepository, cotaRepository, new ObjectMapper(), registry);
+                snapshotRepository, cotaRepository, historicoRepository, new ObjectMapper(), registry);
     }
 
     @Test

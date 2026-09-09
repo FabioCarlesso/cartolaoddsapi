@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════════════
+# Prometheus — exemplo de coleta das metricas do cartola-odds (#58)
+#
+# Este arquivo e referencia, nao um servico que o projeto sobe: nao ha
+# Prometheus no docker-compose.yml. Copie o `scrape_config` abaixo para o
+# Prometheus que voce ja opera, junto com o `rule_files` que carrega os
+# alertas, e recarregue (`curl -X POST http://prometheus:9090/-/reload`).
+#
+# ── O alvo ───────────────────────────────────────────────────────────
+# O Actuator responde na mesma porta da aplicacao (nao ha porta separada),
+# e /actuator/prometheus exige um token de ADMIN — a matriz do SecurityConfig
+# nao abre metricas para anonimo.
+#
+# O token vai num arquivo, e nao inline: o Prometheus nao expande variaveis de
+# ambiente no proprio config, e um token colado aqui iria para o repositorio.
+# `docs/observabilidade/scrape-token` esta no .gitignore para o caso de voce
+# criar o arquivo neste diretorio.
+#
+# ── Limite conhecido ─────────────────────────────────────────────────
+# O access token expira em JWT_EXPIRATION_MS (padrao 24 h) e nao ha renovacao:
+# a coleta para quando ele vence, e retoma-la e colar um token novo. O sintoma
+# e o alvo aparecer como DOWN com 401 em /targets. Uma credencial de conta de
+# maquina esta na issue #44.
+# ══════════════════════════════════════════════════════════════════════
+
+global:
+  # 30s cobre com folga uma metrica que muda no maximo algumas vezes por hora,
+  # e mantem o alerta de saldo com granularidade suficiente.
+  scrape_interval:     30s
+  evaluation_interval: 30s
+
+rule_files:
+  - alertas-cota-odds.yml
+
+scrape_configs:
+  - job_name: cartola-odds
+    metrics_path: /actuator/prometheus
+    scheme: http
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/scrape-token
+    static_configs:
+      - targets: ['cartola-odds:8080']

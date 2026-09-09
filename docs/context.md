@@ -333,6 +333,101 @@ o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mí
 cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
 fica silenciosa até existir dado de verdade.
 
+### Histórico das leituras de cota
+
+A `odds_cota` guarda o estado corrente numa linha só, sobrescrita a cada leitura — e é isso que o
+guardrail precisa no boot. Mas uma linha sobrescrita não tem passado, então "quanto se gastou ao
+longo deste mês" não tinha resposta dentro da aplicação. Foi por não ter que a pergunta quase
+virou um Prometheus ao lado (#58): guardar amostras era o serviço que aquela stack prestava, e
+era o único que ela prestava de fato. Guardar a série aqui custa uma tabela.
+
+A `odds_cota_historico` (#61) é append-only e complementa a `odds_cota`, não a substitui: as duas
+respondem perguntas diferentes e mudam pelo mesmo evento. O append fica em `registrarCota()`, e
+não em `persistirCota()`, porque o outro chamador de `persistirCota` é a liberação de sondagem em
+`guardrailBloqueia()` — ali nenhum header foi lido e o saldo não mudou. Gravar também naquele
+ponto encheria a série de degraus onde nada aconteceu. Falha ao gravar não interrompe a busca,
+pela mesma regra do `persistirCota`: é registro para gráfico, não pode custar um `500` depois de
+o crédito já ter sido gasto.
+
+Não há retenção, e é decisão em vez de esquecimento: uma linha só nasce de uma chamada ao
+provedor, e as chamadas são limitadas pela própria cota que a tabela mede — no plano free, no
+máximo ~500 linhas por mês. Uma política de expurgo custaria mais atenção do que o espaço que
+economiza.
+
+A virada de ciclo é detectada no servidor, e não em cada consumidor: `reinicioDeCota` marca a
+leitura em que o consumo caiu em relação à anterior. A renovação da The Odds API não está
+confirmada como sendo por mês calendário ou por aniversário da assinatura, e detectar pela série
+funciona nos dois casos — enquanto chutar o dia 1º cortaria o gráfico no lugar errado. A primeira
+leitura da janela nunca é marcada: sem uma anterior para comparar, afirmar que houve renovação
+seria chute. Sem essa marca, a queda do consumo pareceria falha de coleta.
+
+A janela do endpoint é limitada a 92 dias, e o limite é sobre a resposta, não sobre a tabela. A
+série não é agregada — cada leitura vira um item —, e medindo com um ano de dados a resposta deu
+6.000 itens e 603 KB: meio megabyte para alimentar um gráfico de algumas centenas de pixels. Um
+trimestre cobre o mês corrente e os dois anteriores, que é o que se compara na prática. Um ano
+inteiro, se um dia fizer falta, pede agregação por dia — não um teto maior.
+
+Os instantes são truncados a microssegundos na origem, no `OddsClient`, e não só na resposta. A
+precisão do `timestamp` do PostgreSQL é essa, e sem truncar o mesmo instante aparecia com nove
+casas em `ultimaLeitura` — que vem da memória — e seis no `instante` da mesma leitura no
+histórico, que volta do banco; arredondado, ainda por cima, deixando o ponto do gráfico depois do
+estado que o originou. Depois de um restart o campo trocava de formato, porque passava a vir do
+banco. Truncando na origem, memória e tabela guardam o mesmo valor.
+
+A série é ordenada pelo **instante da leitura**, com o `id` como desempate — e não pela ordem de
+inserção. Hoje isso só evita que duas leituras do mesmo microssegundo saiam em ordem escolhida
+pelo banco, o que é praticamente inalcançável. Importa mesmo se a aplicação um dia rodar em mais
+de uma instância: quem chegou ao banco primeiro deixa de importar, vale quando a cota foi lida.
+Nesse cenário sobra um risco pequeno — relógios dessincronizados entre instâncias podem inverter
+duas leituras vizinhas e fazer o saldo parecer que subiu, marcando um `reinicioDeCota` falso. Com
+uma instância só, que é o caso, não acontece.
+
+Os campos de data são `LocalDateTime`, sem offset, como em toda a API. É a convenção herdada, e
+foi mantida de propósito para não criar um contrato diferente só neste endpoint; o custo é que o
+consumidor precisa converter usando o fuso em que a aplicação roda, e não o do navegador. Está
+dito na descrição OpenAPI do endpoint em vez de ficar implícito, porque o frontend é consumidor
+novo e um deslocamento de fuso num gráfico não se denuncia sozinho — o gráfico só fica errado.
+
+O matcher de `/api/odds/cota` no `SecurityConfig` é de path exato, então o subcaminho precisou
+entrar explicitamente. Sem isso, `/api/odds/cota/historico` cairia no
+`anyRequest().authenticated()` e a série ficaria aberta a qualquer token — a rota que existe
+justamente para descrever o consumo do componente pago.
+### Dashboard e alertas da cota
+
+O guardrail evita o desastre, mas não avisa que armou — e armado ele serve snapshot antigo em
+silêncio. O dashboard do Grafana e as regras do Prometheus vivem versionados em
+`docs/observabilidade/`, sobre as três métricas que já existiam: a issue (#58) deixou explícito
+que nenhuma métrica nova era necessária, e o que faltava era o outro lado da instrumentação.
+
+Dois números da aplicação não são métricas e por isso ficam repetidos nos artefatos: o mínimo do
+guardrail (`odds.api.min-requests-remaining`) e a cota do plano contratado, sem a qual o consumo
+do mês não é derivável (`remaining + used` somam a cota, e `used` não é exportado). Repetido, um
+número diverge — então `ArtefatosObservabilidadeTest` amarra o mínimo dos artefatos ao
+`application.properties` e confere que todo nome `odds_api_*` citado neles existe na exposição.
+Um alerta que descreve um corte que a aplicação não aplica é pior do que nenhum alerta, e uma
+renomeação de métrica deixaria painel e alerta mudos sem erro em lugar nenhum.
+
+O `NaN` de "sem leitura" atravessa os artefatos de ponta a ponta. As regras de saldo não disparam
+porque comparação com `NaN` é falsa; o painel de guardrail usa `clamp(sgn($minimo - saldo), 0, 1)`
+justamente porque a aritmética preserva `NaN`, enquanto `< bool` o colapsaria em `0` e diria
+"desarmado" antes da primeira chamada.
+
+O alerta de saldo parado mede o tempo no `for:`, e não numa janela de 25 h dentro do `changes()`:
+"sem mudança nos últimos 25 h" também é verdade quando só existem dez minutos de dado, e um
+Prometheus recém-subido dispararia na primeira meia hora. Com janela curta e `for: 25h`, as 25
+horas precisam ter acontecido de fato.
+
+Os artefatos são arquivos, não serviços: o projeto não sobe Prometheus nem Grafana. A primeira
+versão desta issue trazia um perfil `observabilidade` no compose, e ele foi cortado antes do
+merge — o estado *atual* da cota, que é o que se olha em 90% das vezes, já sai inteiro de
+`GET /api/odds/cota`, inclusive o `minRequestsRemaining` que o dashboard precisa duplicar. Uma
+segunda stack para cuidar não se paga por gráfico. O que sobra de exclusivo dela é a avaliação
+contínua — alguém perguntando pelo saldo sem ninguém abrir tela — e a taxa de erro sobre os
+contadores; o histórico do mês deixou de estar nessa lista quando a série passou a ser guardada
+na própria aplicação (#61, acima). Somado a isso, o scrape depende de um token de `ADMIN` que
+expira em 24 h (#44), então a stack não teria como rodar continuamente mesmo se estivesse no
+compose.
+
 ### Observabilidade (Spring Actuator + Micrometer)
 
 O projeto inclui **Spring Boot Actuator** com **Micrometer** e o registry **Prometheus** para coleta de métricas.

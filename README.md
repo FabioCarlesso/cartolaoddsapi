@@ -215,10 +215,16 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
   (chamadas feitas ao provedor, contadas **na tentativa** — a recusa por cota estourada consumiu
   a tentativa igual e precisa aparecer no total), `odds_api_requests_remaining` (gauge com o
   saldo informado) e `odds_api_errors_total` (falhas, um subconjunto do total — o que faz
-  `odds_api_errors_total / odds_api_requests_total` ser uma taxa de erro de verdade).
+  `odds_api_errors_total / odds_api_requests_total` ser uma taxa de erro de verdade). Dashboard e
+  alertas prontos sobre essas três métricas estão em
+  [`docs/observabilidade/`](docs/observabilidade/) — ver [Dashboard e alertas da cota](#dashboard-e-alertas-da-cota).
 - **`GET /api/odds/cota`** (`ADMIN`): saldo restante, consumo do mês, instante da última leitura,
   se o guardrail está ativo e — a pergunta que se faz ao ver o guardrail armado — quando a
   próxima sondagem libera uma chamada (`proximaSondagem`).
+- **`GET /api/odds/cota/historico`** (`ADMIN`): a série das leituras dentro de uma janela
+  (`?dias=30`, de 1 a 92), em ordem cronológica. É o que responde *"quanto eu gastei ao longo
+  deste mês"* — a `odds_cota` guarda só o estado corrente, e uma linha sobrescrita não tem
+  passado. Cada item traz `reinicioDeCota: true` na primeira leitura de um ciclo novo.
 - **Guardrail** `odds.api.min-requests-remaining` (padrão `50`): abaixo desse saldo, o
   `OddsClient` para de chamar o provedor e passa a servir a **última resposta conhecida**,
   persistida na tabela `odds_snapshot` — o que faz o fallback sobreviver a restart e redeploy,
@@ -231,6 +237,10 @@ estoura. O `OddsClient` lê esses headers nos dois caminhos e expõe o último v
 - **Estado persistido** na tabela `odds_cota` e recuperado no boot: sem isso, cada deploy
   voltaria para "sem leitura" e desarmaria o guardrail justamente quando o cache em memória
   some — que é o momento em que a próxima requisição quer chamar o provedor.
+- **Histórico append-only** na tabela `odds_cota_historico`: uma linha por leitura de header,
+  gravada ao lado do estado corrente. A tabela não tem retenção, e é decisão: uma linha só nasce
+  de uma chamada ao provedor, e as chamadas são limitadas pela própria cota que ela mede — no
+  plano free, no máximo ~500 linhas por mês.
 - Log em `WARN` quando o saldo cruza o **dobro do mínimo** e o próprio mínimo configurado (com
   o padrão de `50`, os limiares são 100 e 50), e em `ERROR` quando o guardrail entra em ação ou
   quando o provedor falha sem snapshot disponível.
@@ -358,7 +368,7 @@ incrementa o contador, e todo token anterior deixa de valer na mesma hora.
 | `GET /api/config` | Autenticado |
 | `PATCH /api/config`, `POST /api/config/reset` | `ADMIN` |
 | `DELETE /api/cache`, `DELETE /api/cache/{nome}` | `ADMIN` |
-| `GET /api/odds/cota` | `ADMIN` |
+| `GET /api/odds/cota`, `/api/odds/cota/**` | `ADMIN` |
 | `GET /api/usuarios/me`, `PATCH /api/usuarios/me/senha` | Autenticado (qualquer perfil) |
 | Todo o resto de `/api/usuarios**` | `ADMIN` |
 | Qualquer outra rota | Autenticado |
@@ -613,6 +623,7 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 | `GET` | `/api/historico/{rodadaId}` | Detalhe da escalação de uma rodada específica |
 | `POST` | `/api/historico/{rodadaId}/atualizar-pontuacao` | Busca a pontuação real da rodada via `/atletas/pontuados` e persiste — exige `ADMIN` |
 | `GET` | `/api/odds/cota` | **`ADMIN`** — saldo restante, consumo do mês, instante da última leitura, se o guardrail de cota está ativo e quando a próxima sondagem o destrava |
+| `GET` | `/api/odds/cota/historico` | **`ADMIN`** — série das leituras de cota na janela (`?dias=30`, 1 a 92), em ordem cronológica, com marca de reinício de ciclo |
 | `GET` | `/swagger-ui.html` | Documentação interativa Swagger UI — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/v3/api-docs` | Spec OpenAPI 3 em JSON — pública fora de produção, `404` no perfil `prod` |
 | `GET` | `/actuator/health` | Público — saúde da aplicação |
@@ -666,6 +677,40 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
   "proximaSondagem": "2026-09-06T10:00:00"
 }
 ```
+
+### Exemplo — `GET /api/odds/cota/historico?dias=7`
+
+```json
+{
+  "dias": 7,
+  "desde": "2026-08-29T10:00:00",
+  "total": 3,
+  "leituras": [
+    { "instante": "2026-08-31T22:00:00", "saldoRestante": 8,   "consumoMes": 492, "reinicioDeCota": false },
+    { "instante": "2026-09-01T09:00:00", "saldoRestante": 500, "consumoMes": 0,   "reinicioDeCota": true  },
+    { "instante": "2026-09-01T10:00:00", "saldoRestante": 499, "consumoMes": 1,   "reinicioDeCota": false }
+  ]
+}
+```
+
+> `reinicioDeCota` marca a primeira leitura de um ciclo novo: em relação à leitura anterior, o
+> consumo caiu **ou** o saldo subiu — os dois sinais que a renovação da cota produz. A detecção
+> acontece uma vez, no servidor, para que quem desenha o gráfico não precise reimplementá-la — e
+> para que a queda do consumo não seja lida como falha de coleta. Nunca vem `true` na primeira
+> leitura da janela: sem uma anterior para comparar, afirmar que houve renovação seria chute.
+
+> ⏱️ **Fuso horário.** `instante` e `desde` são `LocalDateTime`: data e hora **locais do
+> servidor**, sem offset. Um `new Date(instante)` no navegador interpreta como hora local dele —
+> com servidor em UTC e navegador em UTC−3, todo ponto do gráfico desloca 3 h. Converta usando o
+> fuso em que a aplicação roda. É a convenção de data/hora de toda a API, não só deste endpoint.
+> O `instante` da última leitura da série é exatamente o `ultimaLeitura` de `GET /api/odds/cota` —
+> os dois são truncados a microssegundos na origem, então comparam direto.
+
+> 📦 **Tamanho da resposta.** A série não é agregada: cada leitura vira um item. A janela padrão
+> de 30 dias dá ~500 itens (~50 KB); o teto de 92 dias, ~1.500. O teto existe por isso — com um
+> ano de dados a resposta passava de 6.000 itens e 600 KB, meio megabyte para alimentar um
+> gráfico de algumas centenas de pixels. Se um dia fizer sentido olhar um ano, o caminho é
+> agregar por dia, não devolver tudo.
 
 ### Exemplo — `GET /api/ranking?posicao=ATA&limite=3`
 
@@ -1133,6 +1178,25 @@ scrape_configs:
 ```
 
 > ⚠️ O scrape precisa de um token de `ADMIN`, e o access token expira (`JWT_EXPIRATION_MS`, padrão 24 h) sem mecanismo de renovação — na prática o Prometheus para de coletar quando o token vence. Um credencial próprio para conta de máquina está na [issue #44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44). Até lá, a coleta contínua exige colar um token novo periodicamente.
+
+### Dashboard e alertas da cota
+
+O guardrail de cota impede o desastre, mas não avisa que armou — e enquanto ele está armado a aplicação serve o último snapshot conhecido, que envelhece em silêncio. O dashboard e as regras de alerta que tornam isso visível são versionados em [`docs/observabilidade/`](docs/observabilidade/), sobre as três métricas que a aplicação já expõe:
+
+| Arquivo | Conteúdo |
+|---|---|
+| `grafana-cota-odds.json` | Dashboard: saldo restante, consumo do mês, taxa de erro e estado do guardrail |
+| `alertas-cota-odds.yml` | Alertas: guardrail armado, armado há mais de um dia, saldo sem leitura e taxa de erro anormal |
+| `alertas-cota-odds.test.yml` | Teste das regras (`promtool test rules`) |
+| `prometheus.yml` | Exemplo de configuração de scrape |
+
+**São arquivos, não serviços.** O projeto não sobe Prometheus nem Grafana: não há nada disso no `docker-compose.yml`. Quem já opera essa stack importa o dashboard e copia as regras; quem não opera não herda uma segunda stack para cuidar.
+
+Para ver a cota, nada disso é necessário: [`GET /api/odds/cota`](#cota-da-the-odds-api-e-guardrail) devolve o estado atual e [`GET /api/odds/cota/historico`](#cota-da-the-odds-api-e-guardrail) devolve a série do mês, os dois em JSON. O que os arquivos acrescentam sobre isso é a **avaliação contínua** — algo perguntando pelo saldo sem ninguém abrir tela — e a taxa de erro sobre os contadores, que não têm endpoint.
+
+**Saldo baixo e saldo não lido são estados diferentes.** `odds_api_requests_remaining` exporta `NaN` — e não `-1` — enquanto nenhuma leitura aconteceu, para não fazer todo alerta de saldo baixo disparar a cada deploy. O dashboard mostra `sem leitura ainda` em vez de zero.
+
+O que fazer quando cada alerta dispara está em [`docs/documentacao.md`, seção 14](docs/documentacao.md#14-observabilidade-da-cota).
 
 > Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) não são expostos. Apenas `health`, `info`, `metrics` e `prometheus` ficam disponíveis.
 
