@@ -68,6 +68,10 @@ public interface OddsCotaApi {
             sem offset. Um cliente que faca new Date(instante) vai interpreta-los como hora
             local dele — com servidor em UTC e navegador em UTC-3, todo ponto do grafico
             desloca 3 h. Converta usando o fuso em que a aplicacao roda, nao o do navegador.
+
+            O instante da ultima leitura desta serie e exatamente o ultimaLeitura devolvido por
+            GET /api/odds/cota: os dois sao truncados a microssegundos na origem, entao dao para
+            comparar direto, inclusive como string.
             """
     )
     @ApiResponses({

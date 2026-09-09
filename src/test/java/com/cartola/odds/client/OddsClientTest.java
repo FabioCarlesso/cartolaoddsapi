@@ -381,6 +381,26 @@ class OddsClientTest {
         }
 
         @Test
+        @DisplayName("o instante gravado deve ser exatamente o mesmo exposto em ultimaLeitura")
+        void instanteDeveBaterComUltimaLeitura() {
+            // Os dois campos descrevem a mesma leitura, e sao servidos por endpoints diferentes:
+            // ultimaLeitura vem da memoria em GET /api/odds/cota, instante volta do banco em
+            // /historico. Sem truncar na origem, o banco arredonda os nanossegundos e o ponto do
+            // grafico fica depois do estado que o originou — dois valores para o mesmo instante.
+            when(snapshotRepository.findById(OddsSnapshot.ID_UNICO)).thenReturn(Optional.empty());
+            responderComCota("412", "88");
+
+            oddsClient.buscarOdds();
+
+            var gravada = ArgumentCaptor.forClass(OddsCotaHistorico.class);
+            verify(historicoRepository).save(gravada.capture());
+            assertThat(gravada.getValue().getInstante()).isEqualTo(oddsClient.getUltimaLeitura());
+            assertThat(oddsClient.getUltimaLeitura().getNano() % 1000)
+                    .as("truncado a microssegundos, a precisao do timestamp no PostgreSQL")
+                    .isZero();
+        }
+
+        @Test
         @DisplayName("falha ao gravar o historico nao deve interromper a busca de odds")
         void falhaNoHistoricoNaoDerrubaBusca() {
             // O historico e um registro para grafico. Nao pode transformar /api/favoritos e

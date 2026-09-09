@@ -703,6 +703,8 @@ motivos: uma propriedade inexistente derrubava a requisição em `500` vindo do 
 > servidor**, sem offset. Um `new Date(instante)` no navegador interpreta como hora local dele —
 > com servidor em UTC e navegador em UTC−3, todo ponto do gráfico desloca 3 h. Converta usando o
 > fuso em que a aplicação roda. É a convenção de data/hora de toda a API, não só deste endpoint.
+> O `instante` da última leitura da série é exatamente o `ultimaLeitura` de `GET /api/odds/cota` —
+> os dois são truncados a microssegundos na origem, então comparam direto.
 
 > 📦 **Tamanho da resposta.** A série não é agregada: cada leitura vira um item. A janela padrão
 > de 30 dias dá ~500 itens (~50 KB); o teto de 92 dias, ~1.500. O teto existe por isso — com um

@@ -92,7 +92,7 @@ class OddsCotaServiceTest {
         @DisplayName("deve devolver as leituras da janela em ordem cronologica")
         void deveDevolverLeiturasDaJanela() {
             var ontem = LocalDateTime.now().minusDays(1);
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(leitura(ontem, 412L, 88L), leitura(ontem.plusHours(1), 411L, 89L)));
 
             var resposta = servico().buscarHistorico(30);
@@ -111,7 +111,7 @@ class OddsCotaServiceTest {
             // A virada do ciclo derruba o consumo e devolve o saldo. Sem a marca, quem desenha
             // o grafico le essa queda como falha de coleta e quebra a linha no lugar errado.
             var base = LocalDateTime.now().minusDays(2);
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(
                             leitura(base, 8L, 492L),
                             leitura(base.plusHours(1), 500L, 0L),
@@ -127,7 +127,7 @@ class OddsCotaServiceTest {
         @DisplayName("nao deve marcar reinicio na primeira leitura da janela")
         void naoDeveMarcarReinicioNaPrimeira() {
             // Sem uma leitura anterior para comparar, afirmar que a cota renovou seria chute.
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(leitura(LocalDateTime.now(), 500L, 0L)));
 
             assertThat(servico().buscarHistorico(30).getLeituras())
@@ -142,7 +142,7 @@ class OddsCotaServiceTest {
             // ultimo consumo conhecido — senao um buraco no meio da serie inventaria um
             // reinicio na leitura seguinte.
             var base = LocalDateTime.now().minusDays(1);
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(
                             leitura(base, 400L, 100L),
                             leitura(base.plusHours(1), 399L, null),
@@ -160,7 +160,7 @@ class OddsCotaServiceTest {
             // consumo perderia o ciclo que terminou com consumo baixissimo — aqui, 2 leituras
             // no mes inteiro. O saldo subindo denuncia a renovacao de qualquer jeito.
             var base = LocalDateTime.now().minusDays(2);
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(
                             leitura(base, 498L, 2L),
                             leitura(base.plusHours(1), 500L, 2L)));
@@ -174,7 +174,7 @@ class OddsCotaServiceTest {
         @DisplayName("saldo caindo no uso normal nao deve marcar reinicio")
         void saldoCaindoNaoMarcaReinicio() {
             var base = LocalDateTime.now().minusDays(1);
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of(
                             leitura(base, 400L, 100L),
                             leitura(base.plusHours(1), 399L, 101L),
@@ -203,7 +203,7 @@ class OddsCotaServiceTest {
         void desdeDeveTerPrecisaoDeMicros() {
             // O PostgreSQL guarda `timestamp` em microssegundos; sem truncar, `desde` sairia com
             // nanossegundos do relogio da JVM e o payload teria duas precisoes diferentes.
-            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(any()))
+            when(historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(any()))
                     .thenReturn(List.of());
 
             assertThat(servico().buscarHistorico(30).getDesde().getNano() % 1000).isZero();

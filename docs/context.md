@@ -367,6 +367,21 @@ série não é agregada — cada leitura vira um item —, e medindo com um ano 
 trimestre cobre o mês corrente e os dois anteriores, que é o que se compara na prática. Um ano
 inteiro, se um dia fizer falta, pede agregação por dia — não um teto maior.
 
+Os instantes são truncados a microssegundos na origem, no `OddsClient`, e não só na resposta. A
+precisão do `timestamp` do PostgreSQL é essa, e sem truncar o mesmo instante aparecia com nove
+casas em `ultimaLeitura` — que vem da memória — e seis no `instante` da mesma leitura no
+histórico, que volta do banco; arredondado, ainda por cima, deixando o ponto do gráfico depois do
+estado que o originou. Depois de um restart o campo trocava de formato, porque passava a vir do
+banco. Truncando na origem, memória e tabela guardam o mesmo valor.
+
+A série é ordenada pelo **instante da leitura**, com o `id` como desempate — e não pela ordem de
+inserção. Hoje isso só evita que duas leituras do mesmo microssegundo saiam em ordem escolhida
+pelo banco, o que é praticamente inalcançável. Importa mesmo se a aplicação um dia rodar em mais
+de uma instância: quem chegou ao banco primeiro deixa de importar, vale quando a cota foi lida.
+Nesse cenário sobra um risco pequeno — relógios dessincronizados entre instâncias podem inverter
+duas leituras vizinhas e fazer o saldo parecer que subiu, marcando um `reinicioDeCota` falso. Com
+uma instância só, que é o caso, não acontece.
+
 Os campos de data são `LocalDateTime`, sem offset, como em toda a API. É a convenção herdada, e
 foi mantida de propósito para não criar um contrato diferente só neste endpoint; o custo é que o
 consumidor precisa converter usando o fuso em que a aplicação roda, e não o do navegador. Está

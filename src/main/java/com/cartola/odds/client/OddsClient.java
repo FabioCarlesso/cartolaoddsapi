@@ -27,6 +27,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -314,7 +315,7 @@ public class OddsClient {
         boolean sondagemVencida = proxima == null || proxima.isBefore(LocalDateTime.now());
 
         if (sondagemVencida) {
-            ultimaSondagem.set(LocalDateTime.now());
+            ultimaSondagem.set(agora());
             persistirCota();
             log.warn("Guardrail de cota ativo (saldo {} < {}), mas a ultima leitura tem mais de {}h: "
                             + "liberando uma chamada de sondagem para reavaliar o saldo.",
@@ -331,6 +332,20 @@ public class OddsClient {
      */
     private LocalDateTime referenciaDaSondagem() {
         return maisRecente(ultimaLeitura.get(), ultimaSondagem.get());
+    }
+
+    /**
+     * Agora, truncado a microssegundos — a precisao que o PostgreSQL guarda em {@code timestamp}.
+     *
+     * <p>Sem truncar, o mesmo instante aparece de dois jeitos para quem consome a API: com nove
+     * casas decimais em {@code ultimaLeitura} de {@code GET /api/odds/cota}, que le da memoria, e
+     * com seis no {@code instante} da mesma leitura em {@code /historico}, que volta do banco — e
+     * arredondado, entao o ponto do historico chega a ficar depois do estado que o originou.
+     * Depois de um restart o campo troca de formato, porque passa a vir do banco. Truncar na
+     * origem faz memoria e tabela guardarem exatamente o mesmo valor.
+     */
+    private static LocalDateTime agora() {
+        return LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
     }
 
     private static LocalDateTime maisRecente(LocalDateTime a, LocalDateTime b) {
@@ -364,7 +379,7 @@ public class OddsClient {
         if (used != null) {
             requestsUsed.set(used);
         }
-        var agora = LocalDateTime.now();
+        var agora = agora();
         ultimaLeitura.set(agora);
         persistirCota();
         registrarHistorico(agora);

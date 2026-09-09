@@ -17,7 +17,6 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class OddsCotaService {
 
     /**
@@ -30,6 +29,14 @@ public class OddsCotaService {
     private final OddsProperties              oddsProperties;
     private final OddsCotaHistoricoRepository historicoRepository;
 
+    /**
+     * Estado corrente da cota. <strong>Sem {@code @Transactional}</strong>, de proposito: nada
+     * aqui toca o banco — os valores vem dos {@code AtomicLong} do {@link OddsClient}. Anotar a
+     * classe inteira, como fazem os services que so falam com repositorio, custava uma aquisicao
+     * de conexao por requisicao ({@code readOnly = true} adquire a conexao antes da hora para
+     * aplicar {@code setReadOnly}), medida em 2,05 contra 1,05 da autenticacao sozinha — numa
+     * rota que nao executa SQL nenhum, e que e a mais consultada por quem monitora a cota.
+     */
     public OddsCotaResponse buscarCota() {
         return OddsCotaResponse.builder()
                 .saldoRestante(oddsClient.getRequestsRemaining())
@@ -55,6 +62,7 @@ public class OddsCotaService {
      * @throws IllegalArgumentException quando a janela nao descreve um intervalo consultavel;
      *         o {@code GlobalExceptionHandler} traduz para 400 com a mensagem.
      */
+    @Transactional(readOnly = true)
     public OddsCotaHistoricoResponse buscarHistorico(int dias) {
         if (dias < 1) {
             throw new IllegalArgumentException(
@@ -65,11 +73,11 @@ public class OddsCotaService {
                     "dias deve ser no maximo " + DIAS_MAXIMO + ". Valor informado: " + dias);
         }
 
-        // Truncado a microssegundos porque e a precisao que o PostgreSQL guarda em `timestamp`:
-        // sem isso, `desde` sai com nanossegundos (do relogio da JVM) e os `instante` com
-        // microssegundos, duas precisoes diferentes no mesmo payload.
+        // Truncado a microssegundos, a precisao que o PostgreSQL guarda em `timestamp`. O
+        // OddsClient trunca pelo mesmo motivo ao marcar a leitura: sem isso, um mesmo instante
+        // aparece com nove casas quando vem da memoria e seis quando volta do banco.
         var desde    = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS).minusDays(dias);
-        var leituras = historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAsc(desde);
+        var leituras = historicoRepository.findByInstanteGreaterThanEqualOrderByInstanteAscIdAsc(desde);
 
         return OddsCotaHistoricoResponse.builder()
                 .dias(dias)
