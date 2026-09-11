@@ -1,5 +1,15 @@
 # Context — Cartola Odds API
 
+> **Papel deste arquivo:** registrar as **decisões de arquitetura e o porquê de cada uma** — o
+> raciocínio que não se deduz lendo o código nem a referência.
+>
+> *O que* o sistema faz e *como* se usa cada endpoint está nos arquivos de referência —
+> [`api.md`](api.md), [`regras-de-negocio.md`](regras-de-negocio.md),
+> [`seguranca.md`](seguranca.md) e os demais listados em [`docs/README.md`](README.md).
+> Como subir o projeto está no [README](../README.md).
+
+---
+
 ## Visão Geral
 
 API REST em **Java 21 + Spring Boot 3.4.5** que monta automaticamente um time competitivo para o **Cartola FC** cruzando odds do Brasileirão (via [The Odds API](https://the-odds-api.com)) com métricas dos atletas da plataforma Cartola.
@@ -14,16 +24,10 @@ Montar um time no Cartola FC exige combinar dois tipos de dados dispersos:
 
 Esta API cruza essas duas fontes e entrega diretamente os melhores atletas disponíveis, já escalados em formação configurável (padrão **4-3-3**).
 
----
-
-## APIs Externas Consumidas
-
-| API | Base URL | Uso |
-|---|---|---|
-| The Odds API | `https://api.the-odds-api.com` | Odds do Brasileirão para identificar times favoritos |
-| Cartola FC API | `https://api.cartola.globo.com` | Atletas, clubes, mercado, partidas, pontuações por rodada |
-
-Endpoints Cartola utilizados: `/mercado/status`, `/atletas/mercado`, `/clubes`, `/partidas`, `/atletas/pontuados`.
+As duas fontes consumidas — The Odds API (paga, com cota) e Cartola FC (pública, sem autenticação)
+— estão detalhadas em [`arquitetura.md` › APIs Externas](arquitetura.md#apis-externas). A assimetria entre
+elas é o que explica boa parte das decisões abaixo: uma é de graça e ilimitada, a outra tem 500
+requisições por mês.
 
 ---
 
@@ -47,11 +51,18 @@ assim mesmo, produzia uma API no ar que ninguém conseguia autenticar, com o avi
 despercebido. A exigência cai quando já existe um ADMIN ativo, para que produção não precise
 manter para sempre a senha do primeiro acesso depois de trocada.
 
+O login devolve `expiraEmSegundos`, uma duração, e não um instante absoluto: o container roda em
+UTC e um horário sem fuso seria lido como local pelo cliente, que passaria a achar que a sessão dura
+horas a mais do que o token realmente vale. É a mesma escolha do `expires_in` do OAuth 2.
+
 O login tem freio de força bruta por e-mail (`LoginThrottle`), e não por IP. Não é falta de IP: com
 `server.forward-headers-strategy=native` a aplicação lê o endereço real do cliente atrás de um proxy
 confiável, e contar por IP seria viável. Continua não sendo o que se quer contar — o e-mail descreve
 o alvo do ataque e o IP descreve só o caminho, e caminho é o que um atacante distribuído troca de
-graça, enquanto adivinhar a senha do administrador é martelar sempre o mesmo endereço.
+graça, enquanto adivinhar a senha do administrador é martelar sempre o mesmo endereço. Contar por IP
+ainda faria o freio punir todos juntos atrás de um NAT.
+
+*Componentes, claims e contrato: [`seguranca.md` › Autenticação (JWT)](seguranca.md#autenticação-jwt).*
 
 ### Política de acesso por rota e hardening do perfil `prod`
 
@@ -86,6 +97,11 @@ documentação está lá, atrás de uma senha; o `404` não confirma nada. O con
 mapa que um atacante levaria tempo montando na mão, e o *Try it out* do Swagger UI deixa disparar as
 chamadas dali mesmo.
 
+O CORS é parametrizado e nunca curinga: o token viaja em header, e um `*` deixaria qualquer site
+chamar a API com o token da vítima. O preflight `OPTIONS` passa antes da autorização porque ele não
+carrega `Authorization` — sem essa exceção o navegador levaria `401` sem chegar a enviar a
+requisição real.
+
 O HSTS sai condicionado à requisição ter chegado por TLS. Atrás da borda da plataforma o TLS termina
 no proxy e o Tomcat veria HTTP puro, então o cabeçalho nunca apareceria em produção; quem resolve é
 `server.forward-headers-strategy=native`, que põe o `RemoteIpValve` na frente da cadeia para
@@ -101,6 +117,15 @@ configurada: a lista de saltos confiáveis existe e tem nome. De quebra o `getRe
 valer atrás do proxy, embora o `LoginThrottle` siga contando por e-mail por outro motivo. A condição
 de TLS evita o outro extremo: mandar HSTS em `http://localhost` trava o navegador do desenvolvedor
 em HTTPS para todo o host por um ano.
+
+O `RemoteIpValve` é do Tomcat e o MockMvc não o atravessa, então essa parte precisou de dois testes
+de HTTP real — um com a faixa padrão e outro que **inverte** `internal-proxies` para provar que os
+headers de um cliente não confiável são ignorados. A inversão é o que torna o caso possível: em
+`localhost` toda requisição chega de uma faixa confiável, e um teste escrito com MockMvc passaria
+verde sem exercitar nada.
+
+*A matriz rota a rota e os cabeçalhos de segurança:
+[`seguranca.md` › Matriz de acesso por rota](seguranca.md#matriz-de-acesso-por-rota).*
 
 ### Gestão de usuários pela API, restrita a administradores
 
@@ -129,116 +154,96 @@ Duas operações são recusadas com 409 mesmo vindas de um administrador: mexer 
 (desativar ou rebaixar) e desativar ou rebaixar o último `ADMIN` ativo. A primeira é quase sempre
 engano; a segunda deixaria a instância sem nenhum acesso administrativo, recuperável só por acesso
 direto ao banco — exatamente o que o bootstrap do admin inicial existe para evitar. Essa segunda
-checagem trava as linhas dos administradores ativos (`SELECT ... FOR UPDATE`) em vez de contá-las:
-uma contagem seria check-then-act, e duas requisições simultâneas removeriam um administrador cada.
+checagem trava as linhas dos administradores ativos (`travarAtivosPorPerfil`, com
+`@Lock(PESSIMISTIC_WRITE)` — um `SELECT ... FOR UPDATE`) em vez de contá-las: uma contagem seria
+check-then-act, e duas requisições simultâneas removeriam um administrador cada.
 
 A conferência da senha atual na troca de senha reusa o freio do login, com o mesmo contador. Um
 token roubado tem validade limitada; sem freio, ele daria tentativas ilimitadas para adivinhar a
 senha e, acertando, tomar a conta em definitivo — a troca derruba os tokens do dono legítimo.
 Contadores separados para login e troca dariam ao atacante duas janelas para o mesmo segredo.
 
-A ordenação da listagem é restrita a uma lista fechada de campos. Fora dela, o Spring Data
-respondia 500 com o nome da entidade interna, e `sort=senha` era aceito — ordenar pelo hash não o
-revela, mas nada na API deveria alcançá-lo.
+As respostas usam `UsuarioResponse` e não a entidade `Usuario`, para que um campo novo na entidade
+não vaze o hash BCrypt por descuido. O e-mail é gravado sempre em minúsculas porque a `UNIQUE` do
+Postgres é sensível a caixa e o login não é: sem normalizar, `Fabio@x.com` e `fabio@x.com`
+coexistiriam na tabela e o login ficaria ambíguo.
+
+A paginação usa envelope próprio (`PaginaResponse<T>`) em vez do `Page` do Spring Data, cujo JSON é
+detalhe interno do framework e muda entre versões — o próprio Spring avisa disso no log. E a
+ordenação é restrita a uma lista fechada de campos: fora dela, o Spring Data respondia 500 com o
+nome da entidade interna, e `sort=senha` era aceito — ordenar pelo hash não o revela, mas nada na
+API deveria alcançá-lo. A mensagem de erro não ecoa o campo recebido: a lista de aceitos basta para
+corrigir a chamada, e evita devolver ao cliente um texto que ele mesmo escolheu.
+
+Payload inválido vira `400` e verbo errado vira `405`, nunca `500`: os dois são erro do cliente, e
+tratá-los como falha de servidor enchia o log de stacktrace de "erro inesperado" a cada chamada. A
+mensagem original fica só no log — ela nomeia a classe Java e chega a listar os valores aceitos de
+um enum.
+
+*Endpoints, contrato e proteções: [`seguranca.md` › Gestão de Usuários](seguranca.md#gestão-de-usuários).*
 
 ### Pipeline de Montagem do Time
 
-O `PipelineService` orquestra a montagem em etapas:
-1. Buscar status do mercado (`/mercado/status`)
-2. Buscar odds e identificar times favoritos (`OddsService`)
-3. Buscar e filtrar atletas do Cartola (`CartolaDataService`)
-4. Calcular desempenho das últimas 5 rodadas — média e desvio padrão (`DesempenhoService` via `/atletas/pontuados`)
-5. Calcular score de cada atleta (`ScoreService`)
-6. Montar o time em formação configurável (`MontadorTimeService`)
+O `PipelineService` orquestra a montagem em etapas encadeadas — status do mercado, odds e favoritos,
+atletas filtrados, desempenho recente, score, montagem —, cada uma isolada num serviço próprio. A
+sequência importa porque cada etapa restringe o conjunto da seguinte: filtrar por time favorito
+antes de calcular score evita pagar o cálculo por atletas que não entrarão no pool, e o desempenho
+precisa estar disponível antes do score porque é um dos seus termos.
+
+*As etapas em detalhe: [`arquitetura.md` › Fluxo de Execução](arquitetura.md#fluxo-de-execução).*
 
 ### Fórmula de Score
 
-O `ScoreService` aplica fórmulas distintas conforme a posição do atleta, priorizando os indicadores mais relevantes para cada função. Os bônus situacionais (`fatorCasa` e `timeFavorito`) são configuráveis via banco de dados e se aplicam a todas as posições.
+O `ScoreService` aplica fórmulas distintas conforme a posição do atleta. O fallback configurável
+(LAT, ZAG, MEI, TEC) pondera média, valorização e desempenho recente; goleiro e atacante têm
+fórmulas próprias porque os scouts que descrevem uma boa atuação são outros — defesas difíceis e
+pênaltis defendidos de um lado, gols e assistências do outro. Usar uma fórmula única obrigaria a
+escolher entre ignorar esses scouts e distribuí-los a posições onde eles não significam nada.
 
-#### Posições sem regra específica (LAT, ZAG, MEI, TEC) — fallback configurável
+Os pesos específicos de GOL e ATA são constantes centralizadas no `ScoreService` (prefixos `GOL_` e
+`ATA_`), e não parâmetros de banco: são poucos, mudam raramente, e expô-los multiplicaria a
+superfície de validação do `PATCH /api/config` sem necessidade. Ficam fáceis de ajustar sem impactar
+a fórmula das demais posições. Os bônus situacionais (`fatorCasa` e `timeFavorito`) continuam
+configuráveis e valem para todas as posições.
 
-```
-score = (mediaPontos × 0.40) + (valorização × 0.20) + (desempenho × 0.20)
-      + (fatorCasa × 0.10)   + (timeFavorito × 0.10)
-      − (desvioPadrao × pesoDesvio)
-```
+**Penalização por volatilidade.** O `DesempenhoService` calcula o desvio padrão populacional das
+últimas rodadas e o `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score em todas as
+posições. A ideia é desempatar por consistência: entre dois atletas de média parecida, o que oscila
+menos é a aposta mais segura. Atletas com menos de 2 rodadas têm `desvioPadrao = 0.0`, anulando a
+penalidade sem quebrar por dados insuficientes, e atletas sem histórico recente caem para o proxy
+`mediaPontos` da temporada e não são penalizados — penalizar por um desvio que não foi medido seria
+inventar um número.
 
-Todos os pesos do fallback são configuráveis em runtime via `PATCH /api/config` sem restart.
+O `desvioPadrao` e o `rodadasConsideradas` são propagados até os DTOs de resposta em vez de ficarem
+internos: é o que permite ao frontend exibir um indicador de consistência sem recalcular nada.
 
-#### Goleiro (GOL) — prioridade em scouts defensivos
-
-```
-score = (desempenho × 0.35) + (mediaPontos × 0.25) + (valorização × 0.10)
-      + (defesasDificeis × 0.05) + (penaltisDefendidos × 0.05) − (golsSofridos × 0.02)
-      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
-      − (desvioPadrao × pesoDesvio)
-```
-
-`defesasDificeis` (DD), `penaltisDefendidos` (DP) e `golsSofridos` (GS) são scouts acumulados da temporada extraídos de `/atletas/mercado`. Quando não disponíveis na resposta da API, os scouts são tratados como 0 sem impacto no cálculo.
-
-#### Atacante (ATA) — prioridade em participação ofensiva
-
-```
-score = (desempenho × 0.25) + (mediaPontos × 0.25) + (valorização × 0.10)
-      + (gols × 0.08) + (assistencias × 0.05)
-      + (fatorCasa × pesoFatorCasa) + (timeFavorito × pesoTimeFavorito)
-      − (desvioPadrao × pesoDesvio)
-```
-
-`gols` (G) e `assistencias` (A) são scouts acumulados da temporada. O bônus `timeFavorito` reforça a preferência por atacantes de times com odds favoráveis.
-
-### Penalização por Volatilidade (Desvio Padrão)
-
-O `DesempenhoService` retorna, para cada atleta, um `DesempenhoAtleta` com `mediaPontos`, `desvioPadrao` (populacional, divisão por N) e `rodadasConsideradas` das últimas rodadas. O `ScoreService` subtrai `desvioPadrao × pesoDesvio` do score final em todas as posições, penalizando atletas inconsistentes e priorizando consistência em situações de empate técnico. O `pesoDesvio` é configurável via `PATCH /api/config` (padrão `0.05`). Atletas com menos de 2 rodadas disponíveis têm `desvioPadrao = 0.0`, anulando a penalidade sem quebrar por dados insuficientes. Atletas sem histórico recente (ausentes do mapa) caem para o proxy `mediaPontos` da temporada e não recebem penalidade.
-
-O `ScoreService` propaga `desvioPadrao` (arredondado para 4 casas) e `rodadasConsideradas` para o modelo `Atleta`, e ambos são expostos nos DTOs de resposta `AtletaDto` (`GET /api/time`) e `AtletaRankingDto` (`GET /api/ranking`). Para atletas que usam o proxy (sem histórico recente), os campos valem `0.0` e `0`. Esses valores alimentam o indicador de consistência exibido no frontend.
-
-#### Constantes de peso por posição
-
-Os pesos específicos por posição são constantes centralizadas em `ScoreService` (prefixo `GOL_` e `ATA_`), fáceis de ajustar sem impactar a fórmula das demais posições.
+*As fórmulas: [`regras-de-negocio.md` › Fórmula do Score](regras-de-negocio.md#fórmula-do-score).*
 
 ### Configuração via Banco de Dados
 
-Parâmetros de negócio (odd limite, pesos do score, formação e regras) ficam na tabela `configuracao` do PostgreSQL.
-Gerenciados via API REST:
+Parâmetros de negócio (odd limite, pesos do score, formação e regras) ficam numa tabela de linha
+única no PostgreSQL, e não em `application.properties`: são o que se quer ajustar *enquanto se usa*
+a aplicação, comparando resultados, e um restart por ajuste tornaria esse ciclo inviável. O
+`PATCH /api/config` atualiza em runtime e o `POST /api/config/reset` volta aos defaults, que nascem
+da própria migration.
 
-| Método | Endpoint | Descrição |
-|---|---|---|
-| `GET` | `/api/config` | Retorna configuração atual |
-| `PATCH` | `/api/config` | Atualiza campos em runtime |
-| `POST` | `/api/config/reset` | Restaura defaults |
+O Flyway aplica as migrations automaticamente na inicialização, e `ddl-auto=validate` garante que o
+esquema esperado pelo Hibernate e o esquema real não divirjam em silêncio.
 
-O Flyway aplica as migrations automaticamente na inicialização:
-- `V1__create_configuracao.sql` — cria tabela e insere valores padrão
-- `V2__alter_configuracao_numeric_to_double.sql` — converte colunas para `DOUBLE PRECISION`
-- `V3__add_evitar_mesmo_clube_defesa.sql` — adiciona a regra configurável para não repetir clubes entre GOL, LAT e ZAG
-- `V4__add_limite_atletas_por_clube.sql` — adiciona limite configurável de atletas titulares por clube
-- `V5__add_budget_maximo.sql` — adiciona constraint de budget máximo em C$ para os titulares (padrão `0` = sem limite)
-- `V6__add_peso_desvio.sql` — adiciona o peso da penalidade por desvio padrão do desempenho (padrão `0.05`)
-- `V7__create_escalacao_rodada.sql` — cria a tabela de histórico de escalações por rodada
-- `V8__create_usuario.sql` — cria a tabela de usuários (perfil de acesso e `tokenVersion`)
-- `V9__create_odds_snapshot.sql` — cria a tabela de snapshot da última resposta de odds, para o guardrail de cota
-- `V10__create_odds_cota.sql` — cria a tabela do último estado conhecido da cota (saldo, consumo, leitura e sondagem)
+*Tabela, migrations e validações: [`banco-de-dados.md` › Parâmetros de Negócio via Banco de Dados](banco-de-dados.md#parâmetros-de-negócio-via-banco-de-dados).*
 
 ### Cache Caffeine (in-memory)
 
-Máximo de 500 entradas por cache. TTL de **10 minutos** para a maioria, exceto `odds`
-(configurável via `odds.api.cache-ttl-minutos`, padrão **60 minutos** — odds de Brasileirão não
-mudam a cada poucos minutos, e um TTL curto multiplicava o consumo de cota sem ganho real).
-O cache é reiniciado junto com a aplicação — não há persistência entre restarts. O cache `odds`
-é o único com um fallback que sobrevive a isso: ver "Guardrail de cota da The Odds API" abaixo.
+Cache em memória JVM, sem Redis: o ganho aqui é evitar chamadas repetidas às APIs externas dentro de
+uma janela de minutos, e isso não justifica uma dependência de infraestrutura a mais.
 
-| Cache | Dado cacheado |
-|---|---|
-| `odds` | Odds da The Odds API |
-| `atletas` | `/atletas/mercado` |
-| `clubes` | `/clubes` |
-| `partidas` | `/partidas` |
-| `pontuados` | `/atletas/pontuados` (chave: rodada) |
-| `statusMercado` | `/mercado/status` |
-| `configuracao` | Config do banco (invalidado via PATCH/POST /api/config) |
+O TTL de `odds` é de **60 minutos**, e não dos 10 minutos das demais entradas: odds de Brasileirão
+não mudam a cada poucos minutos, e um TTL curto multiplicava o consumo de cota sem ganho real. O
+cache é reiniciado junto com a aplicação — não há persistência entre restarts. O cache `odds` é o
+único com um fallback que sobrevive a isso: ver [Guardrail de cota](#guardrail-de-cota-da-the-odds-api),
+abaixo.
 
-Invalidação manual via `DELETE /api/cache` (todos) ou `DELETE /api/cache/{nome}` (específico).
+*Caches registrados, TTLs e invalidação: [`operacao.md` › Cache (Caffeine)](operacao.md#cache-caffeine).*
 
 ### Guardrail de cota da The Odds API
 
@@ -333,6 +338,9 @@ o sentinela interno: um `-1` exportado faria todo alerta de "saldo abaixo do mí
 cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQL, então a série
 fica silenciosa até existir dado de verdade.
 
+*Propriedades, tabelas e contrato dos endpoints:
+[`operacao.md` › Cota da The Odds API: guardrail e sondagem](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem).*
+
 ### Histórico das leituras de cota
 
 A `odds_cota` guarda o estado corrente numa linha só, sobrescrita a cada leitura — e é isso que o
@@ -392,6 +400,9 @@ O matcher de `/api/odds/cota` no `SecurityConfig` é de path exato, então o sub
 entrar explicitamente. Sem isso, `/api/odds/cota/historico` cairia no
 `anyRequest().authenticated()` e a série ficaria aberta a qualquer token — a rota que existe
 justamente para descrever o consumo do componente pago.
+
+*Tabela e contrato: [`regras-de-negocio.md` › Histórico das leituras de cota](regras-de-negocio.md#histórico-das-leituras-de-cota).*
+
 ### Dashboard e alertas da cota
 
 O guardrail evita o desastre, mas não avisa que armou — e armado ele serve snapshot antigo em
@@ -428,149 +439,125 @@ na própria aplicação (#61, acima). Somado a isso, o scrape depende de um toke
 expira em 24 h (#44), então a stack não teria como rodar continuamente mesmo se estivesse no
 compose.
 
+*Painéis, alertas e o que fazer quando cada um dispara:
+[`operacao.md` › Observabilidade](operacao.md#observabilidade).*
+
 ### Observabilidade (Spring Actuator + Micrometer)
 
 O projeto inclui **Spring Boot Actuator** com **Micrometer** e o registry **Prometheus** para coleta de métricas.
 
 O Actuator responde na **mesma porta da aplicação**. Antes ele vivia em `management.server.port=9090` com bind em `127.0.0.1`, e era o bind — não uma regra — que o protegia; uma plataforma que publica uma porta só não sustenta esse arranjo, e a proteção sumiria junto com ele. Na porta única quem protege é a matriz de acesso do `SecurityConfig`.
 
-Endpoints expostos via `management.endpoints.web.exposure.include=health,info,metrics,prometheus`:
-
-| Endpoint | Acesso | Descrição |
-|---|---|---|
-| `/actuator/health` | Público | Saúde da aplicação |
-| `/actuator/info` | Público | Informações da build |
-| `/actuator/metrics` | `ADMIN` | Lista de métricas coletadas |
-| `/actuator/metrics/{nome}` | `ADMIN` | Detalhe de uma métrica específica |
-| `/actuator/prometheus` | `ADMIN` | Métricas em formato Prometheus (scrape) |
-
-`health` e `info` são públicos porque o healthcheck da plataforma precisa consultá-los antes de qualquer token existir. Com `management.endpoint.health.show-details=when_authorized` e `management.endpoint.health.roles=ADMIN`, o corpo anônimo é só `{"status":"UP"}` — o estado de banco, disco e dependências só aparece para `ADMIN`.
+`health` e `info` são públicos porque o healthcheck da plataforma precisa consultá-los antes de qualquer token existir. Com `management.endpoint.health.show-details=when_authorized` e `management.endpoint.health.roles=ADMIN`, o corpo anônimo é só `{"status":"UP"}` — o estado de banco, disco e dependências só aparece para `ADMIN`. Métricas e `prometheus` ficam restritos a `ADMIN` porque descrevem o interior da aplicação: uso de memória, latência por rota, contagem de erros.
 
 Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos, nem para `ADMIN`.
 
-A tag `application=cartolaoddsapi` é adicionada a todas as métricas via `management.metrics.tags.application`.
-
 Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus` com um access token de `ADMIN` no header `Authorization`. Esse token expira em 24 h e não há renovação — a coleta contínua depende de um credencial de conta de máquina, tratado na issue #44.
+
+*Endpoints e exemplos: [`operacao.md` › Endpoints do Actuator](operacao.md#endpoints-do-actuator).*
 
 ### Filtro de Atletas
 
-Apenas atletas com status **Provável (7)** ou **Dúvida (6)** e preço `> 0` são considerados.
-O parâmetro `excluirDuvida=true` (disponível em `GET /api/time` e `GET /api/ranking`) restringe o pool aos **Prováveis (7)**. O filtro é aplicado **pós-cache**, antes do cálculo de score, para não invalidar entradas de cache compartilhadas com o fluxo padrão.
-Antes de identificar favoritos, o `OddsService` cruza os jogos retornados pela The Odds API com os confrontos da rodada atual vindos de `/partidas`; odds de jogos fora da rodada atual são ignoradas.
-Quando odds não estão disponíveis, o filtro por time favorito é desativado e todos os elegíveis entram no pool.
+O pool considera apenas atletas **prováveis** e em **dúvida**, com preço acima de zero: os demais
+status não são escaláveis, e preço zero indica atleta sem participação no mercado da rodada.
+
+O `excluirDuvida=true` filtra o pool **pós-cache**, e não antes: as respostas cacheadas das APIs
+externas são compartilhadas com o fluxo padrão, e filtrar antes obrigaria a manter duas entradas de
+cache — ou a invalidá-las a cada troca de parâmetro, gastando cota por uma variação de consulta.
+
+Antes de identificar favoritos, o `OddsService` cruza os jogos retornados pela The Odds API com os
+confrontos da rodada atual vindos de `/partidas`: odds de jogos fora da rodada atual descreveriam um
+confronto que não vai acontecer agora. Quando odds não estão disponíveis, o filtro por time favorito
+é desativado e todos os elegíveis entram no pool — uma lista completa é mais útil que uma resposta
+vazia.
+
+*Regras e tabela de filtros: [`regras-de-negocio.md` › Filtros de Atletas](regras-de-negocio.md#filtros-de-atletas).*
 
 ### Normalização de Clubes
 
-O `NormalizadorUtil` remove acentos, converte para lowercase, troca hífens por espaços, colapsa espaços duplicados e aplica um dicionário central de aliases para alinhar nomes vindos da The Odds API com os nomes do Cartola FC. Isso cobre variações como `Atlético-MG`, `Atlético Mineiro`, `Atlético Mineiro MG`, `Athletico Paranaense`, `Atlético Paranaense`, `São Paulo FC`, `Inter`, `Fluminense FC` e `Vasco da Gama`.
+O `NormalizadorUtil` existe porque as duas fontes escrevem o mesmo clube de formas diferentes, e o
+cruzamento é por nome. Um dicionário central de aliases, em vez de tratamentos espalhados, é o que
+mantém uma divergência nova sendo resolvida em um lugar só.
 
-O nome do lado do Cartola sai do `slug` do clube, não de `nome`/`nome_fantasia` — o `/partidas` passou a devolver a sigla nesses campos (`"MIR"`), e `apelido` é o apelido de torcida. `CartolaDataService.nomeClubeParaChave` isola essa escolha; `nomeClube` segue servindo à exibição.
+O nome do lado do Cartola sai do `slug` do clube, não de `nome`/`nome_fantasia` — o `/partidas`
+passou a devolver a sigla nesses campos (`"MIR"`), e `apelido` é o apelido de torcida.
+`CartolaDataService.nomeClubeParaChave` isola essa escolha; `nomeClube` segue servindo à exibição.
+Separar os dois papéis é o que impede que uma mudança na API do Cartola quebre o cruzamento e a
+exibição ao mesmo tempo.
 
-### Regra de Defesa
+*Regra, exemplos e aliases: [`regras-de-negocio.md` › Normalização de Nomes de Clubes](regras-de-negocio.md#normalização-de-nomes-de-clubes).*
 
-Quando `evitarMesmoClubeDefesa=true` (padrão), o `MontadorTimeService` evita repetir clubes entre titulares das posições **GOL**, **LAT** e **ZAG**. A regra é configurável via `PATCH /api/config` e pode ser desativada em runtime. Quando não há candidatos suficientes sem repetição, o montador completa a posição com os melhores atletas restantes (respeitando ainda o limite por clube), garantindo que a formação nunca fique incompleta.
+### Regra de Defesa e Limite por Clube
 
-### Limite por Clube no Time Titular
+Não repetir clubes na defesa (`GOL`, `LAT`, `ZAG`) e limitar atletas do mesmo clube no time titular
+são regras de **diversificação de risco**: um time inteiro do mesmo clube transforma uma atuação
+ruim em rodada perdida. As duas são configuráveis porque a aposta contrária — concentrar no clube
+favorito da rodada — é uma estratégia legítima.
 
-O time titular respeita o limite de **no máximo 4 atletas do mesmo clube**, incluindo o **treinador (TEC)**. O limite é configurável em runtime via `PATCH /api/config` no campo `limiteAtletasPorClube` (padrão `4`). O montador aplica um fallback em três níveis:
-1. **Primário** — respeita regra de defesa (sem clube repetido em GOL/LAT/ZAG), limite por clube e budget.
-2. **Intermediário** — relaxa a regra de defesa, mas mantém o limite máximo por clube e budget.
-3. **Último recurso** — relaxa também o limite por clube, mas mantém o budget.
+O montador aplica um fallback em três níveis (respeitar tudo → relaxar a defesa → relaxar o limite
+por clube), sempre mantendo o budget. A prioridade é explícita: **uma formação completa vale mais
+que a regra de diversificação**, porque um time incompleto não é escalável.
+
+*Os três níveis em detalhe: [`regras-de-negocio.md` › Limite Máximo por Clube (inclui TEC)](regras-de-negocio.md#limite-máximo-por-clube-inclui-tec).*
 
 ### Budget Máximo (C$) e Otimização por Orçamento
 
-O `MontadorTimeService` respeita um **teto de gasto em Cartoletas (C$)** para o time titular. O teto efetivo é o `orcamento` informado em `GET /api/time` (tem prioridade) ou, na ausência dele, o `budgetMaximo` configurável em runtime via `PATCH /api/config`. Quando não há teto (`budgetMaximo = 0` e sem `orcamento`), a constraint é desativada: o montador usa a **seleção gulosa por score**, que já é ótima nesse caso.
+Com um teto de cartoletas, escolher os mais baratos é a resposta errada: o objetivo não é economizar,
+é **maximizar o score dentro do teto**. Por isso a seleção sob orçamento é um *multiple-choice
+knapsack* por posição resolvido com branch-and-bound (`OtimizadorTitulares`), com custo-benefício
+(`score/preço`) apenas como critério de desempate entre soluções de score igual.
 
-Quando há um teto finito, a seleção dos titulares passa pelo `OtimizadorTitulares`, que resolve um **multiple-choice knapsack por posição** via **branch-and-bound**. O objetivo é **maximizar a soma de score** com `Σ preço ≤ orçamento` (estratégia sempre `SCORE_MAXIMO`), e não pegar os mais baratos. Características:
+Sem teto (`budgetMaximo = 0` e sem `orcamento`), a constraint é desativada e vale a seleção gulosa
+por score — que já é ótima nesse caso, e não vale pagar uma busca por ela.
 
-- **Desempate:** entre soluções de score igual (dentro de um epsilon), vence a de **menor custo** (equivalente a maior `score/preço`).
-- **Restrições preservadas:** formação, `limiteAtletasPorClube` e a regra de defesa sem clube repetido (GOL/LAT/ZAG) são respeitadas dentro da busca.
-- **Podas:** viabilidade de orçamento (custo mínimo para completar as vagas restantes), limite superior admissível de score e redução de candidatos **por clube**. A redução só descarta um atleta quando existem ao menos `min(vagas da posição, limiteAtletasPorClube)` outros do mesmo clube que o dominam (score ≥ e preço ≤), preservando a otimalidade mesmo em posições com várias vagas (onde dois atletas do mesmo clube podem ser escalados juntos). Na defesa com a regra ativa, o limite é 1 por clube.
-- **Orçamento insuficiente vs. restrições:** quando não é possível completar a formação dentro do teto por falta de orçamento, retorna o melhor time *best-effort* (mais vagas preenchidas, depois maior score), com `formacaoCompleta = false` e `avisoOrcamento` preenchido. Se a incompletude vier das **restrições de clube/defesa** (e não do orçamento), o montador recorre à seleção gulosa — que relaxa essas regras em último recurso, como no fluxo sem orçamento — e fica com a montagem que preenche mais vagas, evitando atribuir ao orçamento uma incompletude que é de clube.
-- **Guarda de iterações:** ao estourar o teto de iterações do branch-and-bound, o montador recai na seleção gulosa por orçamento como fallback, garantindo resposta sempre válida.
+A poda por clube é onde a otimalidade poderia ser perdida por descuido: descartar um atleta porque
+existe outro do mesmo clube que o domina só é seguro quando existem **ao menos
+`min(vagas da posição, limiteAtletasPorClube)`** dominadores, porque numa posição de várias vagas
+dois atletas do mesmo clube podem ser escalados juntos. Uma poda mais agressiva devolveria um time
+subótimo sem sinalizar nada.
+
+Quando a formação não fecha, a causa importa: falta de orçamento produz `avisoOrcamento` e um time
+*best-effort*; incompletude vinda das **restrições de clube/defesa** não é problema de orçamento, e
+o montador recorre à seleção gulosa — que relaxa essas regras em último recurso — para não atribuir
+ao orçamento uma culpa que não é dele. E há uma guarda de iterações no branch-and-bound: estourado o
+teto, cai na seleção gulosa por orçamento, garantindo resposta sempre válida em vez de uma busca que
+não termina.
+
+*O algoritmo e o contrato da resposta:
+[`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).*
 
 ### Reserva de Luxo
 
-A **reserva de luxo** é sempre a reserva com maior score entre as posições que possuem reserva (não é mais o segundo melhor titular). `TEC` não tem reserva e, portanto, não concorre a reserva de luxo.
+A **reserva de luxo** é a reserva com maior score — e não o segundo melhor titular, como numa versão
+anterior. A reserva de luxo só entra em campo se um titular não jogar, então o que interessa é o
+melhor *entre quem está no banco*. `TEC` não tem reserva e, portanto, não concorre.
 
-### Validação de Entrada
+## Pendências Conhecidas
 
-Falhas de Bean Validation no corpo de requisições, principalmente em `PATCH /api/config`, são tratadas no `GlobalExceptionHandler` e retornam HTTP 400 com todas as mensagens de campos inválidos concatenadas com `"; "`.
+### Dados e Algoritmos
+- [x] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
+- [x] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
+- [ ] Ponderar a odd como **variável contínua** em vez de bônus binário
 
----
+### Infraestrutura
+- [ ] **Retry** com backoff exponencial via Spring Retry
+- [x] **Métricas** com Spring Actuator + Micrometer, com dashboard e alertas da cota (ver [`operacao.md` › Observabilidade](operacao.md#observabilidade))
+- [ ] **Credencial de conta de máquina** para o scrape do Prometheus ([#44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44))
+- [ ] **`TRUSTED_PROXIES`** fixado na faixa real da borda ([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39))
+- [ ] **Cobertura de testes** com JaCoCo + relatório HTML
 
-## Estrutura de Pacotes
+### Regras de Negócio
+- [x] **Constraint de budget** máximo (C$) — resolvida com branch-and-bound próprio (ver [`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento))
+- [x] **Formações alternativas** configuráveis, com comparação via `GET /api/time/comparar`
+- [ ] **Simulação** de diferentes `ODD_LIMITE` para comparar times resultantes
 
-```
-com.cartola.odds/
-├── config/      — configurações (cache, REST client, OpenAPI, properties)
-├── client/      — integrações com APIs externas (OddsClient, CartolaClient)
-├── repository/  — persistência (ConfiguracaoRepository)
-├── service/     — lógica de negócio (pipeline, score, desempenho, ranking, montador, configuração)
-├── controller/  — endpoints REST + tratamento global de erros
-│   └── api/     — interfaces com anotações Swagger (separadas dos controllers)
-├── model/       — entidades de domínio, enums, DTOs de request e response
-└── util/        — utilitários (NormalizadorUtil)
-```
+### Qualidade
+- [ ] **Testes de integração** com WireMock simulando as APIs externas
 
----
-
-## Endpoints
-
-| Método | Endpoint | Descrição |
-|---|---|---|
-| `GET` | `/api/time` | Monta o time completo para a rodada atual (opcionais: `orcamento`, `excluirDuvida`) |
-| `GET` | `/api/ranking` | Top atletas por score (filtrável por posição, limite e `excluirDuvida`) |
-| `GET` | `/api/favoritos` | Times favoritos com odds detalhadas |
-| `DELETE` | `/api/cache` | Invalida todos os caches |
-| `DELETE` | `/api/cache/{nome}` | Invalida um cache específico |
-| `GET` | `/api/config` | Retorna configuração atual |
-| `PATCH` | `/api/config` | Atualiza parâmetros em runtime |
-| `POST` | `/api/config/reset` | Restaura defaults |
-| `POST` | `/api/usuarios` | Cria usuário (`ADMIN`) |
-| `GET` | `/api/usuarios` | Lista usuários, paginada (`ADMIN`) |
-| `GET` | `/api/usuarios/{id}` | Detalhe do usuário (`ADMIN`) |
-| `PATCH` | `/api/usuarios/{id}` | Atualiza nome, e-mail, perfil e situação (`ADMIN`) |
-| `DELETE` | `/api/usuarios/{id}` | Desativação lógica (`ADMIN`) |
-| `GET` | `/api/usuarios/me` | Dados da própria conta (autenticado) |
-| `PATCH` | `/api/usuarios/me/senha` | Troca a própria senha (autenticado) |
-| `GET` | `/api/odds/cota` | Saldo, consumo do mês e estado do guardrail de cota da The Odds API (`ADMIN`) |
-| `GET` | `/swagger-ui.html` | Documentação interativa (público fora de produção, `404` no perfil `prod`) |
-| `GET` | `/actuator/health` | Status de saúde da aplicação (público) |
-| `GET` | `/actuator/info` | Informações da build (público) |
-| `GET` | `/actuator/metrics` | Lista de métricas disponíveis (`ADMIN`) |
-| `GET` | `/actuator/metrics/{nome}` | Detalhe de uma métrica específica (`ADMIN`) |
-| `GET` | `/actuator/prometheus` | Métricas no formato Prometheus (`ADMIN`) |
+### Acesso
+- [ ] **Convite por e-mail e recuperação de senha** — fora do escopo da [#37](https://github.com/FabioCarlesso/cartolaoddsapi/issues/37)
 
 ---
-
-## Configuração Principal
-
-| Variável de Ambiente | Padrão | Descrição |
-|---|---|---|
-| `ODDS_API_KEY` | — | Chave da The Odds API (obrigatória para filtro por odds) |
-| `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, para de chamar o provedor e serve o último snapshot |
-| `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds`, em minutos |
-| `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` | `10` | TTL de uma resposta de odds sem nenhum jogo |
-| `ODDS_API_SONDA_INTERVALO_HORAS` | `24` | Intervalo mínimo entre sondagens de saldo com o guardrail ativo |
-| `APP_PORT` | `8080` | Porta exposta no host |
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/cartola_odds` | URL do banco |
-| `SPRING_DATASOURCE_USERNAME` | `cartola` | Usuário do banco |
-| `SPRING_DATASOURCE_PASSWORD` | `cartola` | Senha do banco |
-| `SPRING_PROFILES_ACTIVE` | `default` | Profile do Spring Boot; `prod` desliga Swagger/`api-docs` e baixa o log para `INFO` |
-| `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas, separadas por vírgula — nunca `*` |
-
-Parâmetros de negócio (odd limite, pesos, formação) são gerenciados via banco de dados — não precisam de variáveis de ambiente.
-
----
-
-## Testes
-
-739 cenários distribuídos em 42 classes de teste cobrindo serviços, controllers, segurança, domínio, utilitários e endpoints de observabilidade.
-Os testes usam migrations Flyway próprias em `src/test/resources/db/migration/h2`, equivalentes às de produção e ajustadas para a sintaxe do H2. Execute com:
-
-```bash
-mvn test
-```
 
 ---
 
@@ -581,3 +568,19 @@ mvn test
 - **Mercado fechado:** todos os endpoints retornam campo `avisoMercado` informando o estado atual
 - **Plano free da Odds API:** 500 requisições/mês — o cache reduz o consumo significativamente
 - **Sem API Key:** filtro por time favorito desativado; usa todos os atletas elegíveis por status e preço
+
+---
+
+## Onde está o resto
+
+| Assunto | Arquivo |
+|---|---|
+| Endpoints, parâmetros e códigos de resposta | [`api.md`](api.md) |
+| Regras de montagem do time | [`regras-de-negocio.md`](regras-de-negocio.md) |
+| Autenticação, matriz de acesso e usuários | [`seguranca.md`](seguranca.md) |
+| Variáveis de ambiente e propriedades | [`configuracao.md`](configuracao.md) |
+| Migrations e parâmetros de negócio | [`banco-de-dados.md`](banco-de-dados.md) |
+| Cache, cota, Actuator e alertas | [`operacao.md`](operacao.md) |
+| Estrutura de pacotes e camadas | [`arquitetura.md`](arquitetura.md) |
+| Cobertura de testes por classe | [`desenvolvimento.md`](desenvolvimento.md) |
+| Subir o projeto | [README](../README.md) |
