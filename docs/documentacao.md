@@ -6,6 +6,8 @@
 >
 > Para subir o projeto em cinco minutos, veja o [README](../README.md).
 > Para entender *por que* cada decisão foi tomada, veja [`context.md`](context.md).
+> O índice da documentação e a regra de **onde documentar cada mudança** estão em
+> [`docs/README.md`](README.md).
 
 > **Stack:** Java 21 · Spring Boot 3.4.5 · Maven · JAR
 > **Versão:** 1.0.0
@@ -313,28 +315,24 @@ CREATE TABLE configuracao (
 | `PATCH` | `/api/config` | `ADMIN` | Atualiza um ou mais campos em runtime |
 | `POST` | `/api/config/reset` | `ADMIN` | Restaura todos os defaults |
 
-**Exemplo — `GET /api/config`:**
-```json
-{
-  "oddLimite": 3.0,
-  "pesoMediaPontos": 0.40,
-  "pesoValorizacao": 0.20,
-  "pesoDesempenho": 0.20,
-  "pesoFatorCasa": 0.10,
-  "pesoTimeFavorito": 0.10,
-  "pesoDesvio": 0.05,
-  "formacaoGol": 1,
-  "formacaoLat": 2,
-  "formacaoZag": 2,
-  "formacaoMei": 3,
-  "formacaoAta": 3,
-  "formacaoTec": 1,
-  "evitarMesmoClubeDefesa": true,
-  "limiteAtletasPorClube": 4,
-  "budgetMaximo": 0.0,
-  "updatedAt": "2025-06-01T15:30:00"
-}
-```
+**Parâmetros e seus padrões** — é o corpo de `GET /api/config` e o conjunto de campos aceitos pelo
+`PATCH`, todos opcionais no patch:
+
+| Campo | Padrão | O que controla |
+|---|---|---|
+| `oddLimite` | `3.0` | Odd máxima para um time entrar como favorito (ver [9.1](#91-identificação-de-times-favoritos)) |
+| `pesoMediaPontos` | `0.40` | Peso da média da temporada no score de fallback |
+| `pesoValorizacao` | `0.20` | Peso da valorização da última rodada |
+| `pesoDesempenho` | `0.20` | Peso da média das últimas 5 rodadas |
+| `pesoFatorCasa` | `0.10` | Bônus de mandante — vale em **todas** as posições |
+| `pesoTimeFavorito` | `0.10` | Bônus de time favorito — vale em **todas** as posições |
+| `pesoDesvio` | `0.05` | Peso da penalidade por volatilidade — vale em **todas** as posições |
+| `formacaoGol` · `formacaoLat` · `formacaoZag` · `formacaoMei` · `formacaoAta` · `formacaoTec` | `1` · `2` · `2` · `3` · `3` · `1` | Vagas por posição (padrão 4-3-3) |
+| `evitarMesmoClubeDefesa` | `true` | Não repetir clubes entre GOL, LAT e ZAG (ver [9.6](#96-defesa-sem-clube-repetido)) |
+| `limiteAtletasPorClube` | `4` | Teto de titulares do mesmo clube, incluindo TEC (ver [9.8](#98-limite-máximo-por-clube-inclui-tec)) |
+| `budgetMaximo` | `0.0` | Teto de cartoletas; `0` desliga a restrição (ver [9.9](#99-budget-máximo-c-e-otimização-por-orçamento)) |
+
+A resposta inclui ainda `updatedAt`, somente leitura.
 
 **Validações do `PATCH /api/config`:**
 - `oddLimite` deve ser `> 1.0`
@@ -385,9 +383,23 @@ API](context.md#guardrail-de-cota-da-the-odds-api).*
 
 | Superfície | Acesso | Conteúdo |
 |---|---|---|
-| `GET /api/odds/cota` | `ADMIN` | Saldo restante, consumo do mês, instante da última leitura, se o guardrail está ativo e quando a próxima sondagem o destrava (`proximaSondagem`) — ver [8.4](#84-exemplos-de-resposta) |
+| `GET /api/odds/cota` | `ADMIN` | Estado atual da cota, nos sete campos abaixo |
 | `GET /api/odds/cota/historico` | `ADMIN` | Série das leituras na janela (`?dias=30`, de 1 a 92), em ordem cronológica, com `reinicioDeCota` marcando a primeira leitura de um ciclo novo |
 | `/actuator/prometheus` | `ADMIN` | `odds_api_requests_total`, `odds_api_requests_remaining` e `odds_api_errors_total` — ver [17](#17-observabilidade) |
+
+**Campos de `GET /api/odds/cota`.** Listados aqui, e não deixados para o Swagger, porque este é o
+endpoint que se consulta **em produção** quando o guardrail arma — e em `prod` o springdoc responde
+`404`:
+
+| Campo | Conteúdo |
+|---|---|
+| `saldoRestante` | Último `x-requests-remaining` lido; `null` enquanto não houve leitura |
+| `consumoMes` | Último `x-requests-used` lido |
+| `ultimaLeitura` | Instante da leitura que produziu os dois acima |
+| `minRequestsRemaining` | O mínimo configurado — o mesmo `odds.api.min-requests-remaining` |
+| `guardrailAtivo` | `true` quando o saldo está abaixo do mínimo e o cliente parou de chamar o provedor |
+| `ultimaSondagem` | Instante da última chamada liberada como sondagem; `null` se nenhuma ocorreu |
+| `proximaSondagem` | Quando a próxima sondagem é liberada — **quando o guardrail se destrava sozinho** |
 
 > **Configuração recusada no boot:** `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` é um *piso* dentro de
 > `ODDS_API_CACHE_TTL_MINUTOS`, então precisa caber nele; e as quatro variáveis do guardrail têm
@@ -436,19 +448,8 @@ desativar o usuário ou rebaixar seu perfil — invalida na hora todos os tokens
 sessão no servidor. Trocar o e-mail não precisa do contador: o e-mail é o `subject` do token, e o
 token antigo deixa de resolver um usuário sozinho.
 
-**Fluxo de uso:**
-
-```bash
-# 1. Autenticar
-TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@cartolaodds.local","senha":"sua-senha-aqui"}' | jq -r .accessToken)
-
-# 2. Usar o token nas demais chamadas
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/time
-```
-
-No **Swagger UI**, o botão **Authorize** recebe apenas o valor do `accessToken`.
+O fluxo de autenticação (login, captura do `accessToken`, uso no header) está no
+[README](../README.md#início-rápido-com-docker). No **Swagger UI**, o botão **Authorize** recebe apenas o valor do `accessToken`.
 
 **Duração em vez de instante.** O login devolve `expiraEmSegundos` — o tempo de vida do token a
 partir da resposta —, não uma data. O container roda em UTC e um horário sem fuso seria lido como
@@ -823,23 +824,8 @@ public PontuadosResponse buscarPontuados(int rodada) { ... }
 O cache `configuracao` é interno da camada de configuração e é invalidado automaticamente por
 `PATCH /api/config` e `POST /api/config/reset`.
 
-**`DELETE /api/cache` — `200 OK`:**
-```json
-{
-  "cachesInvalidados": ["odds", "atletas", "clubes", "partidas", "pontuados", "statusMercado"],
-  "mensagem": "Todos os caches invalidados com sucesso.",
-  "timestamp": "2025-06-01T15:30:00"
-}
-```
-
-**`DELETE /api/cache/{nome}` — `200 OK`:**
-```json
-{
-  "cachesInvalidados": ["atletas"],
-  "mensagem": "Cache 'atletas' invalidado com sucesso.",
-  "timestamp": "2025-06-01T15:30:00"
-}
-```
+Os dois verbos respondem `200` com `cachesInvalidados`, `mensagem` e `timestamp`. Um nome
+inválido responde `400`, e a mensagem traz a lista de nomes aceitos:
 
 **Nome inválido — `400 Bad Request`:**
 ```json
@@ -937,55 +923,6 @@ Quando o mercado não está aberto, todos os endpoints retornam o campo `avisoMe
 
 ### 8.4 Exemplos de resposta
 
-#### `GET /api/favoritos`
-
-```json
-{
-  "oddLimite": 3.0,
-  "totalJogos": 10,
-  "totalFavoritos": 4,
-  "totalDescartados": 6,
-  "favoritos": [
-    {
-      "timeFavorito": "Flamengo",
-      "oddFavorito": 1.95,
-      "timeAdversario": "Vasco",
-      "oddAdversario": 4.20,
-      "oddEmpate": 3.40,
-      "favoritoEmCasa": true
-    }
-  ],
-  "descartados": [
-    {
-      "timeCasa": "Fortaleza",
-      "oddCasa": 3.20,
-      "timeVisitante": "Bahia",
-      "oddVisitante": 3.40,
-      "oddEmpate": 3.10,
-      "motivo": "Menor odd (3.20) acima do limite (3.0)"
-    }
-  ],
-  "oddsDeSnapshot": false
-}
-```
-
-`oddsDeSnapshot` indica que a resposta veio do snapshot persistido em vez de uma consulta ao vivo —
-ver [4.4](#44-cota-da-the-odds-api-guardrail-e-sondagem).
-
-#### `GET /api/odds/cota`
-
-```json
-{
-  "saldoRestante": 412,
-  "consumoMes": 88,
-  "ultimaLeitura": "2026-09-05T10:00:00",
-  "minRequestsRemaining": 50,
-  "guardrailAtivo": false,
-  "ultimaSondagem": null,
-  "proximaSondagem": "2026-09-06T10:00:00"
-}
-```
-
 #### `GET /api/odds/cota/historico?dias=7`
 
 ```json
@@ -1016,96 +953,6 @@ ver [4.4](#44-cota-da-the-odds-api-guardrail-e-sondagem).
 > 📦 **Tamanho da resposta.** A série não é agregada: cada leitura vira um item. A janela padrão de
 > 30 dias dá ~500 itens (~50 KB); o teto de 92 dias, ~1.500.
 
-#### `GET /api/ranking?posicao=ATA&limite=3`
-
-```json
-{
-  "rodada": 15,
-  "posicao": "ATA",
-  "limite": 3,
-  "totalDisponivel": 18,
-  "atletas": [
-    { "rank": 1, "apelido": "Hulk", "formatado": "Hulk (ATM)", "score": 8.54, "preco": 22.0, "desvioPadrao": 1.25, "rodadasConsideradas": 5, "emDuvida": false },
-    { "rank": 2, "apelido": "Cano",  "formatado": "Cano (FLU)",  "score": 7.90, "preco": 18.3, "desvioPadrao": 2.10, "rodadasConsideradas": 5, "emDuvida": false },
-    { "rank": 3, "apelido": "Pedro", "formatado": "Pedro (FLA) ⚠️ DÚVIDA", "score": 7.70, "preco": 17.0, "desvioPadrao": 0.0, "rodadasConsideradas": 0, "emDuvida": true }
-  ]
-}
-```
-
-> Os campos `desvioPadrao` e `rodadasConsideradas` expõem o desvio padrão populacional das
-> pontuações e a quantidade de rodadas usadas no cálculo do desempenho recente. Disponíveis também
-> no `GET /api/time`. Valem `0.0` e `0` quando o atleta não tem histórico recente (menos de 2
-> rodadas ou ausente do histórico), caso em que nenhuma penalidade por volatilidade é aplicada.
-
-#### `GET /api/historico`
-
-```json
-{
-  "totalRodadas": 2,
-  "rodadas": [
-    {
-      "rodadaId": 14,
-      "criadoEm": "2025-05-10T10:30:00",
-      "totalAtletas": 12,
-      "scoreSugeridoTotal": 94.3,
-      "pontuacaoRealTotal": 87.5,
-      "pontuacaoRealDisponivel": true
-    },
-    {
-      "rodadaId": 15,
-      "criadoEm": "2025-05-17T09:15:00",
-      "totalAtletas": 12,
-      "scoreSugeridoTotal": 101.2,
-      "pontuacaoRealTotal": null,
-      "pontuacaoRealDisponivel": false
-    }
-  ]
-}
-```
-
-#### `GET /api/historico/14`
-
-```json
-{
-  "rodadaId": 14,
-  "atletas": [
-    {
-      "apelido": "Hulk",
-      "posicao": "ATA",
-      "clube": "Atletico MG",
-      "scoreSugerido": 9.2,
-      "pontuacaoReal": 8.5,
-      "capitao": true,
-      "reservaLuxo": false,
-      "emDuvida": false
-    }
-  ]
-}
-```
-
-Uma rodada sem escalação registrada retorna `404 Not Found` em `GET /api/historico/{rodadaId}` e
-`POST /api/historico/{rodadaId}/atualizar-pontuacao`.
-
-#### `GET /api/time/comparar?formacoes=4-3-3,3-4-3,4-4-2`
-
-```json
-{
-  "rodada": 15,
-  "formacoesComparadas": 3,
-  "melhorFormacao": "4-3-3",
-  "resultados": [
-    { "formacao": "4-3-3", "scoreTotal": 94.3, "custoTotal": 138.5, "capitao": "Hulk (ATM)", "posicao": 1, "formacaoCompleta": true, "time": { } },
-    { "formacao": "3-4-3", "scoreTotal": 91.7, "custoTotal": 132.1, "capitao": "Arrascaeta (FLA)", "posicao": 2, "formacaoCompleta": true, "time": { } },
-    { "formacao": "4-4-2", "scoreTotal": 89.2, "custoTotal": 129.8, "capitao": "Hulk (ATM)", "posicao": 3, "formacaoCompleta": true, "time": { } }
-  ]
-}
-```
-
-- `resultados` ordenados por `scoreTotal` decrescente; `posicao` indica o ranking entre as formações comparadas.
-- `melhorFormacao` aponta para o primeiro da lista (maior `scoreTotal`).
-- `formacaoCompleta` sinaliza, por resultado, se a formação pôde ser totalmente preenchida; quando há `orcamento` insuficiente, `avisoOrcamento` também é preenchido naquele resultado.
-- Cada `time` traz a estrutura completa do `GET /api/time` (titulares, reservas, capitão, etc.).
-
 ### 8.5 Parâmetros de `GET /api/time`
 
 #### `orcamento` (opcional)
@@ -1123,22 +970,9 @@ Limita o total de cartoletas gastas na montagem:
 A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `estrategia`,
 `formacaoCompleta` e — quando o orçamento não basta para completar os 12 titulares —
 `avisoOrcamento` (nesse caso o time é o melhor *best-effort* dentro do teto). Valores em cartoletas
-são arredondados para 2 casas decimais. Detalhes do algoritmo em
+são arredondados para 2 casas decimais. Sem `orcamento`, `orcamentoInformado` e `saldoRestante`
+vêm `null` e `custoTotal` traz o custo real da escalação. Detalhes do algoritmo em
 [9.9](#99-budget-máximo-c-e-otimização-por-orçamento).
-
-```json
-{
-  "rodada": 15,
-  "orcamentoInformado": 120.0,
-  "custoTotal": 118.3,
-  "saldoRestante": 1.7,
-  "estrategia": "SCORE_MAXIMO",
-  "formacaoCompleta": true,
-  "avisoMercado": null,
-  "titulares": { },
-  "reservas": { }
-}
-```
 
 Quando o orçamento é baixo demais para os 12 titulares, a formação é retornada incompleta e
 `avisoOrcamento` é preenchido (`saldoRestante` nunca fica negativo):
@@ -1152,23 +986,6 @@ Quando o orçamento é baixo demais para os 12 titulares, a formação é retorn
   "estrategia": "SCORE_MAXIMO",
   "formacaoCompleta": false,
   "avisoOrcamento": "Orcamento de C$30,0 insuficiente para completar a formacao (10/12 titulares escalados). Considere aumentar o orcamento.",
-  "titulares": { },
-  "reservas": { }
-}
-```
-
-Sem orçamento, `orcamentoInformado` e `saldoRestante` vêm `null` e `custoTotal` traz o custo real da
-escalação:
-
-```json
-{
-  "rodada": 15,
-  "orcamentoInformado": null,
-  "custoTotal": 147.8,
-  "saldoRestante": null,
-  "estrategia": "SCORE_MAXIMO",
-  "formacaoCompleta": true,
-  "avisoMercado": null,
   "titulares": { },
   "reservas": { }
 }
@@ -1189,14 +1006,6 @@ Restringe o pool de montagem aos atletas **prováveis** (status 7):
 O filtro é aplicado **após o cache** — as respostas cacheadas das APIs externas são compartilhadas
 com o fluxo padrão e não são invalidadas. É combinável com `orcamento`. Se não sobrarem prováveis
 suficientes para alguma posição, a resposta é retornada normalmente com `formacaoCompleta: false`.
-
-```bash
-# Melhor time escalável sem nenhum jogador em dúvida
-curl "http://localhost:8080/api/time?excluirDuvida=true"
-
-# Combinando com orçamento
-curl "http://localhost:8080/api/time?orcamento=120&excluirDuvida=true"
-```
 
 > O mesmo parâmetro já existe em `GET /api/ranking`, com a mesma semântica.
 >
@@ -1223,6 +1032,11 @@ no banco **não é alterada**.
   diferente de atletas por posição.
 - As mesmas regras de montagem valem para cada formação: limite por clube, defesa sem clube repetido
   e dúvidas com substituto.
+
+Na resposta, `resultados` vem ordenado por `scoreTotal` decrescente e cada item traz `posicao` — o
+ranking daquela formação entre as comparadas. `melhorFormacao` aponta para o primeiro da lista.
+`formacaoCompleta` e, quando o orçamento não basta, `avisoOrcamento` são **por resultado**, não
+globais. Cada `time` traz a estrutura completa do `GET /api/time` (titulares, reservas, capitão).
 
 | Situação | Resposta |
 |---|---|
@@ -1636,6 +1450,8 @@ GET /api/time
 
 ## 11. Estrutura do Projeto
 
+Orientação de repositório — o que existe na raiz e onde cada coisa mora:
+
 ```
 cartolaoddsapi/
 ├── Dockerfile               # Multi-stage: build (JDK 21) + runtime (JRE 21 Alpine)
@@ -1644,73 +1460,28 @@ cartolaoddsapi/
 ├── .dockerignore            # Exclui target/, testes, docs do contexto Docker
 ├── pom.xml
 ├── README.md                # Porta de entrada: o que é e como subir
-├── docs/
-│   ├── documentacao.md      # Este arquivo — referência completa
-│   ├── context.md           # Decisões de arquitetura e seus porquês
-│   └── observabilidade/     # Dashboard e alertas da cota (ver 17)
-│       ├── grafana-cota-odds.json
-│       ├── alertas-cota-odds.yml
-│       ├── alertas-cota-odds.test.yml
-│       └── prometheus.yml
+├── docs/                    # Ver docs/README.md
 └── src/
-    ├── main/
-    │   ├── java/com/cartola/odds/
-    │   │   ├── CartolaOddsApplication.java
-    │   │   ├── config/          (OddsProperties, CartolaProperties, JwtProperties,
-    │   │   │                     LoginProperties, AdminInicialProperties, AdminInicialBootstrap,
-    │   │   │                     CacheConfig, RestClientConfig, OpenApiConfig, SecurityConfig)
-    │   │   ├── client/          (OddsClient, CartolaClient)
-    │   │   ├── security/        (JwtAuthenticationFilter, ErroSegurancaHandler)
-    │   │   ├── repository/      (ConfiguracaoRepository, EscalacaoRepository, UsuarioRepository,
-    │   │   │                     OddsSnapshotRepository, OddsCotaRepository,
-    │   │   │                     OddsCotaHistoricoRepository — todos `JpaRepository`)
-    │   │   ├── service/         (OddsService, OddsCotaService, CartolaDataService, ScoreService,
-    │   │   │                     DesempenhoService, MontadorTimeService, OtimizadorTitulares,
-    │   │   │                     PipelineService, RankingService, ConfiguracaoService,
-    │   │   │                     EscalacaoService, AuthService, JwtService, LoginThrottle,
-    │   │   │                     UsuarioService, UsuarioDetailsService)
-    │   │   ├── controller/api/  (AuthApi, UsuarioApi, TimeApi, RankingApi, FavoritosApi,
-    │   │   │                     CacheApi, ConfiguracaoApi, HistoricoApi, OddsCotaApi
-    │   │   │                     — interfaces com as anotações Swagger)
-    │   │   ├── controller/      (AuthController, UsuarioController, TimeController,
-    │   │   │                     RankingController, FavoritosController, CacheController,
-    │   │   │                     ConfiguracaoController, HistoricoController, OddsCotaController,
-    │   │   │                     GlobalExceptionHandler)
-    │   │   ├── exception/       (RecursoNaoEncontradoException, TentativasExcedidasException,
-    │   │   │                     ConflitoException, SenhaInvalidaException)
-    │   │   ├── model/           (Atleta, Time, Configuracao, EscalacaoRodada, Usuario,
-    │   │   │                     FormacaoConfig, ResultadoFormacao, OddsComOrigem, OddsSnapshot,
-    │   │   │                     OddsCota, OddsCotaHistorico)
-    │   │   │   ├── enums/        (Posicao, StatusAtleta, StatusMercado, Perfil, Estrategia)
-    │   │   │   ├── request/      (ConfiguracaoRequest, LoginRequest, UsuarioRequest,
-    │   │   │   │                  UsuarioUpdateRequest, AlterarSenhaRequest)
-    │   │   │   └── response/     (TimeResponse, RankingResponse, FavoritosResponse,
-    │   │   │                      CompararFormacoesResponse, HistoricoResponse,
-    │   │   │                      EscalacaoRodadaResponse, ConfiguracaoResponse, CacheResponse,
-    │   │   │                      OddsCotaResponse, OddsCotaHistoricoResponse, LoginResponse,
-    │   │   │                      UsuarioResponse, PaginaResponse, ErrorResponse, OddsResponse,
-    │   │   │                      AtletaResponse, ClubeResponse, PartidaResponse,
-    │   │   │                      PontuadosResponse, MercadoStatusResponse)
-    │   │   └── util/            (NormalizadorUtil, FormacaoParser)
-    │   └── resources/
-    │       ├── application.properties        # Lê variáveis de ambiente com fallback
-    │       ├── application-prod.properties   # Perfil prod: springdoc desligado, log em INFO
-    │       └── db/migration/                 # V1 … V11 — ver 4.3
+    ├── main/java/com/cartola/odds/   # Camadas abaixo
+    ├── main/resources/
+    │   ├── application.properties        # Lê variáveis de ambiente com fallback (ver 4.1)
+    │   ├── application-prod.properties   # Perfil prod: springdoc desligado, log em INFO (ver 5.5)
+    │   └── db/migration/                 # V1 … V11 (ver 4.3)
     └── test/
-        ├── java/                            # 44 classes de teste — 761 cenários (ver 14)
+        ├── java/                         # 44 classes de teste — 761 cenários (ver 14)
         └── resources/
-            ├── application.properties       # H2 in-memory (MODE=PostgreSQL) para testes
-            └── db/migration/h2/             # Migrations equivalentes ajustadas à sintaxe H2
+            ├── application.properties    # H2 in-memory (MODE=PostgreSQL) para testes
+            └── db/migration/h2/          # Migrations equivalentes ajustadas à sintaxe H2
 ```
 
-**Camadas:**
+**Camadas** — o que cada pacote é responsável por conter:
 
 ```
 com.cartola.odds/
 ├── config/      — configurações (cache, REST client, OpenAPI, security, properties)
 ├── client/      — integrações com APIs externas (OddsClient, CartolaClient)
 ├── security/    — filtro JWT e escrita de 401/403
-├── repository/  — persistência (JPA)
+├── repository/  — persistência (Spring Data JPA)
 ├── service/     — lógica de negócio (pipeline, score, desempenho, ranking, montador, usuários)
 ├── controller/  — endpoints REST + tratamento global de erros
 │   └── api/     — interfaces com anotações Swagger (separadas dos controllers)
@@ -1719,7 +1490,11 @@ com.cartola.odds/
 └── util/        — utilitários (NormalizadorUtil, FormacaoParser)
 ```
 
----
+> **A lista de classes de cada pacote não é mantida aqui.** Ela nasce desatualizada a cada classe
+> nova, e o repositório já a responde (`find src/main/java -name '*.java'`, ou a árvore do próprio
+> GitHub). O que este documento mantém é o **critério**: o que pertence a cada camada. Os pontos de
+> entrada citados por nome vivem em [12](#12-referência-de-funções), onde o nome é parte da
+> explicação. Ver [`docs/README.md`](README.md#o-que-não-se-documenta-à-mão).
 
 ## 12. Referência de Funções
 

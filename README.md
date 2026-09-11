@@ -13,9 +13,14 @@ Cartola FC cruzando odds do Brasileirão com métricas dos atletas da plataforma
 | Documento | Papel |
 |---|---|
 | **`README.md`** (este) | O que é, como subir, como autenticar, índice do resto |
+| [**`docs/README.md`**](docs/README.md) | Índice da documentação e **onde documentar cada mudança** |
 | [**`docs/documentacao.md`**](docs/documentacao.md) | Referência completa: endpoints, contratos de resposta, configuração, regras de negócio, estrutura e testes |
 | [**`docs/context.md`**](docs/context.md) | Decisões de arquitetura e o *porquê* de cada uma |
 | [**`docs/observabilidade/`**](docs/observabilidade/) | Dashboard do Grafana e regras de alerta da cota, prontos para importar |
+
+> Vai abrir um PR que mexe em documentação? A tabela *"onde documentar cada mudança"* de
+> [`docs/README.md`](docs/README.md#onde-documentar-cada-mudança) diz qual arquivo é o dono do
+> assunto — é o que impede a sobreposição de voltar.
 
 ---
 

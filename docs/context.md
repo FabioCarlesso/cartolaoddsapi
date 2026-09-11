@@ -5,6 +5,7 @@
 >
 > *O que* o sistema faz e *como* se usa cada endpoint está em
 > [`documentacao.md`](documentacao.md). Como subir o projeto está no [README](../README.md).
+> O índice da documentação está em [`docs/README.md`](README.md).
 
 ---
 
