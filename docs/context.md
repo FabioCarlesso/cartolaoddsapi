@@ -541,13 +541,13 @@ melhor *entre quem está no banco*. `TEC` não tem reserva e, portanto, não con
 
 ### Infraestrutura
 - [ ] **Retry** com backoff exponencial via Spring Retry
-- [x] **Métricas** com Spring Actuator + Micrometer, com dashboard e alertas da cota (ver [17](operacao.md#observabilidade))
+- [x] **Métricas** com Spring Actuator + Micrometer, com dashboard e alertas da cota (ver [`operacao.md` › Observabilidade](operacao.md#observabilidade))
 - [ ] **Credencial de conta de máquina** para o scrape do Prometheus ([#44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44))
 - [ ] **`TRUSTED_PROXIES`** fixado na faixa real da borda ([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39))
 - [ ] **Cobertura de testes** com JaCoCo + relatório HTML
 
 ### Regras de Negócio
-- [x] **Constraint de budget** máximo (C$) — resolvida com branch-and-bound próprio (ver [9.9](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento))
+- [x] **Constraint de budget** máximo (C$) — resolvida com branch-and-bound próprio (ver [`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento))
 - [x] **Formações alternativas** configuráveis, com comparação via `GET /api/time/comparar`
 - [ ] **Simulação** de diferentes `ODD_LIMITE` para comparar times resultantes
 

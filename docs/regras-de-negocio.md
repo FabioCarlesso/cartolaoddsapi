@@ -196,7 +196,7 @@ baratos:
 
 **Opt-out via `excluirDuvida`:** o parâmetro opcional `excluirDuvida=true` em `GET /api/time` e
 `GET /api/ranking` remove os atletas com `status_id == 6` do pool no `PipelineService`, **após o
-cache** e **antes** do `ScoreService` — ver [8.5](api.md#parâmetros-de-get-apitime).
+cache** e **antes** do `ScoreService` — ver [`api.md` › Parâmetros de `GET /api/time`](api.md#parâmetros-de-get-apitime).
 
 ## Normalização de Nomes de Clubes
 
@@ -318,7 +318,7 @@ nasce de uma chamada ao provedor, e as chamadas são limitadas pela própria cot
 `GET /api/odds/cota/historico?dias=N` lê essa tabela, com `N` entre 1 e 92 (`400` fora da faixa). A
 série é ordenada pelo **instante da leitura**, com o `id` como desempate. Os campos de data são
 `LocalDateTime` — hora local do servidor, sem offset — como no resto da API. Contrato de resposta em
-[8.4](api.md#exemplos-de-resposta).
+[`api.md` › Exemplos de resposta](api.md#exemplos-de-resposta).
 
 *Por que append-only, por que 92 dias e como o reinício de ciclo é detectado:
 [`context.md` › Histórico das leituras de cota](context.md#histórico-das-leituras-de-cota).*
@@ -361,3 +361,12 @@ Lista os jogos da rodada atual classificados em **favoritos** e **descartados**.
 em apostas reais).
 
 ---
+
+---
+
+## Ver também
+
+- [`api.md`](api.md) — os parâmetros e o contrato de cada endpoint
+- [`banco-de-dados.md`](banco-de-dados.md) — os parâmetros de negócio e seus padrões
+- [`arquitetura.md`](arquitetura.md) — o pipeline que orquestra estas regras
+- [`context.md`](context.md) — por que cada regra é assim

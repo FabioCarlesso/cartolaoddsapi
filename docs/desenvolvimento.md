@@ -84,3 +84,11 @@ mvn test jacoco:report
 ```
 
 ---
+
+---
+
+## Ver também
+
+- [`arquitetura.md`](arquitetura.md) — as camadas que os testes cobrem
+- [`seguranca.md`](seguranca.md) — a matriz que o `PoliticaAcessoIntegrationTest` percorre
+- [`operacao.md`](operacao.md) — os artefatos que o `ArtefatosObservabilidadeTest` amarra

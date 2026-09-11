@@ -47,7 +47,7 @@ API](context.md#guardrail-de-cota-da-the-odds-api).*
 |---|---|---|
 | `GET /api/odds/cota` | `ADMIN` | Estado atual da cota, nos sete campos abaixo |
 | `GET /api/odds/cota/historico` | `ADMIN` | Série das leituras na janela (`?dias=30`, de 1 a 92), em ordem cronológica, com `reinicioDeCota` marcando a primeira leitura de um ciclo novo |
-| `/actuator/prometheus` | `ADMIN` | `odds_api_requests_total`, `odds_api_requests_remaining` e `odds_api_errors_total` — ver [17](operacao.md#observabilidade) |
+| `/actuator/prometheus` | `ADMIN` | `odds_api_requests_total`, `odds_api_requests_remaining` e `odds_api_errors_total` — ver [Observabilidade](operacao.md#observabilidade) |
 
 **Campos de `GET /api/odds/cota`.** Listados aqui, e não deixados para o Swagger, porque este é o
 endpoint que se consulta **em produção** quando o guardrail arma — e em `prod` o springdoc responde
@@ -230,7 +230,7 @@ copia o que precisa; quem não opera não herda uma segunda stack para cuidar.
 
 > Para ver a cota não é preciso nada disto. `GET /api/odds/cota` devolve o estado atual nos sete
 > campos, incluindo o próprio `minRequestsRemaining`, e `GET /api/odds/cota/historico` devolve a
-> série do mês (ver [4.4](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)). O que estes arquivos
+> série do mês (ver [Cota da The Odds API: guardrail e sondagem](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)). O que estes arquivos
 > acrescentam sobre os dois endpoints é a **avaliação contínua** — algo perguntando pelo saldo sem
 > ninguém abrir tela — e a taxa de erro sobre `odds_api_errors_total` / `odds_api_requests_total`,
 > que não têm endpoint equivalente.
@@ -357,3 +357,12 @@ mesmo do `application.properties`.
 [`context.md` › Dashboard e alertas da cota](context.md#dashboard-e-alertas-da-cota).*
 
 ---
+
+---
+
+## Ver também
+
+- [`configuracao.md`](configuracao.md) — as propriedades do guardrail e do cache
+- [`api.md`](api.md) — o contrato de `/api/odds/cota` e de `/api/cache`
+- [`seguranca.md`](seguranca.md) — por que `metrics` e `prometheus` exigem `ADMIN`
+- [`context.md`](context.md) — por que o guardrail, o snapshot e o `NaN` são assim

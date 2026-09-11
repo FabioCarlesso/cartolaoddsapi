@@ -59,9 +59,9 @@ ou o próprio build já as respondem, e com a vantagem de nunca discordarem do c
 
 | Não mantenha aqui | Onde a resposta está |
 |---|---|
-| Árvore de arquivos comentada classe a classe | `find src/main/java -name '*.java'`, ou a árvore do GitHub. A referência mantém o **critério** de cada camada ([§ 11](arquitetura.md#estrutura-do-projeto)), não a lista |
+| Árvore de arquivos comentada classe a classe | `find src/main/java -name '*.java'`, ou a árvore do GitHub. A referência mantém o **critério** de cada camada ([`arquitetura.md` › Estrutura do Projeto](arquitetura.md#estrutura-do-projeto)), não a lista |
 | Corpo de request/response por rota | Swagger UI / `/v3/api-docs` (fora de `prod`) |
-| Catálogo de exemplos `curl` por endpoint | A tabela de rotas em [§ 8.1](api.md#tabela-completa) e o Swagger UI |
+| Catálogo de exemplos `curl` por endpoint | A tabela de rotas em [`api.md` › Tabela completa](api.md#tabela-completa) e o Swagger UI |
 | Listagem de todos os campos de um DTO | Os `@Schema` do springdoc |
 
 **As exceções, e o critério delas.** Um exemplo entra quando mostra **comportamento que o schema não
@@ -70,14 +70,14 @@ em que a ordem importa. Sai quando só repete o schema. Pelo mesmo critério, o 
 
 | O que ficou | Por quê |
 |---|---|
-| `GET /api/odds/cota/historico` ([8.4](api.md#exemplos-de-resposta)) | Mostra o `reinicioDeCota` virando `true` numa leitura específica — o schema diz que o campo é booleano, não quando ele muda |
-| `GET /api/time` com orçamento insuficiente ([8.5](api.md#parâmetros-de-get-apitime)) | É o caso degradado: `formacaoCompleta: false` com `avisoOrcamento` preenchido |
-| `ErrorResponse` de `403` ([5.3](seguranca.md#erros-de-autorização-401-e-403)) | `401` e `403` nascem no filter chain, antes do MVC — o springdoc não os documenta por rota |
-| Envelope `PaginaResponse` ([6.3](seguranca.md#formato-da-paginação)) | É o contrato que os **próximos** endpoints paginados devem reusar |
-| Fluxo de gestão de usuários ([6.1](seguranca.md#fluxo-típico)) | Runbook: a sequência autenticar → criar → listar → desativar é a resposta a "como libero acesso a alguém" |
-| Retorno da The Odds API ([3.1](arquitetura.md#the-odds-api)) | API de terceiro — não está no nosso OpenAPI |
-| `{"status":"UP"}` do Actuator ([17.1](operacao.md#endpoints-do-actuator)) | O ponto é a **diferença** entre o corpo anônimo e o de `ADMIN` |
-| Os 7 campos de `GET /api/odds/cota` ([4.4](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)) | É o endpoint que se lê **em produção** quando o guardrail arma — e em `prod` o springdoc responde `404` |
+| `GET /api/odds/cota/historico` ([`api.md` › Exemplos de resposta](api.md#exemplos-de-resposta)) | Mostra o `reinicioDeCota` virando `true` numa leitura específica — o schema diz que o campo é booleano, não quando ele muda |
+| `GET /api/time` com orçamento insuficiente ([`api.md` › Parâmetros de `GET /api/time`](api.md#parâmetros-de-get-apitime)) | É o caso degradado: `formacaoCompleta: false` com `avisoOrcamento` preenchido |
+| `ErrorResponse` de `403` ([`seguranca.md` › Erros de autorização (401 e 403)](seguranca.md#erros-de-autorização-401-e-403)) | `401` e `403` nascem no filter chain, antes do MVC — o springdoc não os documenta por rota |
+| Envelope `PaginaResponse` ([`seguranca.md` › Formato da paginação](seguranca.md#formato-da-paginação)) | É o contrato que os **próximos** endpoints paginados devem reusar |
+| Fluxo de gestão de usuários ([`seguranca.md` › Fluxo típico](seguranca.md#fluxo-típico)) | Runbook: a sequência autenticar → criar → listar → desativar é a resposta a "como libero acesso a alguém" |
+| Retorno da The Odds API ([`arquitetura.md` › The Odds API](arquitetura.md#the-odds-api)) | API de terceiro — não está no nosso OpenAPI |
+| `{"status":"UP"}` do Actuator ([`operacao.md` › Endpoints do Actuator](operacao.md#endpoints-do-actuator)) | O ponto é a **diferença** entre o corpo anônimo e o de `ADMIN` |
+| Os 7 campos de `GET /api/odds/cota` ([`operacao.md` › Cota da The Odds API: guardrail e sondagem](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)) | É o endpoint que se lê **em produção** quando o guardrail arma — e em `prod` o springdoc responde `404` |
 
 ## Tamanho dos arquivos
 

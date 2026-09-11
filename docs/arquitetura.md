@@ -49,7 +49,7 @@ mvn clean package -DskipTests
 | Endpoint | `GET /sports/soccer_brazil_campeonato/odds` |
 | Autenticação | Query param `apiKey` |
 | Plano gratuito | 500 requisições/mês |
-| Headers de cota | `x-requests-remaining` e `x-requests-used` — lidos também nas respostas de erro (ver [4.4](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)) |
+| Headers de cota | `x-requests-remaining` e `x-requests-used` — lidos também nas respostas de erro (ver [`operacao.md` › Cota da The Odds API: guardrail e sondagem](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem)) |
 
 **Custo por chamada:** a The Odds API cobra por requisição **por região e por mercado**. Com
 `odds.api.regions=us` e `odds.api.markets=h2h` (um valor em cada), cada chamada custa 1 crédito —
@@ -117,11 +117,11 @@ cartolaoddsapi/
 └── src/
     ├── main/java/com/cartola/odds/   # Camadas abaixo
     ├── main/resources/
-    │   ├── application.properties        # Lê variáveis de ambiente com fallback (ver 4.1)
-    │   ├── application-prod.properties   # Perfil prod: springdoc desligado, log em INFO (ver 5.5)
-    │   └── db/migration/                 # V1 … V11 (ver 4.3)
+    │   ├── application.properties        # Variáveis de ambiente com fallback
+    │   ├── application-prod.properties   # Perfil prod: springdoc desligado, log em INFO
+    │   └── db/migration/                 # V1 … V11 — ver banco-de-dados.md
     └── test/
-        ├── java/                         # 44 classes de teste — 761 cenários (ver 14)
+        ├── java/                         # 44 classes — 761 cenários
         └── resources/
             ├── application.properties    # H2 in-memory (MODE=PostgreSQL) para testes
             └── db/migration/h2/          # Migrations equivalentes ajustadas à sintaxe H2
@@ -146,7 +146,7 @@ com.cartola.odds/
 > **A lista de classes de cada pacote não é mantida aqui.** Ela nasce desatualizada a cada classe
 > nova, e o repositório já a responde (`find src/main/java -name '*.java'`, ou a árvore do próprio
 > GitHub). O que este documento mantém é o **critério**: o que pertence a cada camada. Os pontos de
-> entrada citados por nome vivem em [12](arquitetura.md#referência-de-funções), onde o nome é parte da
+> entrada citados por nome vivem em [Referência de Funções](arquitetura.md#referência-de-funções), onde o nome é parte da
 > explicação. Ver [`docs/README.md`](README.md#o-que-não-se-documenta-à-mão).
 
 ---
@@ -242,7 +242,7 @@ Retorna `Time` completo com alertas de dúvida.
 
 ### `OtimizadorTitulares` — seleção sob orçamento
 Resolve o *multiple-choice knapsack* por posição via branch-and-bound quando há teto de cartoletas.
-Ver [9.9](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).
+Ver [`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).
 
 ### `RankingService.buscarRanking(posicao, limite) → RankingResponse`
 Retorna os melhores atletas por score. Reutiliza o mesmo pipeline de filtros do `/api/time`.
@@ -250,7 +250,7 @@ Retorna os melhores atletas por score. Reutiliza o mesmo pipeline de filtros do 
 
 ### `EscalacaoService.salvarEscalacao(Time, rodadaId)` / `atualizarPontuacaoReal(rodadaId)`
 Persiste a escalação da rodada de forma idempotente e, depois do fechamento, preenche a
-`pontuacao_real` a partir de `/atletas/pontuados`. Ver [9.12](regras-de-negocio.md#histórico-de-escalações-por-rodada).
+`pontuacao_real` a partir de `/atletas/pontuados`. Ver [`regras-de-negocio.md` › Histórico de Escalações por Rodada](regras-de-negocio.md#histórico-de-escalações-por-rodada).
 
 ### `PipelineService.executar() → Time`
 Orquestra todas as etapas. Lança `IllegalStateException` se pool vazio após filtragem.
@@ -273,3 +273,12 @@ Converte falhas de Bean Validation — principalmente no corpo do `PATCH /api/co
 Converte valores de query param/path variable que não convertem para o tipo esperado (ex.: `?orcamento=abc`, `?excluirDuvida=abc`) em HTTP 400, informando nome do parâmetro, valor recebido e tipo esperado. Sem este handler a exceção cairia no `handleGeneric(Exception)` e seria reportada como `500`, tratando erro de cliente como falha de servidor.
 
 ---
+
+---
+
+## Ver também
+
+- [`api.md`](api.md) — contrato REST das rotas expostas por cada controller
+- [`regras-de-negocio.md`](regras-de-negocio.md) — o que cada serviço do pipeline decide
+- [`banco-de-dados.md`](banco-de-dados.md) — migrations e o esquema que o `ddl-auto=validate` confere
+- [`context.md`](context.md) — por que as camadas e o pipeline são assim

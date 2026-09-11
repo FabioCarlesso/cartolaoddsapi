@@ -16,7 +16,7 @@
 | `docker-compose.yml` | Orquestração com variáveis de ambiente, healthcheck e resource limits |
 | `.env.example` | Template de variáveis — copiar para `.env` antes de usar |
 | `.dockerignore` | Exclui `target/`, `src/test/`, `docs/` e arquivos de IDE do contexto |
-| `application.properties` | Lê variáveis de ambiente com fallback para valores padrão (ver [4.2](configuracao.md#variáveis-de-ambiente)) |
+| `application.properties` | Lê variáveis de ambiente com fallback para valores padrão (ver [`configuracao.md` › Variáveis de Ambiente](configuracao.md#variáveis-de-ambiente)) |
 
 ### Dockerfile — Multi-stage Build
 
@@ -94,3 +94,11 @@ GET http://localhost:8080/v3/api-docs → 200 OK = healthy
 `start_period: 60s` — aguarda a JVM e o PostgreSQL inicializarem antes de começar as verificações.
 
 ---
+
+---
+
+## Ver também
+
+- [`configuracao.md`](configuracao.md) — as variáveis de ambiente que o compose passa
+- [`operacao.md`](operacao.md) — o healthcheck e as métricas do container no ar
+- [`../README.md`](../README.md) — o início rápido

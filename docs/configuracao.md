@@ -62,12 +62,12 @@ Arquivo: `src/main/resources/application-prod.properties` — só o que muda em 
 (`SPRING_PROFILES_ACTIVE=prod`):
 
 ```properties
-# Swagger e OpenAPI desligados: as rotas passam a responder 404 (ver 5.5)
+# Swagger e OpenAPI desligados: as rotas passam a responder 404
 springdoc.api-docs.enabled=false
 springdoc.swagger-ui.enabled=false
 
 # DEBUG imprime o e-mail do dono de um token recusado e a URI de cada 401/403.
-# As linhas de operação já identificam o usuário por id — ver 5.5.
+# As linhas de operação já identificam o usuário por id.
 logging.level.com.cartola=INFO
 ```
 
@@ -100,14 +100,23 @@ spring.datasource.url=${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/c
 | `APP_LOGIN_MAX_TENTATIVAS` | `5` | Falhas de login toleradas por e-mail dentro da janela |
 | `APP_LOGIN_JANELA_MINUTOS` | `5` | Janela do freio de login, em minutos |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:4200` | Origens do frontend liberadas para CORS, separadas por vírgula — nunca `*` |
-| `TRUSTED_PROXIES` | faixas privadas | Regex dos endereços de proxy confiáveis (ver [5.4](seguranca.md#cabeçalhos-de-segurança-e-proxy-confiável)) |
+| `TRUSTED_PROXIES` | faixas privadas | Regex dos endereços de proxy confiáveis (ver [`seguranca.md` › Cabeçalhos de segurança e proxy confiável](seguranca.md#cabeçalhos-de-segurança-e-proxy-confiável)) |
 | `ODDS_API_MIN_REQUESTS_REMAINING` | `50` | Guardrail de cota: abaixo deste saldo restante, o cliente para de chamar a The Odds API e serve o último snapshot conhecido |
 | `ODDS_API_CACHE_TTL_MINUTOS` | `60` | TTL do cache `odds` em minutos |
 | `ODDS_API_CACHE_TTL_DEGRADADO_MINUTOS` | `10` | TTL de uma resposta de odds **sem nenhum jogo** (provedor fora do ar, fora de temporada) |
 | `ODDS_API_SONDA_INTERVALO_HORAS` | `24` | Com o guardrail ativo, intervalo mínimo entre chamadas de sondagem que reavaliam o saldo |
 
 > **Parâmetros de negócio** (odd limite, pesos, formação e regras) **não** são variáveis de
-> ambiente: ficam no banco e são gerenciados por `PATCH /api/config` — ver [4.3](banco-de-dados.md#parâmetros-de-negócio-via-banco-de-dados).
+> ambiente: ficam no banco e são gerenciados por `PATCH /api/config` — ver [`banco-de-dados.md` › Parâmetros de Negócio via Banco de Dados](banco-de-dados.md#parâmetros-de-negócio-via-banco-de-dados).
 
 > **Sem API Key configurada:** a aplicação sobe normalmente, o filtro por time favorito é
 > desativado e todos os atletas elegíveis por status/preço são considerados.
+
+---
+
+## Ver também
+
+- [`deploy.md`](deploy.md) — como essas variáveis chegam ao container
+- [`banco-de-dados.md`](banco-de-dados.md) — os parâmetros que ficam no banco, não no ambiente
+- [`operacao.md`](operacao.md) — as propriedades do guardrail de cota em uso
+- [`seguranca.md`](seguranca.md) — o efeito de `SPRING_PROFILES_ACTIVE=prod`

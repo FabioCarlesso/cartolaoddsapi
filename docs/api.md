@@ -135,7 +135,7 @@ A resposta passa a expor `orcamentoInformado`, `custoTotal`, `saldoRestante`, `e
 `avisoOrcamento` (nesse caso o time é o melhor *best-effort* dentro do teto). Valores em cartoletas
 são arredondados para 2 casas decimais. Sem `orcamento`, `orcamentoInformado` e `saldoRestante`
 vêm `null` e `custoTotal` traz o custo real da escalação. Detalhes do algoritmo em
-[9.9](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).
+[`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).
 
 Quando o orçamento é baixo demais para os 12 titulares, a formação é retornada incompleta e
 `avisoOrcamento` é preenchido (`saldoRestante` nunca fica negativo):
@@ -173,7 +173,7 @@ suficientes para alguma posição, a resposta é retornada normalmente com `form
 > O mesmo parâmetro já existe em `GET /api/ranking`, com a mesma semântica.
 >
 > Por ser uma consulta comparativa, `excluirDuvida=true` **não registra** a escalação no histórico —
-> ver [9.12](regras-de-negocio.md#histórico-de-escalações-por-rodada). O `orcamento`, sozinho, continua registrando
+> ver [`regras-de-negocio.md` › Histórico de Escalações por Rodada](regras-de-negocio.md#histórico-de-escalações-por-rodada). O `orcamento`, sozinho, continua registrando
 > normalmente.
 
 ### `GET /api/time/comparar`
@@ -223,10 +223,10 @@ globais. Cada `time` traz a estrutura completa do `GET /api/time` (titulares, re
 | `http://localhost:8080/v3/api-docs` | JSON OpenAPI 3 (importar no Postman/Insomnia) |
 
 > Ambas respondem **`404`** com `SPRING_PROFILES_ACTIVE=prod`: o `application-prod.properties`
-> desliga o springdoc. Ver [5.5](seguranca.md#perfil-de-produção).
+> desliga o springdoc. Ver [`seguranca.md` › Perfil de produção](seguranca.md#perfil-de-produção).
 
 No Swagger UI, o botão **Authorize** recebe apenas o valor do `accessToken` devolvido por
-`POST /api/auth/login`. A lista de endpoints e seus contratos está em [8](api.md#endpoints); falhas de
+`POST /api/auth/login`. A lista de endpoints e seus contratos está em [Endpoints](api.md#endpoints); falhas de
 validação de request body em `PATCH /api/config` retornam HTTP 400 com a mensagem do campo inválido.
 
 **Respostas documentadas em `GET /api/time`:**
@@ -290,6 +290,15 @@ validação de request body em `PATCH /api/config` retornam HTTP 400 com a mensa
 
 ### `status_mercado` — referência
 
-Ver [8.3](api.md#aviso-de-mercado).
+Ver [Aviso de mercado](api.md#aviso-de-mercado).
 
 ---
+
+---
+
+## Ver também
+
+- [`regras-de-negocio.md`](regras-de-negocio.md) — as regras por trás de cada resposta
+- [`seguranca.md`](seguranca.md) — quem pode chamar cada rota
+- [`operacao.md`](operacao.md) — os endpoints de cota e do Actuator
+- [`context.md`](context.md) — por que a API é fechada e por que o envelope de paginação é próprio

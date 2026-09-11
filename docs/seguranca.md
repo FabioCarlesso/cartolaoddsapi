@@ -69,7 +69,7 @@ cria um a partir de `APP_ADMIN_INICIAL_EMAIL` e `APP_ADMIN_INICIAL_SENHA`. Nem `
 `429` ao atingir o limite — `APP_LOGIN_MAX_TENTATIVAS` (padrão 5) dentro de
 `APP_LOGIN_JANELA_MINUTOS` (padrão 5). Um login bem-sucedido zera a contagem, e o bloqueio de um
 e-mail não afeta os demais usuários. O mesmo contador protege a conferência da senha atual em
-`PATCH /api/usuarios/me/senha` (ver [6](seguranca.md#gestão-de-usuários)).
+`PATCH /api/usuarios/me/senha` (ver [Gestão de Usuários](seguranca.md#gestão-de-usuários)).
 
 ### Matriz de acesso por rota
 
@@ -107,7 +107,7 @@ matcher cita o verbo `POST`, então o `GET` da mesma rota cai na regra final.
 matcher por método cobre só aquele método — **`HEAD` não herda a autorização de `GET`** —, e por
 isso as regras de `ADMIN` citam apenas os verbos que escrevem: leitura e `HEAD` caem na regra final,
 que já é fechada. Em `/api/usuarios` o matcher de URL é o **piso** e o `@PreAuthorize` ao lado de
-cada método é a regra fina (ver [6](seguranca.md#gestão-de-usuários)).
+cada método é a regra fina (ver [Gestão de Usuários](seguranca.md#gestão-de-usuários)).
 
 **Verificação.** `PoliticaAcessoIntegrationTest` percorre a matriz rota a rota nos três estados
 (sem token, `USER`, `ADMIN`) e afirma apenas o veredito da autorização, não o status de negócio do
@@ -364,3 +364,12 @@ instância. Auto-cadastro público, convite por e-mail e redefinição de senha 
 da [issue #37](https://github.com/FabioCarlesso/cartolaoddsapi/issues/37).
 
 ---
+
+---
+
+## Ver também
+
+- [`api.md`](api.md) — o mapa completo de rotas
+- [`configuracao.md`](configuracao.md) — `JWT_SECRET`, `TRUSTED_PROXIES` e as variáveis do freio de login
+- [`operacao.md`](operacao.md) — o acesso `ADMIN` às métricas e à cota
+- [`context.md`](context.md) — por que JWT com `tokenVersion` e por que `native` e não `framework`
