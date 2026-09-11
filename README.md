@@ -14,9 +14,8 @@ Cartola FC cruzando odds do Brasileirão com métricas dos atletas da plataforma
 |---|---|
 | **`README.md`** (este) | O que é, como subir, como autenticar, índice do resto |
 | [**`docs/README.md`**](docs/README.md) | Índice da documentação e **onde documentar cada mudança** |
-| [**`docs/documentacao.md`**](docs/documentacao.md) | Referência completa: endpoints, contratos de resposta, configuração, regras de negócio, estrutura e testes |
+| [**`docs/`**](docs/) | Um arquivo por assunto: arquitetura, api, regras de negócio, segurança, configuração, banco de dados, operação, deploy e desenvolvimento |
 | [**`docs/context.md`**](docs/context.md) | Decisões de arquitetura e o *porquê* de cada uma |
-| [**`docs/observabilidade/`**](docs/observabilidade/) | Dashboard do Grafana e regras de alerta da cota, prontos para importar |
 
 > Vai abrir um PR que mexe em documentação? A tabela *"onde documentar cada mudança"* de
 > [`docs/README.md`](docs/README.md#onde-documentar-cada-mudança) diz qual arquivo é o dono do
@@ -26,25 +25,39 @@ Cartola FC cruzando odds do Brasileirão com métricas dos atletas da plataforma
 
 ## O que a API faz
 
-- Cruza as odds do Brasileirão ([The Odds API](https://the-odds-api.com)) com os dados dos atletas
-  do Cartola FC e escala o time da rodada — formação padrão **4-3-3**, configurável.
-- Monta o time de **maior score** dentro de um teto de cartoletas (`GET /api/time?orcamento=120`),
-  compara formações lado a lado e permite excluir jogadores em dúvida.
-- Persiste a escalação de cada rodada e depois compara **score sugerido vs. pontuação real**
-  (`/api/historico`).
-- Ajusta pesos do score, formação e regras **em runtime**, sem restart (`PATCH /api/config`).
-- É **fechada por JWT**: todo endpoint exige token, e um administrador gerencia as contas pela
-  própria API (`/api/usuarios`).
-- Protege a cota paga da The Odds API com um **guardrail**: abaixo do saldo mínimo, para de chamar o
-  provedor e serve o último snapshot persistido — com o saldo e o histórico de consumo expostos em
-  `/api/odds/cota`.
-- Expõe saúde e métricas via Actuator + Micrometer, com dashboard e alertas prontos.
+Cruza as odds do Brasileirão ([The Odds API](https://the-odds-api.com)) com os dados dos atletas
+do Cartola FC e escala o time da rodada. Em detalhe:
 
-A lista completa de funcionalidades está em
-[`documentacao.md` § 1](docs/documentacao.md#1-funcionalidades).
+| # | Funcionalidade | Descrição |
+|---|---|---|
+| 1 | **Cache Caffeine** | Respostas das APIs externas cacheadas em memória (10–60 min) |
+| 2 | **Invalidação de Cache** | Endpoint `DELETE /api/cache` para forçar atualização imediata dos dados |
+| 3 | **Configuração via Banco** | Parâmetros de negócio (odd limite, pesos, formação e regras) gerenciados via banco de dados |
+| 4 | **Config em Runtime** | `PATCH /api/config` atualiza parâmetros sem restart; `POST /api/config/reset` restaura defaults |
+| 5 | **Desempenho Real** | Score usa média das últimas 5 rodadas via `/atletas/pontuados` |
+| 6 | **Interfaces de API** | Swagger docs nas interfaces (`controller/api/`), controllers limpas |
+| 7 | **6 Grupos de Endpoints REST** | `/api/time`, `/api/ranking`, `/api/favoritos`, `/api/cache`, `/api/config`, `/api/historico` |
+| 8 | **Formação Configurável** | Padrão 4-3-3, alterável via `PATCH /api/config` |
+| 9 | **Dúvidas** | Titulares em dúvida recebem substituto da mesma posição |
+| 10 | **Defesa sem Clube Repetido** | Regra configurável evita repetir clubes entre GOL, LAT e ZAG |
+| 11 | **Limite por Clube** | Time titular respeita no máximo 4 atletas do mesmo clube (incluindo TEC) |
+| 12 | **Reserva de Luxo por Reserva** | Reserva de luxo é sempre a reserva com maior score |
+| 13 | **Normalização de Clubes** | Nomes de clubes são normalizados com acentos, hífens, espaços e aliases tratados |
+| 14 | **Aviso de Mercado** | Todos os endpoints informam quando o mercado está fechado ou em manutenção |
+| 15 | **Observabilidade** | Spring Boot Actuator + Micrometer: `/actuator/health`, `/actuator/metrics`, `/actuator/prometheus` |
+| 16 | **Histórico de Escalações** | `GET /api/time` persiste a escalação da rodada (idempotente; exceto `excluirDuvida=true`, que é comparativo); `/api/historico` permite comparar score sugerido vs. pontuação real |
+| 17 | **Orçamento Máximo** | `GET /api/time?orcamento=120.0` monta o time de **maior score** que cabe no limite de cartoletas (otimização branch-and-bound; custo-benefício só como desempate) |
+| 18 | **Excluir Dúvidas do Ranking** | `GET /api/ranking?excluirDuvida=true` remove jogadores em dúvida (status 6), retornando apenas prováveis. Padrão `false` |
+| 19 | **Comparar Formações** | `GET /api/time/comparar?formacoes=4-3-3,3-4-3` monta o melhor time para cada formação com o mesmo pool e retorna um comparativo por `scoreTotal` (consulta pontual, não altera a configuração) |
+| 20 | **Excluir Dúvidas do Time** | `GET /api/time?excluirDuvida=true` monta o time só com prováveis — nenhum jogador em dúvida entre titulares e reservas. Padrão `false`, combinável com `orcamento` |
+| 21 | **Autenticação JWT** | A API é fechada: `POST /api/auth/login` emite o access token e todo o resto exige `Authorization: Bearer`. Admin inicial criado no primeiro boot |
+| 22 | **Gestão de Usuários** | `/api/usuarios` — administrador cria, lista, edita e desativa contas pela própria API; qualquer autenticado vê os próprios dados e troca a própria senha |
+| 23 | **Guardrail de Cota** | Abaixo do saldo mínimo, o cliente para de chamar a The Odds API e serve o último snapshot persistido; `GET /api/odds/cota` e `/api/odds/cota/historico` expõem saldo, consumo e a série das leituras |
+
+---
 
 **Stack:** Java 21 · Spring Boot 3.4.5 · PostgreSQL 16 · Flyway · Caffeine · Docker —
-[versões e dependências](docs/documentacao.md#2-stack-e-dependências).
+[versões e dependências](docs/arquitetura.md#stack-e-dependências).
 
 ---
 
@@ -87,7 +100,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/ranking
 > do que uma que falha dizendo qual variável falta.
 
 Os demais comandos (logs, rebuild, build manual, `docker run` sem Compose) estão em
-[`documentacao.md` § 16.3](docs/documentacao.md#163-comandos).
+[`deploy.md` › Comandos](docs/deploy.md#comandos).
 
 ---
 
@@ -124,12 +137,12 @@ ODDS_API_KEY=sua_chave mvn spring-boot:run
 | `JWT_SECRET` | Segredo HMAC de assinatura dos tokens (mínimo 32 caracteres). Obrigatório em produção; fora dela, ausente, vira uma chave efêmera por boot |
 
 Todas as outras — banco, porta, CORS, freio de login, TTLs e guardrail de cota — têm padrão e estão
-na [tabela completa de variáveis de ambiente](docs/documentacao.md#42-variáveis-de-ambiente).
+na [tabela completa de variáveis de ambiente](docs/configuracao.md#variáveis-de-ambiente).
 
 > **Parâmetros de negócio** (odd limite, pesos do score, formação e regras) **não** são variáveis de
 > ambiente: ficam no banco, com valores padrão criados pelo Flyway no primeiro boot, e são ajustados
 > em runtime por `PATCH /api/config` — ver
-> [`documentacao.md` § 4.3](docs/documentacao.md#43-parâmetros-de-negócio-via-banco-de-dados).
+> [`banco-de-dados.md` › Parâmetros de Negócio via Banco de Dados](docs/banco-de-dados.md#parâmetros-de-negócio-via-banco-de-dados).
 
 ---
 
@@ -141,7 +154,7 @@ documentação OpenAPI — esta última só fora de produção —, toda requisi
 cota da The Odds API, que é paga.
 
 Autenticar diz *quem* está chamando; a
-[matriz de acesso por rota](docs/documentacao.md#52-matriz-de-acesso-por-rota) diz *o que cada um
+[matriz de acesso por rota](docs/seguranca.md#matriz-de-acesso-por-rota) diz *o que cada um
 pode fazer*. O critério que separa `USER` de `ADMIN` é um só: **escreve na instância inteira ou
 gasta cota externa**.
 
@@ -150,7 +163,7 @@ No primeiro boot, se não existir nenhum administrador ativo, a aplicação cria
 daí, contas novas nascem de `POST /api/usuarios` — não há auto-cadastro público.
 
 Detalhes de claims, expiração, freio de força bruta e revogação de token:
-[`documentacao.md` § 5](docs/documentacao.md#5-autenticação-e-política-de-acesso).
+[`seguranca.md` › Autenticação e Política de Acesso](docs/seguranca.md#autenticação-e-política-de-acesso).
 
 ---
 
@@ -165,7 +178,7 @@ mvn test -Dtest=OddsServiceTest
 ```
 
 **44 classes de teste — 761 cenários.** A cobertura por classe está em
-[`documentacao.md` § 14](docs/documentacao.md#14-testes).
+[`desenvolvimento.md` › Testes](docs/desenvolvimento.md#testes).
 
 ---
 
@@ -173,16 +186,17 @@ mvn test -Dtest=OddsServiceTest
 
 | Quero… | Vá para |
 |---|---|
-| A lista de endpoints e o JSON de cada resposta | [`documentacao.md` § 8](docs/documentacao.md#8-endpoints) |
-| Todas as variáveis de ambiente | [`documentacao.md` § 4.2](docs/documentacao.md#42-variáveis-de-ambiente) |
-| Ajustar pesos do score, formação ou `oddLimite` | [`documentacao.md` § 4.3](docs/documentacao.md#43-parâmetros-de-negócio-via-banco-de-dados) |
-| Entender o guardrail de cota da The Odds API | [`documentacao.md` § 4.4](docs/documentacao.md#44-cota-da-the-odds-api-guardrail-e-sondagem) |
-| A matriz de acesso por rota e o hardening de `prod` | [`documentacao.md` § 5](docs/documentacao.md#5-autenticação-e-política-de-acesso) |
-| Criar, listar ou desativar usuários | [`documentacao.md` § 6](docs/documentacao.md#6-gestão-de-usuários) |
-| As regras de montagem do time (score, formação, orçamento) | [`documentacao.md` § 9](docs/documentacao.md#9-regras-de-negócio) |
-| A estrutura de pacotes e arquivos | [`documentacao.md` § 11](docs/documentacao.md#11-estrutura-do-projeto) |
-| Monitorar a aplicação com Prometheus/Grafana | [`documentacao.md` § 17](docs/documentacao.md#17-observabilidade) |
-| Saber **por que** algo foi feito assim | [`context.md`](docs/context.md) |
+| A lista de endpoints e os parâmetros de cada um | [`docs/api.md`](docs/api.md) |
+| As regras de montagem do time (score, formação, orçamento) | [`docs/regras-de-negocio.md`](docs/regras-de-negocio.md) |
+| A matriz de acesso por rota e o hardening de `prod` | [`docs/seguranca.md`](docs/seguranca.md) |
+| Criar, listar ou desativar usuários | [`docs/seguranca.md`](docs/seguranca.md#gestão-de-usuários) |
+| Todas as variáveis de ambiente | [`docs/configuracao.md`](docs/configuracao.md) |
+| Ajustar pesos do score, formação ou `oddLimite` | [`docs/banco-de-dados.md`](docs/banco-de-dados.md) |
+| Entender o guardrail de cota da The Odds API | [`docs/operacao.md`](docs/operacao.md#cota-da-the-odds-api-guardrail-e-sondagem) |
+| Monitorar a aplicação com Prometheus/Grafana | [`docs/operacao.md`](docs/operacao.md#observabilidade) |
+| A estrutura de pacotes e camadas | [`docs/arquitetura.md`](docs/arquitetura.md) |
+| Rodar ou entender os testes | [`docs/desenvolvimento.md`](docs/desenvolvimento.md) |
+| Saber **por que** algo foi feito assim | [`docs/context.md`](docs/context.md) |
 
 ---
 

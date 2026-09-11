@@ -3,9 +3,10 @@
 > **Papel deste arquivo:** registrar as **decisões de arquitetura e o porquê de cada uma** — o
 > raciocínio que não se deduz lendo o código nem a referência.
 >
-> *O que* o sistema faz e *como* se usa cada endpoint está em
-> [`documentacao.md`](documentacao.md). Como subir o projeto está no [README](../README.md).
-> O índice da documentação está em [`docs/README.md`](README.md).
+> *O que* o sistema faz e *como* se usa cada endpoint está nos arquivos de referência —
+> [`api.md`](api.md), [`regras-de-negocio.md`](regras-de-negocio.md),
+> [`seguranca.md`](seguranca.md) e os demais listados em [`docs/README.md`](README.md).
+> Como subir o projeto está no [README](../README.md).
 
 ---
 
@@ -24,7 +25,7 @@ Montar um time no Cartola FC exige combinar dois tipos de dados dispersos:
 Esta API cruza essas duas fontes e entrega diretamente os melhores atletas disponíveis, já escalados em formação configurável (padrão **4-3-3**).
 
 As duas fontes consumidas — The Odds API (paga, com cota) e Cartola FC (pública, sem autenticação)
-— estão detalhadas em [`documentacao.md` § 3](documentacao.md#3-apis-externas). A assimetria entre
+— estão detalhadas em [`arquitetura.md` › APIs Externas](arquitetura.md#apis-externas). A assimetria entre
 elas é o que explica boa parte das decisões abaixo: uma é de graça e ilimitada, a outra tem 500
 requisições por mês.
 
@@ -61,7 +62,7 @@ o alvo do ataque e o IP descreve só o caminho, e caminho é o que um atacante d
 graça, enquanto adivinhar a senha do administrador é martelar sempre o mesmo endereço. Contar por IP
 ainda faria o freio punir todos juntos atrás de um NAT.
 
-*Componentes, claims e contrato: [`documentacao.md` § 5.1](documentacao.md#51-autenticação-jwt).*
+*Componentes, claims e contrato: [`seguranca.md` › Autenticação (JWT)](seguranca.md#autenticação-jwt).*
 
 ### Política de acesso por rota e hardening do perfil `prod`
 
@@ -124,7 +125,7 @@ headers de um cliente não confiável são ignorados. A inversão é o que torna
 verde sem exercitar nada.
 
 *A matriz rota a rota e os cabeçalhos de segurança:
-[`documentacao.md` § 5.2](documentacao.md#52-matriz-de-acesso-por-rota).*
+[`seguranca.md` › Matriz de acesso por rota](seguranca.md#matriz-de-acesso-por-rota).*
 
 ### Gestão de usuários pela API, restrita a administradores
 
@@ -179,7 +180,7 @@ tratá-los como falha de servidor enchia o log de stacktrace de "erro inesperado
 mensagem original fica só no log — ela nomeia a classe Java e chega a listar os valores aceitos de
 um enum.
 
-*Endpoints, contrato e proteções: [`documentacao.md` § 6](documentacao.md#6-gestão-de-usuários).*
+*Endpoints, contrato e proteções: [`seguranca.md` › Gestão de Usuários](seguranca.md#gestão-de-usuários).*
 
 ### Pipeline de Montagem do Time
 
@@ -189,7 +190,7 @@ sequência importa porque cada etapa restringe o conjunto da seguinte: filtrar p
 antes de calcular score evita pagar o cálculo por atletas que não entrarão no pool, e o desempenho
 precisa estar disponível antes do score porque é um dos seus termos.
 
-*As etapas em detalhe: [`documentacao.md` § 10](documentacao.md#10-fluxo-de-execução).*
+*As etapas em detalhe: [`arquitetura.md` › Fluxo de Execução](arquitetura.md#fluxo-de-execução).*
 
 ### Fórmula de Score
 
@@ -216,7 +217,7 @@ inventar um número.
 O `desvioPadrao` e o `rodadasConsideradas` são propagados até os DTOs de resposta em vez de ficarem
 internos: é o que permite ao frontend exibir um indicador de consistência sem recalcular nada.
 
-*As fórmulas: [`documentacao.md` § 9.3](documentacao.md#93-fórmula-do-score).*
+*As fórmulas: [`regras-de-negocio.md` › Fórmula do Score](regras-de-negocio.md#fórmula-do-score).*
 
 ### Configuração via Banco de Dados
 
@@ -229,7 +230,7 @@ da própria migration.
 O Flyway aplica as migrations automaticamente na inicialização, e `ddl-auto=validate` garante que o
 esquema esperado pelo Hibernate e o esquema real não divirjam em silêncio.
 
-*Tabela, migrations e validações: [`documentacao.md` § 4.3](documentacao.md#43-parâmetros-de-negócio-via-banco-de-dados).*
+*Tabela, migrations e validações: [`banco-de-dados.md` › Parâmetros de Negócio via Banco de Dados](banco-de-dados.md#parâmetros-de-negócio-via-banco-de-dados).*
 
 ### Cache Caffeine (in-memory)
 
@@ -242,7 +243,7 @@ cache é reiniciado junto com a aplicação — não há persistência entre res
 único com um fallback que sobrevive a isso: ver [Guardrail de cota](#guardrail-de-cota-da-the-odds-api),
 abaixo.
 
-*Caches registrados, TTLs e invalidação: [`documentacao.md` § 7](documentacao.md#7-cache-caffeine).*
+*Caches registrados, TTLs e invalidação: [`operacao.md` › Cache (Caffeine)](operacao.md#cache-caffeine).*
 
 ### Guardrail de cota da The Odds API
 
@@ -338,7 +339,7 @@ cada deploy, antes da primeira chamada. Comparação com `NaN` é falsa no PromQ
 fica silenciosa até existir dado de verdade.
 
 *Propriedades, tabelas e contrato dos endpoints:
-[`documentacao.md` § 4.4](documentacao.md#44-cota-da-the-odds-api-guardrail-e-sondagem).*
+[`operacao.md` › Cota da The Odds API: guardrail e sondagem](operacao.md#cota-da-the-odds-api-guardrail-e-sondagem).*
 
 ### Histórico das leituras de cota
 
@@ -400,7 +401,7 @@ entrar explicitamente. Sem isso, `/api/odds/cota/historico` cairia no
 `anyRequest().authenticated()` e a série ficaria aberta a qualquer token — a rota que existe
 justamente para descrever o consumo do componente pago.
 
-*Tabela e contrato: [`documentacao.md` § 9.13](documentacao.md#913-histórico-das-leituras-de-cota).*
+*Tabela e contrato: [`regras-de-negocio.md` › Histórico das leituras de cota](regras-de-negocio.md#histórico-das-leituras-de-cota).*
 
 ### Dashboard e alertas da cota
 
@@ -439,7 +440,7 @@ expira em 24 h (#44), então a stack não teria como rodar continuamente mesmo s
 compose.
 
 *Painéis, alertas e o que fazer quando cada um dispara:
-[`documentacao.md` § 17](documentacao.md#17-observabilidade).*
+[`operacao.md` › Observabilidade](operacao.md#observabilidade).*
 
 ### Observabilidade (Spring Actuator + Micrometer)
 
@@ -453,7 +454,7 @@ Endpoints sensíveis (`env`, `beans`, `heapdump`, etc.) **não** são expostos, 
 
 Para scrape com Prometheus, aponte o job para `GET /actuator/prometheus` com um access token de `ADMIN` no header `Authorization`. Esse token expira em 24 h e não há renovação — a coleta contínua depende de um credencial de conta de máquina, tratado na issue #44.
 
-*Endpoints e exemplos: [`documentacao.md` § 17.1](documentacao.md#171-endpoints-do-actuator).*
+*Endpoints e exemplos: [`operacao.md` › Endpoints do Actuator](operacao.md#endpoints-do-actuator).*
 
 ### Filtro de Atletas
 
@@ -470,7 +471,7 @@ confronto que não vai acontecer agora. Quando odds não estão disponíveis, o 
 é desativado e todos os elegíveis entram no pool — uma lista completa é mais útil que uma resposta
 vazia.
 
-*Regras e tabela de filtros: [`documentacao.md` § 9.2](documentacao.md#92-filtros-de-atletas).*
+*Regras e tabela de filtros: [`regras-de-negocio.md` › Filtros de Atletas](regras-de-negocio.md#filtros-de-atletas).*
 
 ### Normalização de Clubes
 
@@ -484,7 +485,7 @@ passou a devolver a sigla nesses campos (`"MIR"`), e `apelido` é o apelido de t
 Separar os dois papéis é o que impede que uma mudança na API do Cartola quebre o cruzamento e a
 exibição ao mesmo tempo.
 
-*Regra, exemplos e aliases: [`documentacao.md` § 9.11](documentacao.md#911-normalização-de-nomes-de-clubes).*
+*Regra, exemplos e aliases: [`regras-de-negocio.md` › Normalização de Nomes de Clubes](regras-de-negocio.md#normalização-de-nomes-de-clubes).*
 
 ### Regra de Defesa e Limite por Clube
 
@@ -497,7 +498,7 @@ O montador aplica um fallback em três níveis (respeitar tudo → relaxar a def
 por clube), sempre mantendo o budget. A prioridade é explícita: **uma formação completa vale mais
 que a regra de diversificação**, porque um time incompleto não é escalável.
 
-*Os três níveis em detalhe: [`documentacao.md` § 9.8](documentacao.md#98-limite-máximo-por-clube-inclui-tec).*
+*Os três níveis em detalhe: [`regras-de-negocio.md` › Limite Máximo por Clube (inclui TEC)](regras-de-negocio.md#limite-máximo-por-clube-inclui-tec).*
 
 ### Budget Máximo (C$) e Otimização por Orçamento
 
@@ -523,13 +524,40 @@ teto, cai na seleção gulosa por orçamento, garantindo resposta sempre válida
 não termina.
 
 *O algoritmo e o contrato da resposta:
-[`documentacao.md` § 9.9](documentacao.md#99-budget-máximo-c-e-otimização-por-orçamento).*
+[`regras-de-negocio.md` › Budget Máximo (C$) e Otimização por Orçamento](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento).*
 
 ### Reserva de Luxo
 
 A **reserva de luxo** é a reserva com maior score — e não o segundo melhor titular, como numa versão
 anterior. A reserva de luxo só entra em campo se um titular não jogar, então o que interessa é o
 melhor *entre quem está no banco*. `TEC` não tem reserva e, portanto, não concorre.
+
+## Pendências Conhecidas
+
+### Dados e Algoritmos
+- [x] **Score específico por posição** (goleiros: defesas difíceis; atacantes: gols + assistências)
+- [x] **Dicionário de aliases** para nomes de clubes divergentes entre as APIs
+- [ ] Ponderar a odd como **variável contínua** em vez de bônus binário
+
+### Infraestrutura
+- [ ] **Retry** com backoff exponencial via Spring Retry
+- [x] **Métricas** com Spring Actuator + Micrometer, com dashboard e alertas da cota (ver [17](operacao.md#observabilidade))
+- [ ] **Credencial de conta de máquina** para o scrape do Prometheus ([#44](https://github.com/FabioCarlesso/cartolaoddsapi/issues/44))
+- [ ] **`TRUSTED_PROXIES`** fixado na faixa real da borda ([#39](https://github.com/FabioCarlesso/cartolaoddsapi/issues/39))
+- [ ] **Cobertura de testes** com JaCoCo + relatório HTML
+
+### Regras de Negócio
+- [x] **Constraint de budget** máximo (C$) — resolvida com branch-and-bound próprio (ver [9.9](regras-de-negocio.md#budget-máximo-c-e-otimização-por-orçamento))
+- [x] **Formações alternativas** configuráveis, com comparação via `GET /api/time/comparar`
+- [ ] **Simulação** de diferentes `ODD_LIMITE` para comparar times resultantes
+
+### Qualidade
+- [ ] **Testes de integração** com WireMock simulando as APIs externas
+
+### Acesso
+- [ ] **Convite por e-mail e recuperação de senha** — fora do escopo da [#37](https://github.com/FabioCarlesso/cartolaoddsapi/issues/37)
+
+---
 
 ---
 
@@ -547,8 +575,12 @@ melhor *entre quem está no banco*. `TEC` não tem reserva e, portanto, não con
 
 | Assunto | Arquivo |
 |---|---|
-| Endpoints, contratos e exemplos de resposta | [`documentacao.md` § 8](documentacao.md#8-endpoints) |
-| Configuração e variáveis de ambiente | [`documentacao.md` § 4](documentacao.md#4-configuração) |
-| Estrutura de pacotes e arquivos | [`documentacao.md` § 11](documentacao.md#11-estrutura-do-projeto) |
-| Cobertura de testes por classe | [`documentacao.md` § 14](documentacao.md#14-testes) |
+| Endpoints, parâmetros e códigos de resposta | [`api.md`](api.md) |
+| Regras de montagem do time | [`regras-de-negocio.md`](regras-de-negocio.md) |
+| Autenticação, matriz de acesso e usuários | [`seguranca.md`](seguranca.md) |
+| Variáveis de ambiente e propriedades | [`configuracao.md`](configuracao.md) |
+| Migrations e parâmetros de negócio | [`banco-de-dados.md`](banco-de-dados.md) |
+| Cache, cota, Actuator e alertas | [`operacao.md`](operacao.md) |
+| Estrutura de pacotes e camadas | [`arquitetura.md`](arquitetura.md) |
+| Cobertura de testes por classe | [`desenvolvimento.md`](desenvolvimento.md) |
 | Subir o projeto | [README](../README.md) |
