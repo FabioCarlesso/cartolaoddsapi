@@ -58,6 +58,15 @@ server.forward-headers-strategy=native
 server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES:<faixas privadas>}
 ```
 
+`server.address` não aparece de propósito. Sem a propriedade o Tomcat liga em
+`new InetSocketAddress(porta)`, que já é o bind mais abrangente disponível: em JVM
+dual-stack o socket sai como coringa IPv6 — o `:::8080` de sempre no `ss`, que também
+atende IPv4 — e, num host sem IPv6, cai para `0.0.0.0` sem erro. Declarar `::` não
+ampliaria alcance nenhum e trocaria essa degradação silenciosa por uma falha dura
+(`UnsupportedAddressTypeException`, aplicação não sobe) em todo ambiente sem IPv6.
+Para restringir o bind a uma interface, passe `SERVER_ADDRESS` no ambiente: o binding
+relaxado do Spring mapeia a variável para `server.address` sem precisar da linha.
+
 Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
 (`SPRING_PROFILES_ACTIVE=prod`):
 
