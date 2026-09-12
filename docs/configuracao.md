@@ -54,9 +54,17 @@ app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
 
 # ── Servidor ──────────────────────────────────────────────────────────
 server.port=8080
+server.address=${SERVER_ADDRESS:::}
 server.forward-headers-strategy=native
 server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES:<faixas privadas>}
 ```
+
+`server.address=::` é o coringa IPv6 e, em kernel dual-stack, o mesmo socket também
+atende IPv4 — é o bind mais abrangente, não o mais restrito. Vale explicitar porque
+rede privada de plataforma costuma ser IPv6-only: um bind só em IPv4 ainda passaria no
+healthcheck do container (que fala por `localhost`) e mesmo assim recusaria o tráfego
+que vem do proxy interno, com um sintoma que não aponta para a API — timeout de conexão
+do lado de quem chama e nenhum log deste lado, porque a requisição nunca é aceita.
 
 Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
 (`SPRING_PROFILES_ACTIVE=prod`):
