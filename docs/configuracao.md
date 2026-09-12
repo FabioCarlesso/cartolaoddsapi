@@ -54,17 +54,18 @@ app.cors.allowed-origins=${CORS_ALLOWED_ORIGINS:http://localhost:4200}
 
 # ── Servidor ──────────────────────────────────────────────────────────
 server.port=8080
-server.address=${SERVER_ADDRESS:::}
 server.forward-headers-strategy=native
 server.tomcat.remoteip.internal-proxies=${TRUSTED_PROXIES:<faixas privadas>}
 ```
 
-`server.address=::` é o coringa IPv6 e, em kernel dual-stack, o mesmo socket também
-atende IPv4 — é o bind mais abrangente, não o mais restrito. Vale explicitar porque
-rede privada de plataforma costuma ser IPv6-only: um bind só em IPv4 ainda passaria no
-healthcheck do container (que fala por `localhost`) e mesmo assim recusaria o tráfego
-que vem do proxy interno, com um sintoma que não aponta para a API — timeout de conexão
-do lado de quem chama e nenhum log deste lado, porque a requisição nunca é aceita.
+`server.address` não aparece de propósito. Sem a propriedade o Tomcat liga em
+`new InetSocketAddress(porta)`, que já é o bind mais abrangente disponível: em JVM
+dual-stack o socket sai como coringa IPv6 — o `:::8080` de sempre no `ss`, que também
+atende IPv4 — e, num host sem IPv6, cai para `0.0.0.0` sem erro. Declarar `::` não
+ampliaria alcance nenhum e trocaria essa degradação silenciosa por uma falha dura
+(`UnsupportedAddressTypeException`, aplicação não sobe) em todo ambiente sem IPv6.
+Para restringir o bind a uma interface, passe `SERVER_ADDRESS` no ambiente: o binding
+relaxado do Spring mapeia a variável para `server.address` sem precisar da linha.
 
 Arquivo: `src/main/resources/application-prod.properties` — só o que muda em produção
 (`SPRING_PROFILES_ACTIVE=prod`):

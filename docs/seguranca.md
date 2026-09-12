@@ -158,7 +158,7 @@ porta a partir dos `X-Forwarded-*` antes de a requisição chegar ao filter chai
 por um ano.
 
 **`TRUSTED_PROXIES`.** O padrão de `internal-proxies` cobre as faixas privadas (`10/8`,
-`172.16-31/12`, `192.168/16`, `169.254/16`, `127/8`, `::1` e `fd00::/8`), que é onde o proxy da
+`172.16-31/12`, `192.168/16`, `169.254/16`, `127/8`, `::1` e `fc00::/7`), que é onde o proxy da
 plataforma normalmente fala com o container — na maioria dos deploys não é preciso configurar nada. Se a borda
 chegar de um IP público, liste-o em `TRUSTED_PROXIES`:
 
@@ -170,7 +170,7 @@ O valor é uma **regex de endereços**, não um CIDR. O sintoma de faixa errada 
 `X-Forwarded-*` são descartados, `request.isSecure()` fica falso e o `Strict-Transport-Security`
 some das respostas. Se o HSTS não aparecer em produção, é aqui que se olha.
 
-A faixa `fd00::/8` é o equivalente IPv6 de `10/8` e `192.168/16` — a "unique local" das redes
+A faixa `fc00::/7` é o equivalente IPv6 de `10/8` e `192.168/16` — a "unique local" das redes
 privadas de plataforma. Sem ela, uma borda que chegue por IPv6 (o caso de toda rede interna
 IPv6-only) não seria reconhecida como proxy confiável, ainda que a lista já trouxesse todas as
 faixas privadas IPv4; o HSTS sumiria em produção sem que nada no log explicasse por quê.
